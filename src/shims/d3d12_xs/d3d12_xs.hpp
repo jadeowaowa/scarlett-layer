@@ -53,6 +53,7 @@ struct ID3D12CommandQueueX : public IUnknown {
     virtual void    STDMETHODCALLTYPE ExecuteCommandLists(
         UINT NumCommandLists, ID3D12CommandList* const* ppCommandLists) = 0;
     virtual HRESULT STDMETHODCALLTYPE Signal(ID3D12Fence* pFence, UINT64 Value) = 0;
+    virtual HRESULT STDMETHODCALLTYPE Wait(ID3D12Fence* pFence, UINT64 Value) = 0;
     virtual HRESULT STDMETHODCALLTYPE PresentX(
         UINT PlaneCount,
         const D3D12XBOX_PRESENT_PLANE_PARAMETERS* pPlaneParameters,

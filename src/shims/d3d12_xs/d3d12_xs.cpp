@@ -231,6 +231,10 @@ public:
         return m_queue->Signal(pFence, Value);
     }
 
+    HRESULT STDMETHODCALLTYPE Wait(ID3D12Fence* pFence, UINT64 Value) override {
+        return m_queue->Wait(pFence, Value);
+    }
+
     HRESULT STDMETHODCALLTYPE PresentX(
         UINT PlaneCount,
         const D3D12XBOX_PRESENT_PLANE_PARAMETERS* pPlaneParameters,
@@ -512,7 +516,12 @@ public:
             return hr;
         }
         *ppCommandQueue = new ScarlettCommandQueueX(m_factory, m_device, std::move(nativeQueue));
-        sc::log::Write(sc::log::Level::Info, "d3d12_xs", __FUNCTION__, "-> wrapped ID3D12CommandQueueX");
+        const char* typeName = (pDesc->Type == D3D12_COMMAND_LIST_TYPE_COMPUTE) ? "COMPUTE"
+                             : (pDesc->Type == D3D12_COMMAND_LIST_TYPE_COPY)    ? "COPY"
+                                                                                : "DIRECT";
+        char qBuf[96];
+        std::snprintf(qBuf, sizeof(qBuf), "-> wrapped ID3D12CommandQueueX (type=%s)", typeName);
+        sc::log::Write(sc::log::Level::Info, "d3d12_xs", __FUNCTION__, qBuf);
         return S_OK;
     }
 

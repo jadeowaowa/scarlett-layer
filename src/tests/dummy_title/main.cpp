@@ -847,6 +847,13 @@ int main() {
         return 1;
     }
 
+    D3D12_COMMAND_QUEUE_DESC cqDesc{};
+    cqDesc.Type = D3D12_COMMAND_LIST_TYPE_COMPUTE;
+    ComPtr<ID3D12CommandQueueX> computeQueue;
+    if (FAILED(deviceX->CreateCommandQueueX(&cqDesc, &computeQueue))) {
+        return 1;
+    }
+
     ComPtr<ID3D12Fence> ioFence;
     if (FAILED(deviceX->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&ioFence)))) {
         return 1;
@@ -1232,7 +1239,7 @@ int main() {
     ComPtr<ID3D12Resource> energyTexture;
     if (FAILED(deviceX->CreatePlacedResource(
             textureHeap.Get(), energyOffset, &energyDesc,
-            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, nullptr, IID_PPV_ARGS(&energyTexture)))) {
+            D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&energyTexture)))) {
         return 1;
     }
 
@@ -1317,14 +1324,22 @@ int main() {
     ComPtr<ID3D12CommandAllocator> cmdAlloc;
     ComPtr<ID3D12GraphicsCommandList> cmdList;
     ComPtr<ID3D12Fence> fence;
+    ComPtr<ID3D12CommandAllocator> computeAlloc;
+    ComPtr<ID3D12GraphicsCommandList> computeList;
+    ComPtr<ID3D12Fence> asyncComputeFence;
     if (FAILED(deviceX->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&cmdAlloc))) ||
         FAILED(deviceX->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, cmdAlloc.Get(), nullptr, IID_PPV_ARGS(&cmdList))) ||
-        FAILED(deviceX->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)))) {
+        FAILED(deviceX->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence))) ||
+        FAILED(deviceX->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&computeAlloc))) ||
+        FAILED(deviceX->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_COMPUTE, computeAlloc.Get(), nullptr, IID_PPV_ARGS(&computeList))) ||
+        FAILED(deviceX->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&asyncComputeFence)))) {
         return 1;
     }
+    computeList->Close();
 
     HANDLE fenceEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     UINT64 fenceVal = 0;
+    UINT64 asyncFenceVal = 0;
 
     {
         D3D12_TEXTURE_COPY_LOCATION dstLoc{};
@@ -1452,46 +1467,64 @@ int main() {
         D3D12XBOX_FRAME_PIPELINE_TOKEN token = D3D12XBOX_FRAME_PIPELINE_TOKEN_NULL;
         deviceX->WaitFrameEventX(D3D12XBOX_FRAME_EVENT_ORIGIN, INFINITE, nullptr, &token);
 
-        cmdAlloc->Reset();
-        cmdList->Reset(cmdAlloc.Get(), computePso.Get());
-
         ID3D12DescriptorHeap* heaps[] = { srvHeap.Get() };
-        cmdList->SetDescriptorHeaps(1, heaps);
 
-        // Pass 1: Live CS 5.0 procedural energy field dispatch into placed UAV texture
+        // Pass 1 (Async COMPUTE queue): CS 5.0 procedural energy field into placed UAV texture
+        computeAlloc->Reset();
+        computeList->Reset(computeAlloc.Get(), computePso.Get());
+        computeList->SetDescriptorHeaps(1, heaps);
+
         D3D12_RESOURCE_BARRIER energyToUav{};
         energyToUav.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
         energyToUav.Transition.pResource = energyTexture.Get();
         energyToUav.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-        energyToUav.Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+        energyToUav.Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
         energyToUav.Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
-        cmdList->ResourceBarrier(1, &energyToUav);
+        computeList->ResourceBarrier(1, &energyToUav);
 
         ComputeConstants cc{ elapsed, turbo ? 1.0f : 0.0f, posX, posY };
-        cmdList->SetComputeRootSignature(computeRootSig.Get());
-        cmdList->SetComputeRoot32BitConstants(0, sizeof(ComputeConstants) / sizeof(uint32_t), &cc, 0);
-        cmdList->SetComputeRootDescriptorTable(1, gpuUavTable);
-        cmdList->Dispatch(kTexSize / 8, kTexSize / 8, 1);
+        computeList->SetComputeRootSignature(computeRootSig.Get());
+        computeList->SetComputeRoot32BitConstants(0, sizeof(ComputeConstants) / sizeof(uint32_t), &cc, 0);
+        computeList->SetComputeRootDescriptorTable(1, gpuUavTable);
+        computeList->Dispatch(kTexSize / 8, kTexSize / 8, 1);
 
-        D3D12_RESOURCE_BARRIER postComputeBarriers[3]{};
-        postComputeBarriers[0].Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
-        postComputeBarriers[0].UAV.pResource = energyTexture.Get();
+        D3D12_RESOURCE_BARRIER computeEndBarriers[2]{};
+        computeEndBarriers[0].Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+        computeEndBarriers[0].UAV.pResource = energyTexture.Get();
+        computeEndBarriers[1].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        computeEndBarriers[1].Transition.pResource = energyTexture.Get();
+        computeEndBarriers[1].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+        computeEndBarriers[1].Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+        computeEndBarriers[1].Transition.StateAfter = D3D12_RESOURCE_STATE_COMMON;
+        computeList->ResourceBarrier(2, computeEndBarriers);
+        computeList->Close();
 
-        postComputeBarriers[1].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-        postComputeBarriers[1].Transition.pResource = energyTexture.Get();
-        postComputeBarriers[1].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-        postComputeBarriers[1].Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
-        postComputeBarriers[1].Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+        ID3D12CommandList* computeLists[] = { computeList.Get() };
+        computeQueue->ExecuteCommandLists(1, computeLists);
+        ++asyncFenceVal;
+        computeQueue->Signal(asyncComputeFence.Get(), asyncFenceVal);
 
-        postComputeBarriers[2].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-        postComputeBarriers[2].Transition.pResource = renderTarget.Get();
-        postComputeBarriers[2].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-        postComputeBarriers[2].Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
-        postComputeBarriers[2].Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
-        cmdList->ResourceBarrier(3, postComputeBarriers);
+        // GPU-side cross-queue sync: DIRECT queue waits for COMPUTE fence without CPU stall
+        cmdQueue->Wait(asyncComputeFence.Get(), asyncFenceVal);
 
-        // Pass 2: Rasterize textured + compute-lit star to console render target
-        cmdList->SetPipelineState(pso.Get());
+        // Pass 2 (DIRECT graphics queue): Rasterize textured + async-compute-lit star
+        cmdAlloc->Reset();
+        cmdList->Reset(cmdAlloc.Get(), pso.Get());
+        cmdList->SetDescriptorHeaps(1, heaps);
+
+        D3D12_RESOURCE_BARRIER gfxPreBarriers[2]{};
+        gfxPreBarriers[0].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        gfxPreBarriers[0].Transition.pResource = energyTexture.Get();
+        gfxPreBarriers[0].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+        gfxPreBarriers[0].Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
+        gfxPreBarriers[0].Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+
+        gfxPreBarriers[1].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        gfxPreBarriers[1].Transition.pResource = renderTarget.Get();
+        gfxPreBarriers[1].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+        gfxPreBarriers[1].Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+        gfxPreBarriers[1].Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+        cmdList->ResourceBarrier(2, gfxPreBarriers);
         const float bgColor[4] = { 0.03f, 0.06f, 0.08f, 1.0f };
         cmdList->ClearRenderTargetView(rtvHandle, bgColor, 0, nullptr);
 
@@ -1517,13 +1550,19 @@ int main() {
         cmdList->IASetVertexBuffers(0, 1, &vbView);
         cmdList->DrawInstanced(static_cast<UINT>(_countof(kStarVertices)), 1, 0, 0);
 
-        D3D12_RESOURCE_BARRIER toPresent{};
-        toPresent.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-        toPresent.Transition.pResource = renderTarget.Get();
-        toPresent.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-        toPresent.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
-        toPresent.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
-        cmdList->ResourceBarrier(1, &toPresent);
+        D3D12_RESOURCE_BARRIER gfxPostBarriers[2]{};
+        gfxPostBarriers[0].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        gfxPostBarriers[0].Transition.pResource = energyTexture.Get();
+        gfxPostBarriers[0].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+        gfxPostBarriers[0].Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+        gfxPostBarriers[0].Transition.StateAfter = D3D12_RESOURCE_STATE_COMMON;
+
+        gfxPostBarriers[1].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        gfxPostBarriers[1].Transition.pResource = renderTarget.Get();
+        gfxPostBarriers[1].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+        gfxPostBarriers[1].Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+        gfxPostBarriers[1].Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+        cmdList->ResourceBarrier(2, gfxPostBarriers);
 
         cmdList->Close();
         ID3D12CommandList* lists[] = { cmdList.Get() };
@@ -1569,6 +1608,9 @@ int main() {
                 static_cast<unsigned long long>(frame));
 
     CloseHandle(fenceEvent);
+    asyncComputeFence.Reset();
+    computeList.Reset();
+    computeAlloc.Reset();
     fence.Reset();
     cmdList.Reset();
     cmdAlloc.Reset();
@@ -1583,6 +1625,7 @@ int main() {
     rootSig.Reset();
     computePso.Reset();
     computeRootSig.Reset();
+    computeQueue.Reset();
     cmdQueue.Reset();
     deviceX.Reset();
     gameInput.Reset();
