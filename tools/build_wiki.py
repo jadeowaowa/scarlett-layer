@@ -275,6 +275,22 @@ def scan_shim(shim_name: str) -> Dict[str, object]:
     return info
 
 
+def short_name(sig: str) -> str:
+    m = re.search(r"(\w+)\s*\(", sig)
+    return m.group(1) if m else sig
+
+
+def render_shim_slim(shim: Dict[str, object]) -> str:
+    parts: List[str] = [f"- **`{shim['name']}.dll`**"]
+    if shim["exports"]:
+        parts.append("  - Exports: " + ", ".join(f"`{e}`" for e in shim["exports"]))
+    for iface_name, base_name, methods in shim["interfaces"]:
+        slot_start = 3 if base_name == "IUnknown" else 0
+        slots = ", ".join(f"[{slot_start + i:02d}] {short_name(s)}" for i, s in enumerate(methods))
+        parts.append(f"  - `{iface_name}:{base_name}`: {slots}")
+    return "\n".join(parts)
+
+
 def render_shim_section(shim: Dict[str, object], detailed: bool = True) -> str:
     lines: List[str] = []
     lines.append(f"## `{shim['name']}.dll`")
@@ -417,8 +433,10 @@ def main() -> int:
     write_text(WIKI_DIR / "05_Test_Suite_Index.md", "\n".join(p5).rstrip() + "\n")
 
     # --- 7. AI_CONTEXT_SNAPSHOT.md (Single-File Upload Bundle) ---
+    slim = "--slim" in sys.argv
+    snap_sprints = (sprint_log[:2] + sprint_log[-5:]) if (slim and len(sprint_log) > 7) else sprint_log
     snap: List[str] = [
-        "# Scarlett Layer â€” AI Context Snapshot",
+        "# Scarlett Layer â€” AI Context Snapshot" + (" (Slim)" if slim else ""),
         "",
         f"**Commit:** `{commit_short}` (#{commit_count}) | **Generated:** {generated_utc}  ",
         f"**Totals:** {len(source_tree)} files ({total_loc:,} LOC) | {len(shim_names)} shims | {len(ctest_cases)} CTest checks",
@@ -426,7 +444,7 @@ def main() -> int:
         "---",
         "",
         "## 1. Sprint Status (`docs/PROGRESS.md`)",
-        *sprint_log,
+        *snap_sprints,
         "",
         "---",
         "",
@@ -437,31 +455,38 @@ def main() -> int:
         snap += ["", "---", ""]
 
     snap.append("## 2. File Inventory")
-    snap.append("```text")
-    for rel, cnt in source_tree:
-        snap.append(f"{cnt:5d}  {rel}")
-    snap.append("```")
+    if slim:
+        snap.append(", ".join(f"`{rel}`" for rel, _ in source_tree))
+    else:
+        snap.append("```text")
+        for rel, cnt in source_tree:
+            snap.append(f"{cnt:5d}  {rel}")
+        snap.append("```")
+
     snap += ["", "## 3. Shim Exports & COM VTable Layouts", ""]
     for sname in shim_names:
-        snap.append(render_shim_section(shim_map[sname], detailed=False))
+        snap.append(render_shim_slim(shim_map[sname]) if slim else render_shim_section(shim_map[sname], detailed=False))
 
-    # Compact RDNA2 ISA opcode cheat sheet
     rdna2_hdr = ROOT / "src" / "shims" / "d3d12_xs" / "rdna2_isa.hpp"
     if rdna2_hdr.exists():
         rdna2_enums = parse_enums(read_text(rdna2_hdr))
-        snap += ["## 4. RDNA2 ISA Decoder Opcodes (`rdna2_isa.hpp`)"]
+        snap += ["", "## 4. RDNA2 ISA Decoder Opcodes (`rdna2_isa.hpp`)"]
         for ename, items in rdna2_enums:
-            snap.append(f"- `{ename}`: " + ", ".join(items))
+            vals = [it.split("=")[0].strip() for it in items] if slim else items
+            snap.append(f"- `{ename}`: " + ", ".join(vals))
         snap.append("")
 
+    anchor_cases = ctest_cases[-3:] if (slim and len(ctest_cases) > 3) else ctest_cases
     snap += [
-        "## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`)",
+        f"## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, {len(ctest_cases)} total)",
         "```cpp",
     ]
-    for _, _, literal in ctest_cases:
+    if slim and len(ctest_cases) > 3:
+        snap.append(f"    // ... ({len(ctest_cases) - 3} earlier tests omitted)")
+    for _, _, literal in anchor_cases:
         snap.append(f"    {literal}")
     snap += ["```", "", "## 6. Recent Git History"]
-    for c in recent_commits[:10]:
+    for c in recent_commits[: (5 if slim else 10)]:
         snap.append(f"- `{c}`")
 
     snapshot_text = "\n".join(snap).rstrip() + "\n"
@@ -470,8 +495,9 @@ def main() -> int:
 
     kb = len(snapshot_text.encode("utf-8")) / 1024.0
     approx_tokens = len(snapshot_text) // 4
+    mode_tag = " [SLIM]" if slim else ""
     print(f"Built wiki in {WIKI_DIR.relative_to(ROOT)} (7 files)")
-    print(f"AI_CONTEXT_SNAPSHOT.md: {kb:.1f} KB (~{approx_tokens:,} tokens)")
+    print(f"AI_CONTEXT_SNAPSHOT.md{mode_tag}: {kb:.1f} KB (~{approx_tokens:,} tokens)")
     return 0
 
 

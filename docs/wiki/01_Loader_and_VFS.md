@@ -10,7 +10,8 @@
 - `src/loader/pe_patcher.hpp` (19 lines)
 - `src/loader/scarlett_hook.cpp` (401 lines)
 - `tools/audit_imports.py` (242 lines)
-- `tools/build_wiki.py` (479 lines)
+- `tools/build_wiki.py` (505 lines)
+- `tools/test_brief.py` (108 lines)
 
 ## `src/common/codecs.hpp`
 - **Structs:** `ScLzHeader`
