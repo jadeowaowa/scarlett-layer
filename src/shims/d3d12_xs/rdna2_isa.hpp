@@ -12,6 +12,7 @@
 namespace sc::d3d12::rdna2 {
 
 // Standard AMD RDNA2 (GFX10.3) 9-bit operand encoding constants
+inline constexpr uint16_t kSrcSgprMax        = 105u; // s0..s105
 inline constexpr uint16_t kSrcInlineZero     = 128u;
 inline constexpr uint16_t kSrcInlineHalf     = 240u; //  0.5f
 inline constexpr uint16_t kSrcInlineNegHalf  = 241u; // -0.5f
@@ -24,9 +25,18 @@ inline constexpr uint16_t kSrcInlineNegFour  = 247u; // -4.0f
 inline constexpr uint16_t kSrcLiteral32      = 255u;
 inline constexpr uint16_t kSrcVgprBase       = 256u;
 
+inline constexpr uint16_t SgprSrc(uint8_t idx) {
+    return static_cast<uint16_t>(idx);
+}
+
 inline constexpr uint16_t VgprSrc(uint8_t idx) {
     return static_cast<uint16_t>(kSrcVgprBase + idx);
 }
+
+// Standard AMD RDNA2 EXP target indices
+inline constexpr uint8_t kExpTargetMrt0   = 0u;
+inline constexpr uint8_t kExpTargetPos0   = 12u;
+inline constexpr uint8_t kExpTargetParam0 = 32u;
 
 // Real RDNA2 (GFX10.3) opcode tables
 enum SoppOp : uint8_t {
@@ -66,13 +76,27 @@ enum MubufOp : uint8_t {
     kMubufStoreDword = 0x1Cu
 };
 
+enum SmemOp : uint8_t {
+    kSmemLoadDword   = 0x00u,
+    kSmemLoadDwordX2 = 0x01u,
+    kSmemLoadDwordX4 = 0x02u
+};
+
+enum VintrpOp : uint8_t {
+    kVintrpP1F32  = 0x00u,
+    kVintrpP2F32  = 0x01u,
+    kVintrpMovF32 = 0x02u
+};
+
 enum class InstFormat : uint8_t {
     Sopp,
     Vop1,
     Vop2,
     Vop3,
     Exp,
-    Mubuf
+    Mubuf,
+    Smem,
+    Vintrp
 };
 
 struct DecodedInst {
@@ -102,6 +126,16 @@ struct DecodedInst {
     uint8_t    mubufVdata{0};
     uint8_t    mubufSrsrc{0};
     uint16_t   mubufOffset{0};
+
+    // SMEM fields
+    uint8_t    smemSdata{0};
+    uint8_t    smemSbase{0};
+    uint32_t   smemOffset{0};
+
+    // VINTRP fields
+    uint8_t    vintrpAttr{0};
+    uint8_t    vintrpChan{0};
+    uint8_t    vintrpVsrc{0};
 };
 
 struct DecodedProgram {
@@ -109,7 +143,7 @@ struct DecodedProgram {
 };
 
 // ============================================================================
-// Binary RDNA2 Encoders (for clean-room test shaders & assembler tooling)
+// Binary RDNA2 Encoders
 // ============================================================================
 inline void AppendSopp(std::vector<uint32_t>& words, SoppOp op, uint16_t simm16 = 0) {
     const uint32_t w = (0x17Fu << 23) | ((static_cast<uint32_t>(op) & 0x7Fu) << 16) | simm16;
@@ -144,6 +178,12 @@ inline void AppendVop2LiteralF32(
     words.push_back(std::bit_cast<uint32_t>(imm0));
 }
 
+inline void AppendVop2LiteralU32(
+    std::vector<uint32_t>& words, Vop2Op op, uint8_t vdst, uint32_t imm0, uint8_t vsrc1) {
+    AppendVop2(words, op, vdst, kSrcLiteral32, vsrc1);
+    words.push_back(imm0);
+}
+
 inline void AppendVop3(
     std::vector<uint32_t>& words,
     Vop3Op op,
@@ -167,14 +207,15 @@ inline void AppendVop3(
     words.push_back(w1);
 }
 
-inline void AppendExpMrt0(
+inline void AppendExp(
     std::vector<uint32_t>& words,
+    uint8_t target,
     uint8_t vsrc0, uint8_t vsrc1, uint8_t vsrc2, uint8_t vsrc3,
-    uint8_t enMask = 0xFu, bool done = true, bool vm = true) {
+    uint8_t enMask = 0xFu, bool done = true, bool vm = false) {
     const uint32_t w0 = (0x3Eu << 26)
                       | (vm ? (1u << 12) : 0u)
                       | (done ? (1u << 11) : 0u)
-                      | (0u << 4) // target 0 = MRT0
+                      | ((static_cast<uint32_t>(target) & 0x3Fu) << 4)
                       | (static_cast<uint32_t>(enMask) & 0xFu);
     const uint32_t w1 = (static_cast<uint32_t>(vsrc3) << 24)
                       | (static_cast<uint32_t>(vsrc2) << 16)
@@ -184,23 +225,46 @@ inline void AppendExpMrt0(
     words.push_back(w1);
 }
 
-inline void AppendVop2LiteralU32(
-    std::vector<uint32_t>& words, Vop2Op op, uint8_t vdst, uint32_t imm0, uint8_t vsrc1) {
-    AppendVop2(words, op, vdst, kSrcLiteral32, vsrc1);
-    words.push_back(imm0);
+inline void AppendExpMrt0(
+    std::vector<uint32_t>& words,
+    uint8_t vsrc0, uint8_t vsrc1, uint8_t vsrc2, uint8_t vsrc3,
+    uint8_t enMask = 0xFu, bool done = true, bool vm = true) {
+    AppendExp(words, kExpTargetMrt0, vsrc0, vsrc1, vsrc2, vsrc3, enMask, done, vm);
 }
 
 inline void AppendMubufStoreDword(
     std::vector<uint32_t>& words, uint8_t vdata, uint8_t vaddr, uint8_t srsrc = 0, uint16_t offset = 0) {
     const uint32_t w0 = (0x38u << 26)
                       | (static_cast<uint32_t>(kMubufStoreDword) << 18)
-                      | (1u << 12) // offen=1
+                      | (1u << 12)
                       | (static_cast<uint32_t>(offset) & 0xFFFu);
     const uint32_t w1 = ((static_cast<uint32_t>(srsrc) & 0x1Fu) << 16)
                       | (static_cast<uint32_t>(vdata) << 8)
                       | static_cast<uint32_t>(vaddr);
     words.push_back(w0);
     words.push_back(w1);
+}
+
+inline void AppendSmemLoad(
+    std::vector<uint32_t>& words, SmemOp op, uint8_t sdata, uint8_t sbasePair, uint32_t byteOffset) {
+    const uint32_t w0 = (0x3Du << 26)
+                      | (static_cast<uint32_t>(op) << 18)
+                      | ((static_cast<uint32_t>(sdata) & 0x7Fu) << 6)
+                      | (static_cast<uint32_t>(sbasePair) & 0x3Fu);
+    const uint32_t w1 = (0x7Fu << 25) | (byteOffset & 0x1FFFFFu);
+    words.push_back(w0);
+    words.push_back(w1);
+}
+
+inline void AppendVintrpMov(
+    std::vector<uint32_t>& words, uint8_t vdst, uint8_t attr, uint8_t chan, uint8_t vsrc = 0) {
+    const uint32_t w0 = (0x32u << 26)
+                      | (static_cast<uint32_t>(vdst) << 18)
+                      | (static_cast<uint32_t>(kVintrpMovF32) << 16)
+                      | ((static_cast<uint32_t>(attr) & 0x3Fu) << 10)
+                      | ((static_cast<uint32_t>(chan) & 0x3u) << 8)
+                      | static_cast<uint32_t>(vsrc);
+    words.push_back(w0);
 }
 
 // ============================================================================
@@ -291,6 +355,23 @@ inline bool DecodeProgram(
             continue;
         }
 
+        if ((w0 >> 26) == 0x32u) {
+            inst.format     = InstFormat::Vintrp;
+            inst.vdst       = static_cast<uint8_t>((w0 >> 18) & 0xFFu);
+            inst.opcode     = static_cast<uint16_t>((w0 >> 16) & 0x3u);
+            inst.vintrpAttr = static_cast<uint8_t>((w0 >> 10) & 0x3Fu);
+            inst.vintrpChan = static_cast<uint8_t>((w0 >> 8) & 0x3u);
+            inst.vintrpVsrc = static_cast<uint8_t>(w0 & 0xFFu);
+            if (inst.opcode != kVintrpMovF32) {
+                char buf[64];
+                std::snprintf(buf, sizeof(buf), "unsupported VINTRP opcode 0x%02X", inst.opcode);
+                outError = buf;
+                return false;
+            }
+            outProg.insts.push_back(inst);
+            continue;
+        }
+
         if ((w0 >> 26) == 0x35u) {
             if (pc >= wordCount) {
                 outError = "truncated 64-bit VOP3 instruction";
@@ -311,6 +392,51 @@ inline bool DecodeProgram(
                 inst.opcode != kVop3Med3F32 && inst.opcode != kVop3MulLoU32) {
                 char buf[64];
                 std::snprintf(buf, sizeof(buf), "unsupported VOP3 opcode 0x%03X", inst.opcode);
+                outError = buf;
+                return false;
+            }
+            outProg.insts.push_back(inst);
+            continue;
+        }
+
+        if ((w0 >> 26) == 0x38u) {
+            if (pc >= wordCount) {
+                outError = "truncated 64-bit MUBUF instruction";
+                return false;
+            }
+            const uint32_t w1 = words[pc++];
+            inst.format      = InstFormat::Mubuf;
+            inst.opcode      = static_cast<uint16_t>((w0 >> 18) & 0x7Fu);
+            inst.mubufOffset = static_cast<uint16_t>(w0 & 0xFFFu);
+            inst.mubufSrsrc  = static_cast<uint8_t>((w1 >> 16) & 0x1Fu);
+            inst.mubufVdata  = static_cast<uint8_t>((w1 >> 8) & 0xFFu);
+            inst.mubufVaddr  = static_cast<uint8_t>(w1 & 0xFFu);
+            if (inst.opcode != kMubufStoreDword) {
+                char buf[64];
+                std::snprintf(buf, sizeof(buf), "unsupported MUBUF opcode 0x%02X", inst.opcode);
+                outError = buf;
+                return false;
+            }
+            outProg.insts.push_back(inst);
+            continue;
+        }
+
+        if ((w0 >> 26) == 0x3Du) {
+            if (pc >= wordCount) {
+                outError = "truncated 64-bit SMEM instruction";
+                return false;
+            }
+            const uint32_t w1 = words[pc++];
+            inst.format     = InstFormat::Smem;
+            inst.opcode     = static_cast<uint16_t>((w0 >> 18) & 0xFFu);
+            inst.smemSdata  = static_cast<uint8_t>((w0 >> 6) & 0x7Fu);
+            inst.smemSbase  = static_cast<uint8_t>(w0 & 0x3Fu);
+            inst.smemOffset = w1 & 0x1FFFFFu;
+            if (inst.opcode != kSmemLoadDword &&
+                inst.opcode != kSmemLoadDwordX2 &&
+                inst.opcode != kSmemLoadDwordX4) {
+                char buf[64];
+                std::snprintf(buf, sizeof(buf), "unsupported SMEM opcode 0x%02X", inst.opcode);
                 outError = buf;
                 return false;
             }
@@ -342,28 +468,6 @@ inline bool DecodeProgram(
             continue;
         }
 
-        if ((w0 >> 26) == 0x38u) {
-            if (pc >= wordCount) {
-                outError = "truncated 64-bit MUBUF instruction";
-                return false;
-            }
-            const uint32_t w1 = words[pc++];
-            inst.format      = InstFormat::Mubuf;
-            inst.opcode      = static_cast<uint16_t>((w0 >> 18) & 0x7Fu);
-            inst.mubufOffset = static_cast<uint16_t>(w0 & 0xFFFu);
-            inst.mubufSrsrc  = static_cast<uint8_t>((w1 >> 16) & 0x1Fu);
-            inst.mubufVdata  = static_cast<uint8_t>((w1 >> 8) & 0xFFu);
-            inst.mubufVaddr  = static_cast<uint8_t>(w1 & 0xFFu);
-            if (inst.opcode != kMubufStoreDword) {
-                char buf[64];
-                std::snprintf(buf, sizeof(buf), "unsupported MUBUF opcode 0x%02X", inst.opcode);
-                outError = buf;
-                return false;
-            }
-            outProg.insts.push_back(inst);
-            continue;
-        }
-
         char buf[64];
         std::snprintf(buf, sizeof(buf), "unrecognized RDNA2 encoding 0x%08X", w0);
         outError = buf;
@@ -378,9 +482,19 @@ inline bool DecodeProgram(
 }
 
 // ============================================================================
-// Disassembler & HLSL Lifter
+// Disassembler & HLSL Lifters (VS, PS, CS)
 // ============================================================================
+inline std::string FormatExpTargetAsm(uint8_t target) {
+    if (target < 8u)   return "mrt" + std::to_string(target);
+    if (target >= 12u && target <= 15u) return "pos" + std::to_string(target - 12u);
+    if (target >= 32u) return "param" + std::to_string(target - 32u);
+    return "tgt" + std::to_string(target);
+}
+
 inline std::string FormatOperandAsm(uint16_t src, bool hasLit, uint32_t lit) {
+    if (src <= kSrcSgprMax) {
+        return "s" + std::to_string(src);
+    }
     if (src >= kSrcVgprBase && src < kSrcVgprBase + 256u) {
         return "v" + std::to_string(src - kSrcVgprBase);
     }
@@ -408,8 +522,18 @@ inline std::string FormatOperandAsm(uint16_t src, bool hasLit, uint32_t lit) {
     }
 }
 
+inline uint8_t SmemDwordCount(uint16_t opcode) {
+    switch (opcode) {
+        case kSmemLoadDword:   return 1u;
+        case kSmemLoadDwordX2: return 2u;
+        case kSmemLoadDwordX4: return 4u;
+        default:               return 0u;
+    }
+}
+
 inline std::string Disassemble(const DecodedProgram& prog) {
     std::string out;
+    static constexpr char kChans[4] = { 'x', 'y', 'z', 'w' };
     for (const auto& i : prog.insts) {
         switch (i.format) {
             case InstFormat::Sopp:
@@ -447,10 +571,10 @@ inline std::string Disassemble(const DecodedProgram& prog) {
             case InstFormat::Vop3: {
                 const char* mn = "v_op3";
                 switch (i.opcode) {
-                    case kVop3MadF32:  mn = "v_mad_f32"; break;
-                    case kVop3FmaF32:  mn = "v_fma_f32"; break;
-                    case kVop3Min3F32: mn = "v_min3_f32"; break;
-                    case kVop3Max3F32: mn = "v_max3_f32"; break;
+                    case kVop3MadF32:   mn = "v_mad_f32"; break;
+                    case kVop3FmaF32:   mn = "v_fma_f32"; break;
+                    case kVop3Min3F32:  mn = "v_min3_f32"; break;
+                    case kVop3Max3F32:  mn = "v_max3_f32"; break;
                     case kVop3Med3F32:  mn = "v_med3_f32"; break;
                     case kVop3MulLoU32: mn = "v_mul_lo_u32"; break;
                     default: break;
@@ -463,7 +587,7 @@ inline std::string Disassemble(const DecodedProgram& prog) {
                 break;
             }
             case InstFormat::Exp:
-                out += "exp mrt" + std::to_string(i.expTarget) + ", v"
+                out += "exp " + FormatExpTargetAsm(i.expTarget) + ", v"
                      + std::to_string(i.expVsrc[0]) + ", v" + std::to_string(i.expVsrc[1])
                      + ", v" + std::to_string(i.expVsrc[2]) + ", v" + std::to_string(i.expVsrc[3])
                      + (i.expDone ? " done" : "") + (i.expVm ? " vm\n" : "\n");
@@ -472,6 +596,28 @@ inline std::string Disassemble(const DecodedProgram& prog) {
                 out += "buffer_store_dword v" + std::to_string(i.mubufVdata)
                      + ", v" + std::to_string(i.mubufVaddr)
                      + ", s[" + std::to_string(i.mubufSrsrc) + "]\n";
+                break;
+            case InstFormat::Smem: {
+                const uint8_t cnt = SmemDwordCount(i.opcode);
+                const char* mn = (cnt == 4u) ? "s_load_dwordx4"
+                               : (cnt == 2u) ? "s_load_dwordx2"
+                                             : "s_load_dword";
+                char buf[96];
+                if (cnt > 1u) {
+                    std::snprintf(buf, sizeof(buf), "%s s[%u:%u], s[%u:%u], 0x%X\n",
+                                  mn, i.smemSdata, i.smemSdata + cnt - 1u,
+                                  i.smemSbase * 2u, i.smemSbase * 2u + 1u, i.smemOffset);
+                } else {
+                    std::snprintf(buf, sizeof(buf), "%s s%u, s[%u:%u], 0x%X\n",
+                                  mn, i.smemSdata,
+                                  i.smemSbase * 2u, i.smemSbase * 2u + 1u, i.smemOffset);
+                }
+                out += buf;
+                break;
+            }
+            case InstFormat::Vintrp:
+                out += "v_interp_mov_f32 v" + std::to_string(i.vdst) + ", p0, attr"
+                     + std::to_string(i.vintrpAttr) + "." + kChans[i.vintrpChan & 3u] + "\n";
                 break;
         }
     }
@@ -482,7 +628,9 @@ inline bool FormatOperandHlsl(
     uint16_t src, bool hasLit, uint32_t lit, bool absMod, bool negMod,
     std::string& outExpr, std::string& outError) {
     std::string base;
-    if (src >= kSrcVgprBase && src < kSrcVgprBase + 256u) {
+    if (src <= kSrcSgprMax) {
+        base = "s" + std::to_string(src);
+    } else if (src >= kSrcVgprBase && src < kSrcVgprBase + 256u) {
         base = "v" + std::to_string(src - kSrcVgprBase);
     } else if (src == kSrcLiteral32 && hasLit) {
         char buf[32];
@@ -520,11 +668,102 @@ inline bool FormatOperandHlsl(
     return true;
 }
 
+inline bool EmitGraphicsAluOrSmem(
+    const DecodedInst& i, std::string& body, std::string& outError) {
+    static constexpr char kChans[4] = { 'x', 'y', 'z', 'w' };
+
+    if (i.format == InstFormat::Smem) {
+        const uint8_t cnt = SmemDwordCount(i.opcode);
+        if (cnt == 0u || (i.smemOffset % 4u) != 0u || (i.smemOffset / 4u) + cnt > 64u) {
+            outError = "SMEM CBV offset out of range for Cb0 (max 256 B)";
+            return false;
+        }
+        for (uint8_t k = 0; k < cnt; ++k) {
+            const uint32_t dw = (i.smemOffset / 4u) + k;
+            const uint32_t vec = dw / 4u;
+            const char ch = kChans[dw % 4u];
+            body += "    s" + std::to_string(i.smemSdata + k)
+                  + " = gCb0[" + std::to_string(vec) + "]." + ch + ";\n";
+        }
+        return true;
+    }
+
+    if (i.format == InstFormat::Vop1) {
+        if (i.opcode == kVop1Nop) return true;
+        std::string s0;
+        if (!FormatOperandHlsl(i.src0, i.hasLiteral, i.literal32, false, false, s0, outError)) {
+            return false;
+        }
+        std::string dst = "v" + std::to_string(i.vdst);
+        if (i.opcode == kVop1MovB32)       body += "    " + dst + " = " + s0 + ";\n";
+        else if (i.opcode == kVop1RcpF32)  body += "    " + dst + " = rcp(" + s0 + ");\n";
+        else if (i.opcode == kVop1SqrtF32) body += "    " + dst + " = sqrt(" + s0 + ");\n";
+        return true;
+    }
+
+    if (i.format == InstFormat::Vop2) {
+        std::string s0, s1;
+        if (!FormatOperandHlsl(i.src0, i.hasLiteral, i.literal32, false, false, s0, outError) ||
+            !FormatOperandHlsl(i.src1, false, 0, false, false, s1, outError)) {
+            return false;
+        }
+        std::string dst = "v" + std::to_string(i.vdst);
+        switch (i.opcode) {
+            case kVop2AddF32:    body += "    " + dst + " = (" + s0 + " + " + s1 + ");\n"; break;
+            case kVop2SubF32:    body += "    " + dst + " = (" + s0 + " - " + s1 + ");\n"; break;
+            case kVop2SubRevF32: body += "    " + dst + " = (" + s1 + " - " + s0 + ");\n"; break;
+            case kVop2MulF32:    body += "    " + dst + " = (" + s0 + " * " + s1 + ");\n"; break;
+            case kVop2MinF32:    body += "    " + dst + " = min(" + s0 + ", " + s1 + ");\n"; break;
+            case kVop2MaxF32:    body += "    " + dst + " = max(" + s0 + ", " + s1 + ");\n"; break;
+            case kVop2FmacF32:   body += "    " + dst + " = (" + s0 + " * " + s1 + " + " + dst + ");\n"; break;
+            default:
+                outError = "unsupported VOP2 opcode in float graphics shader";
+                return false;
+        }
+        return true;
+    }
+
+    if (i.format == InstFormat::Vop3) {
+        std::string s0, s1, s2;
+        if (!FormatOperandHlsl(i.src0, false, 0, (i.absMask & 1u) != 0, (i.negMask & 1u) != 0, s0, outError) ||
+            !FormatOperandHlsl(i.src1, false, 0, (i.absMask & 2u) != 0, (i.negMask & 2u) != 0, s1, outError) ||
+            !FormatOperandHlsl(i.src2, false, 0, (i.absMask & 4u) != 0, (i.negMask & 4u) != 0, s2, outError)) {
+            return false;
+        }
+        std::string expr;
+        switch (i.opcode) {
+            case kVop3MadF32:
+            case kVop3FmaF32:  expr = "mad(" + s0 + ", " + s1 + ", " + s2 + ")"; break;
+            case kVop3Min3F32: expr = "min(" + s0 + ", min(" + s1 + ", " + s2 + "))"; break;
+            case kVop3Max3F32: expr = "max(" + s0 + ", max(" + s1 + ", " + s2 + "))"; break;
+            case kVop3Med3F32:
+                expr = "max(min(" + s0 + ", " + s1 + "), min(max(" + s0 + ", " + s1 + "), " + s2 + "))";
+                break;
+            default:
+                outError = "unsupported VOP3 opcode in float graphics shader";
+                return false;
+        }
+        if (i.clamp) {
+            expr = "saturate(" + expr + ")";
+        }
+        body += "    v" + std::to_string(i.vdst) + " = " + expr + ";\n";
+        return true;
+    }
+
+    return true;
+}
+
 inline bool LiftPixelShaderToHlsl(
     const DecodedProgram& prog, std::string& outHlsl, std::string& outError) {
     std::set<uint8_t> usedVgprs;
+    std::set<uint8_t> usedSgprs;
+    std::set<uint8_t> usedParams;
+    bool hasSmem = false;
+
     auto markSrc = [&](uint16_t s) {
-        if (s >= kSrcVgprBase && s < kSrcVgprBase + 256u) {
+        if (s <= kSrcSgprMax) {
+            usedSgprs.insert(static_cast<uint8_t>(s));
+        } else if (s >= kSrcVgprBase && s < kSrcVgprBase + 256u) {
             usedVgprs.insert(static_cast<uint8_t>(s - kSrcVgprBase));
         }
     };
@@ -546,6 +785,16 @@ inline bool LiftPixelShaderToHlsl(
                 markSrc(i.src1);
                 markSrc(i.src2);
                 break;
+            case InstFormat::Smem:
+                hasSmem = true;
+                for (uint8_t k = 0; k < SmemDwordCount(i.opcode); ++k) {
+                    usedSgprs.insert(static_cast<uint8_t>(i.smemSdata + k));
+                }
+                break;
+            case InstFormat::Vintrp:
+                usedVgprs.insert(i.vdst);
+                usedParams.insert(i.vintrpAttr);
+                break;
             case InstFormat::Exp:
                 for (int c = 0; c < 4; ++c) {
                     if ((i.expEn & (1u << c)) != 0) {
@@ -553,83 +802,26 @@ inline bool LiftPixelShaderToHlsl(
                     }
                 }
                 break;
-            case InstFormat::Sopp:
+            default:
                 break;
         }
     }
 
+    static constexpr char kChans[4] = { 'x', 'y', 'z', 'w' };
     std::string body;
     bool hasMrt0Export = false;
 
     for (const auto& i : prog.insts) {
         if (i.format == InstFormat::Sopp) {
-            if (i.opcode == kSoppEndpgm) {
-                break;
-            }
+            if (i.opcode == kSoppEndpgm) break;
             continue;
         }
-
-        if (i.format == InstFormat::Vop1) {
-            if (i.opcode == kVop1Nop) {
-                continue;
-            }
-            std::string s0;
-            if (!FormatOperandHlsl(i.src0, i.hasLiteral, i.literal32, false, false, s0, outError)) {
-                return false;
-            }
-            std::string dst = "v" + std::to_string(i.vdst);
-            if (i.opcode == kVop1MovB32)       body += "    " + dst + " = " + s0 + ";\n";
-            else if (i.opcode == kVop1RcpF32)  body += "    " + dst + " = rcp(" + s0 + ");\n";
-            else if (i.opcode == kVop1SqrtF32) body += "    " + dst + " = sqrt(" + s0 + ");\n";
+        if (i.format == InstFormat::Vintrp) {
+            body += "    v" + std::to_string(i.vdst) + " = input.param"
+                  + std::to_string(i.vintrpAttr) + "." + kChans[i.vintrpChan & 3u] + ";\n";
             continue;
         }
-
-        if (i.format == InstFormat::Vop2) {
-            std::string s0, s1;
-            if (!FormatOperandHlsl(i.src0, i.hasLiteral, i.literal32, false, false, s0, outError) ||
-                !FormatOperandHlsl(i.src1, false, 0, false, false, s1, outError)) {
-                return false;
-            }
-            std::string dst = "v" + std::to_string(i.vdst);
-            switch (i.opcode) {
-                case kVop2AddF32:    body += "    " + dst + " = (" + s0 + " + " + s1 + ");\n"; break;
-                case kVop2SubF32:    body += "    " + dst + " = (" + s0 + " - " + s1 + ");\n"; break;
-                case kVop2SubRevF32: body += "    " + dst + " = (" + s1 + " - " + s0 + ");\n"; break;
-                case kVop2MulF32:    body += "    " + dst + " = (" + s0 + " * " + s1 + ");\n"; break;
-                case kVop2MinF32:    body += "    " + dst + " = min(" + s0 + ", " + s1 + ");\n"; break;
-                case kVop2MaxF32:    body += "    " + dst + " = max(" + s0 + ", " + s1 + ");\n"; break;
-                case kVop2FmacF32:   body += "    " + dst + " = (" + s0 + " * " + s1 + " + " + dst + ");\n"; break;
-                default: break;
-            }
-            continue;
-        }
-
-        if (i.format == InstFormat::Vop3) {
-            std::string s0, s1, s2;
-            if (!FormatOperandHlsl(i.src0, false, 0, (i.absMask & 1u) != 0, (i.negMask & 1u) != 0, s0, outError) ||
-                !FormatOperandHlsl(i.src1, false, 0, (i.absMask & 2u) != 0, (i.negMask & 2u) != 0, s1, outError) ||
-                !FormatOperandHlsl(i.src2, false, 0, (i.absMask & 4u) != 0, (i.negMask & 4u) != 0, s2, outError)) {
-                return false;
-            }
-            std::string expr;
-            switch (i.opcode) {
-                case kVop3MadF32:
-                case kVop3FmaF32:  expr = "mad(" + s0 + ", " + s1 + ", " + s2 + ")"; break;
-                case kVop3Min3F32: expr = "min(" + s0 + ", min(" + s1 + ", " + s2 + "))"; break;
-                case kVop3Max3F32: expr = "max(" + s0 + ", max(" + s1 + ", " + s2 + "))"; break;
-                case kVop3Med3F32:
-                    expr = "max(min(" + s0 + ", " + s1 + "), min(max(" + s0 + ", " + s1 + "), " + s2 + "))";
-                    break;
-                default: break;
-            }
-            if (i.clamp) {
-                expr = "saturate(" + expr + ")";
-            }
-            body += "    v" + std::to_string(i.vdst) + " = " + expr + ";\n";
-            continue;
-        }
-
-        if (i.format == InstFormat::Exp && i.expTarget == 0u) {
+        if (i.format == InstFormat::Exp && i.expTarget == kExpTargetMrt0) {
             hasMrt0Export = true;
             std::string ch[4];
             for (int c = 0; c < 4; ++c) {
@@ -638,6 +830,10 @@ inline bool LiftPixelShaderToHlsl(
                       : ((c == 3) ? "1.0f" : "0.0f");
             }
             body += "    mrt0 = float4(" + ch[0] + ", " + ch[1] + ", " + ch[2] + ", " + ch[3] + ");\n";
+            continue;
+        }
+        if (!EmitGraphicsAluOrSmem(i, body, outError)) {
+            return false;
         }
     }
 
@@ -646,13 +842,156 @@ inline bool LiftPixelShaderToHlsl(
         return false;
     }
 
-    outHlsl = "float4 PSMain(float4 svPos : SV_POSITION) : SV_TARGET {\n";
+    outHlsl.clear();
+    if (hasSmem) {
+        outHlsl += "cbuffer Cb0 : register(b0) {\n    float4 gCb0[16];\n};\n";
+    }
+    if (usedParams.empty()) {
+        outHlsl += "float4 PSMain(float4 svPos : SV_POSITION) : SV_TARGET {\n";
+    } else {
+        outHlsl += "struct PSIn {\n    float4 svPos : SV_POSITION;\n";
+        for (uint8_t p : usedParams) {
+            outHlsl += "    float4 param" + std::to_string(p) + " : TEXCOORD" + std::to_string(p) + ";\n";
+        }
+        outHlsl += "};\nfloat4 PSMain(PSIn input) : SV_TARGET {\n";
+    }
     for (uint8_t v : usedVgprs) {
         outHlsl += "    float v" + std::to_string(v) + " = 0.0f;\n";
+    }
+    for (uint8_t s : usedSgprs) {
+        outHlsl += "    float s" + std::to_string(s) + " = 0.0f;\n";
     }
     outHlsl += "    float4 mrt0 = float4(0.0f, 0.0f, 0.0f, 1.0f);\n";
     outHlsl += body;
     outHlsl += "    return mrt0;\n}\n";
+    return true;
+}
+
+inline bool LiftVertexShaderToHlsl(
+    const DecodedProgram& prog, std::string& outHlsl, std::string& outError) {
+    std::set<uint8_t> usedVgprs;
+    std::set<uint8_t> usedSgprs;
+    std::set<uint8_t> exportedParams;
+    bool hasSmem = false;
+    bool usesColor = false;
+
+    auto markSrc = [&](uint16_t s) {
+        if (s <= kSrcSgprMax) {
+            usedSgprs.insert(static_cast<uint8_t>(s));
+        } else if (s >= kSrcVgprBase && s < kSrcVgprBase + 256u) {
+            const uint8_t v = static_cast<uint8_t>(s - kSrcVgprBase);
+            usedVgprs.insert(v);
+            if (v >= 4u && v <= 7u) usesColor = true;
+        }
+    };
+
+    for (const auto& i : prog.insts) {
+        switch (i.format) {
+            case InstFormat::Vop1:
+                usedVgprs.insert(i.vdst);
+                markSrc(i.src0);
+                break;
+            case InstFormat::Vop2:
+                usedVgprs.insert(i.vdst);
+                markSrc(i.src0);
+                markSrc(i.src1);
+                break;
+            case InstFormat::Vop3:
+                usedVgprs.insert(i.vdst);
+                markSrc(i.src0);
+                markSrc(i.src1);
+                markSrc(i.src2);
+                break;
+            case InstFormat::Smem:
+                hasSmem = true;
+                for (uint8_t k = 0; k < SmemDwordCount(i.opcode); ++k) {
+                    usedSgprs.insert(static_cast<uint8_t>(i.smemSdata + k));
+                }
+                break;
+            case InstFormat::Exp:
+                if (i.expTarget >= kExpTargetParam0) {
+                    exportedParams.insert(static_cast<uint8_t>(i.expTarget - kExpTargetParam0));
+                }
+                for (int c = 0; c < 4; ++c) {
+                    if ((i.expEn & (1u << c)) != 0) {
+                        usedVgprs.insert(i.expVsrc[c]);
+                        if (i.expVsrc[c] >= 4u && i.expVsrc[c] <= 7u) usesColor = true;
+                    }
+                }
+                break;
+            default:
+                break;
+        }
+    }
+
+    std::string body;
+    bool hasPos0Export = false;
+
+    for (const auto& i : prog.insts) {
+        if (i.format == InstFormat::Sopp) {
+            if (i.opcode == kSoppEndpgm) break;
+            continue;
+        }
+        if (i.format == InstFormat::Exp) {
+            std::string ch[4];
+            for (int c = 0; c < 4; ++c) {
+                ch[c] = ((i.expEn & (1u << c)) != 0)
+                      ? ("v" + std::to_string(i.expVsrc[c]))
+                      : ((c == 3) ? "1.0f" : "0.0f");
+            }
+            if (i.expTarget == kExpTargetPos0) {
+                hasPos0Export = true;
+                body += "    o.pos0 = float4(" + ch[0] + ", " + ch[1] + ", " + ch[2] + ", " + ch[3] + ");\n";
+            } else if (i.expTarget >= kExpTargetParam0) {
+                const uint8_t pIdx = static_cast<uint8_t>(i.expTarget - kExpTargetParam0);
+                body += "    o.param" + std::to_string(pIdx) + " = float4("
+                      + ch[0] + ", " + ch[1] + ", " + ch[2] + ", " + ch[3] + ");\n";
+            }
+            continue;
+        }
+        if (!EmitGraphicsAluOrSmem(i, body, outError)) {
+            return false;
+        }
+    }
+
+    if (!hasPos0Export) {
+        outError = "RDNA2 vertex shader contains no EXP pos0 export";
+        return false;
+    }
+
+    outHlsl.clear();
+    if (hasSmem) {
+        outHlsl += "cbuffer Cb0 : register(b0) {\n    float4 gCb0[16];\n};\n";
+    }
+    outHlsl += "struct VSIn {\n    float4 inPos : POSITION;\n";
+    if (usesColor) {
+        outHlsl += "    float4 inCol : COLOR;\n";
+    }
+    outHlsl += "};\nstruct VSOut {\n    float4 pos0 : SV_POSITION;\n";
+    for (uint8_t p : exportedParams) {
+        outHlsl += "    float4 param" + std::to_string(p) + " : TEXCOORD" + std::to_string(p) + ";\n";
+    }
+    outHlsl += "};\nVSOut VSMain(VSIn input) {\n";
+    outHlsl += "    float v0 = input.inPos.x;\n"
+               "    float v1 = input.inPos.y;\n"
+               "    float v2 = input.inPos.z;\n"
+               "    float v3 = input.inPos.w;\n";
+    if (usesColor) {
+        outHlsl += "    float v4 = input.inCol.x;\n"
+                   "    float v5 = input.inCol.y;\n"
+                   "    float v6 = input.inCol.z;\n"
+                   "    float v7 = input.inCol.w;\n";
+    }
+    for (uint8_t v : usedVgprs) {
+        if (v < 4u || (usesColor && v <= 7u)) continue;
+        outHlsl += "    float v" + std::to_string(v) + " = 0.0f;\n";
+    }
+    for (uint8_t s : usedSgprs) {
+        outHlsl += "    float s" + std::to_string(s) + " = 0.0f;\n";
+    }
+    outHlsl += "    VSOut o = (VSOut)0;\n";
+    outHlsl += body;
+    outHlsl += "    return o;\n}\n";
     return true;
 }
 
@@ -680,7 +1019,7 @@ inline bool FormatOperandUintHlsl(
 
 inline bool LiftComputeShaderToHlsl(
     const DecodedProgram& prog, std::string& outHlsl, std::string& outError) {
-    std::set<uint8_t> usedVgprs{ 0u }; // v0 = SV_DispatchThreadID.x
+    std::set<uint8_t> usedVgprs{ 0u };
     auto markSrc = [&](uint16_t s) {
         if (s >= kSrcVgprBase && s < kSrcVgprBase + 256u) {
             usedVgprs.insert(static_cast<uint8_t>(s - kSrcVgprBase));

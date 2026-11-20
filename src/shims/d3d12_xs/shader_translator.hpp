@@ -37,16 +37,15 @@ enum class ScxsPayloadFormat : uint32_t {
     Rdna2Isa           = 2
 };
 
-// Clean-room precompiled Scarlett shader container header ("SCXS")
 struct ScarlettShaderContainerHeader {
-    char     magic[4];           // "SCXS"
-    uint16_t containerVersion;   // 1
-    uint16_t stage;              // ScxsShaderStage
-    uint32_t targetArch;         // ScxsTargetArch
-    uint32_t payloadFormat;      // ScxsPayloadFormat
-    uint32_t payloadSize;        // Bytes following this 32-byte header
-    uint32_t payloadFnv1a;       // FNV-1a 32-bit checksum of payload
-    uint32_t shaderModelPacked;  // (major << 8) | minor
+    char     magic[4];
+    uint16_t containerVersion;
+    uint16_t stage;
+    uint32_t targetArch;
+    uint32_t payloadFormat;
+    uint32_t payloadSize;
+    uint32_t payloadFnv1a;
+    uint32_t shaderModelPacked;
     uint32_t flags;
 };
 static_assert(sizeof(ScarlettShaderContainerHeader) == 32, "SCXS header must be 32 bytes");
@@ -128,7 +127,7 @@ public:
         std::string& outError) const = 0;
 };
 
-// Proof-of-concept binary RDNA2 ISA -> HLSL -> DXBC translator plugin (Pixel Shader subset)
+// Binary RDNA2 ISA -> HLSL -> DXBC translator plugin (VS + PS + CS)
 class Rdna2IsaTranslator final : public IShaderTranslator {
 public:
     const char* Name() const override { return "Rdna2IsaTranslator"; }
@@ -142,7 +141,9 @@ public:
         const auto stage = static_cast<ScxsShaderStage>(hdr.stage);
         return hdr.containerVersion == 1 &&
                static_cast<ScxsPayloadFormat>(hdr.payloadFormat) == ScxsPayloadFormat::Rdna2Isa &&
-               (stage == ScxsShaderStage::Pixel || stage == ScxsShaderStage::Compute);
+               (stage == ScxsShaderStage::Pixel ||
+                stage == ScxsShaderStage::Vertex ||
+                stage == ScxsShaderStage::Compute);
     }
 
     HRESULT Translate(
@@ -180,11 +181,27 @@ public:
             return E_NOTIMPL;
         }
 
-        const bool isCompute = (static_cast<ScxsShaderStage>(hdr.stage) == ScxsShaderStage::Compute);
+        const auto stage = static_cast<ScxsShaderStage>(hdr.stage);
         std::string liftedHlsl;
-        const bool lifted = isCompute
-            ? rdna2::LiftComputeShaderToHlsl(prog, liftedHlsl, outError)
-            : rdna2::LiftPixelShaderToHlsl(prog, liftedHlsl, outError);
+        const char* srcName = "rdna2_lifted_ps.hlsl";
+        const char* entry   = "PSMain";
+        const char* target  = "ps_5_0";
+        bool lifted = false;
+
+        if (stage == ScxsShaderStage::Vertex) {
+            lifted  = rdna2::LiftVertexShaderToHlsl(prog, liftedHlsl, outError);
+            srcName = "rdna2_lifted_vs.hlsl";
+            entry   = "VSMain";
+            target  = "vs_5_0";
+        } else if (stage == ScxsShaderStage::Compute) {
+            lifted  = rdna2::LiftComputeShaderToHlsl(prog, liftedHlsl, outError);
+            srcName = "rdna2_lifted_cs.hlsl";
+            entry   = "CSMain";
+            target  = "cs_5_0";
+        } else {
+            lifted  = rdna2::LiftPixelShaderToHlsl(prog, liftedHlsl, outError);
+        }
+
         if (!lifted) {
             return E_NOTIMPL;
         }
@@ -193,9 +210,9 @@ public:
         Microsoft::WRL::ComPtr<ID3DBlob> compileErr;
         HRESULT hr = D3DCompile(
             liftedHlsl.data(), liftedHlsl.size(),
-            isCompute ? "rdna2_lifted_cs.hlsl" : "rdna2_lifted_ps.hlsl", nullptr, nullptr,
-            isCompute ? "CSMain" : "PSMain", isCompute ? "cs_5_0" : "ps_5_0",
-            D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &dxbcBlob, &compileErr);
+            srcName, nullptr, nullptr,
+            entry, target, D3DCOMPILE_OPTIMIZATION_LEVEL3,
+            0, &dxbcBlob, &compileErr);
         if (FAILED(hr) || !dxbcBlob) {
             outError = compileErr
                 ? std::string("RDNA2 lifted HLSL compile failed: ") +
