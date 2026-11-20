@@ -1,0 +1,265 @@
+#include "common/stub.hpp"
+
+#include <cctype>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <cwctype>
+#include <string>
+#include <unordered_map>
+
+namespace {
+
+using LoadLibraryAFn   = HMODULE(WINAPI*)(LPCSTR);
+using LoadLibraryWFn   = HMODULE(WINAPI*)(LPCWSTR);
+using LoadLibraryExAFn = HMODULE(WINAPI*)(LPCSTR, HANDLE, DWORD);
+using LoadLibraryExWFn = HMODULE(WINAPI*)(LPCWSTR, HANDLE, DWORD);
+
+LoadLibraryAFn   g_origLoadLibraryA   = nullptr;
+LoadLibraryWFn   g_origLoadLibraryW   = nullptr;
+LoadLibraryExAFn g_origLoadLibraryExA = nullptr;
+LoadLibraryExWFn g_origLoadLibraryExW = nullptr;
+
+std::unordered_map<std::wstring, std::wstring> g_shimsWide;
+std::unordered_map<std::string, std::string>   g_shimsAnsi;
+
+std::string WideToUtf8(const std::wstring& w) {
+    if (w.empty()) {
+        return {};
+    }
+    int len = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, nullptr, 0, nullptr, nullptr);
+    if (len <= 1) {
+        return {};
+    }
+    std::string out(static_cast<size_t>(len - 1), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, out.data(), len, nullptr, nullptr);
+    return out;
+}
+
+std::string WideToAnsi(const std::wstring& w) {
+    if (w.empty()) {
+        return {};
+    }
+    int len = WideCharToMultiByte(CP_ACP, 0, w.c_str(), -1, nullptr, 0, nullptr, nullptr);
+    if (len <= 1) {
+        return {};
+    }
+    std::string out(static_cast<size_t>(len - 1), '\0');
+    WideCharToMultiByte(CP_ACP, 0, w.c_str(), -1, out.data(), len, nullptr, nullptr);
+    return out;
+}
+
+std::wstring NormalizeDllKeyW(const wchar_t* raw) {
+    if (!raw || !*raw) {
+        return {};
+    }
+    std::wstring s(raw);
+    size_t slash = s.find_last_of(L"\\/");
+    if (slash != std::wstring::npos) {
+        s = s.substr(slash + 1);
+    }
+    for (wchar_t& ch : s) {
+        ch = static_cast<wchar_t>(std::towlower(ch));
+    }
+    if (s.find(L'.') == std::wstring::npos) {
+        s += L".dll";
+    }
+    return s;
+}
+
+std::string NormalizeDllKeyA(const char* raw) {
+    if (!raw || !*raw) {
+        return {};
+    }
+    std::string s(raw);
+    size_t slash = s.find_last_of("\\/");
+    if (slash != std::string::npos) {
+        s = s.substr(slash + 1);
+    }
+    for (char& ch : s) {
+        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    }
+    if (s.find('.') == std::string::npos) {
+        s += ".dll";
+    }
+    return s;
+}
+
+DWORD SanitizeFlagsForAbsoluteShim(DWORD flags) {
+    // Strip search-directory constraints that reject absolute paths outside System32
+    constexpr DWORD kRestrictiveMask =
+        LOAD_LIBRARY_SEARCH_SYSTEM32 |
+        LOAD_LIBRARY_SEARCH_APPLICATION_DIR |
+        LOAD_LIBRARY_SEARCH_USER_DIRS |
+        LOAD_LIBRARY_SEARCH_DEFAULT_DIRS;
+    return flags & ~kRestrictiveMask;
+}
+
+HMODULE WINAPI HookLoadLibraryW(LPCWSTR lpLibFileName) {
+    std::wstring key = NormalizeDllKeyW(lpLibFileName);
+    auto it = g_shimsWide.find(key);
+    if (it != g_shimsWide.end()) {
+        std::string msg = "[dynamic] " + WideToUtf8(lpLibFileName ? lpLibFileName : L"")
+                        + " -> " + WideToUtf8(it->second);
+        sc::log::Write(sc::log::Level::Info, "scarlett_hook", "LoadLibraryW", msg.c_str());
+        return g_origLoadLibraryW(it->second.c_str());
+    }
+    return g_origLoadLibraryW(lpLibFileName);
+}
+
+HMODULE WINAPI HookLoadLibraryA(LPCSTR lpLibFileName) {
+    std::string key = NormalizeDllKeyA(lpLibFileName);
+    auto it = g_shimsAnsi.find(key);
+    if (it != g_shimsAnsi.end()) {
+        std::string msg = "[dynamic] " + std::string(lpLibFileName ? lpLibFileName : "")
+                        + " -> " + it->second;
+        sc::log::Write(sc::log::Level::Info, "scarlett_hook", "LoadLibraryA", msg.c_str());
+        return g_origLoadLibraryA(it->second.c_str());
+    }
+    return g_origLoadLibraryA(lpLibFileName);
+}
+
+HMODULE WINAPI HookLoadLibraryExW(LPCWSTR lpLibFileName, HANDLE hFile, DWORD dwFlags) {
+    std::wstring key = NormalizeDllKeyW(lpLibFileName);
+    auto it = g_shimsWide.find(key);
+    if (it != g_shimsWide.end()) {
+        std::string msg = "[dynamic] " + WideToUtf8(lpLibFileName ? lpLibFileName : L"")
+                        + " -> " + WideToUtf8(it->second);
+        sc::log::Write(sc::log::Level::Info, "scarlett_hook", "LoadLibraryExW", msg.c_str());
+        return g_origLoadLibraryExW(it->second.c_str(), hFile, SanitizeFlagsForAbsoluteShim(dwFlags));
+    }
+    return g_origLoadLibraryExW(lpLibFileName, hFile, dwFlags);
+}
+
+HMODULE WINAPI HookLoadLibraryExA(LPCSTR lpLibFileName, HANDLE hFile, DWORD dwFlags) {
+    std::string key = NormalizeDllKeyA(lpLibFileName);
+    auto it = g_shimsAnsi.find(key);
+    if (it != g_shimsAnsi.end()) {
+        std::string msg = "[dynamic] " + std::string(lpLibFileName ? lpLibFileName : "")
+                        + " -> " + it->second;
+        sc::log::Write(sc::log::Level::Info, "scarlett_hook", "LoadLibraryExA", msg.c_str());
+        return g_origLoadLibraryExA(it->second.c_str(), hFile, SanitizeFlagsForAbsoluteShim(dwFlags));
+    }
+    return g_origLoadLibraryExA(lpLibFileName, hFile, dwFlags);
+}
+
+void DiscoverShimsWin32() {
+    wchar_t dirBuf[MAX_PATH]{};
+    DWORD len = GetEnvironmentVariableW(L"SCARLETT_SHIM_DIR", dirBuf, MAX_PATH);
+    if (len == 0 || len >= MAX_PATH) {
+        return;
+    }
+
+    std::wstring shimDir(dirBuf);
+    std::wstring pattern = shimDir + L"\\*.dll";
+
+    WIN32_FIND_DATAW fd{};
+    HANDLE hFind = FindFirstFileW(pattern.c_str(), &fd);
+    if (hFind == INVALID_HANDLE_VALUE) {
+        return;
+    }
+
+    do {
+        if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+            continue;
+        }
+        std::wstring fileName(fd.cFileName);
+        std::wstring fullWide = shimDir + L"\\" + fileName;
+        std::wstring keyW = NormalizeDllKeyW(fileName.c_str());
+        std::string keyA = WideToAnsi(keyW);
+        std::string fullA = WideToAnsi(fullWide);
+
+        g_shimsWide.emplace(std::move(keyW), std::move(fullWide));
+        g_shimsAnsi.emplace(std::move(keyA), std::move(fullA));
+    } while (FindNextFileW(hFind, &fd));
+
+    FindClose(hFind);
+}
+
+uint32_t PatchModuleIat(HMODULE mod) {
+    if (!mod) {
+        return 0;
+    }
+    auto* base = reinterpret_cast<uint8_t*>(mod);
+    auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(base);
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) {
+        return 0;
+    }
+    auto* nt = reinterpret_cast<IMAGE_NT_HEADERS64*>(base + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE ||
+        nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
+        return 0;
+    }
+
+    const auto& importDir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+    if (importDir.VirtualAddress == 0 || importDir.Size == 0) {
+        return 0;
+    }
+
+    uint32_t patched = 0;
+    auto* desc = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(base + importDir.VirtualAddress);
+    for (; desc->Name != 0 || desc->FirstThunk != 0; ++desc) {
+        if (desc->OriginalFirstThunk == 0 || desc->FirstThunk == 0) {
+            continue;
+        }
+        auto* origThunk = reinterpret_cast<IMAGE_THUNK_DATA64*>(base + desc->OriginalFirstThunk);
+        auto* iatThunk  = reinterpret_cast<IMAGE_THUNK_DATA64*>(base + desc->FirstThunk);
+
+        for (; origThunk->u1.AddressOfData != 0; ++origThunk, ++iatThunk) {
+            if (IMAGE_SNAP_BY_ORDINAL64(origThunk->u1.Ordinal)) {
+                continue;
+            }
+            auto* ibn = reinterpret_cast<IMAGE_IMPORT_BY_NAME*>(base + origThunk->u1.AddressOfData);
+            void* replacement = nullptr;
+
+            if (std::strcmp(ibn->Name, "LoadLibraryW") == 0) {
+                replacement = reinterpret_cast<void*>(&HookLoadLibraryW);
+            } else if (std::strcmp(ibn->Name, "LoadLibraryA") == 0) {
+                replacement = reinterpret_cast<void*>(&HookLoadLibraryA);
+            } else if (std::strcmp(ibn->Name, "LoadLibraryExW") == 0) {
+                replacement = reinterpret_cast<void*>(&HookLoadLibraryExW);
+            } else if (std::strcmp(ibn->Name, "LoadLibraryExA") == 0) {
+                replacement = reinterpret_cast<void*>(&HookLoadLibraryExA);
+            }
+
+            if (replacement) {
+                DWORD oldProt = 0;
+                if (VirtualProtect(&iatThunk->u1.Function, sizeof(ULONG_PTR),
+                                   PAGE_READWRITE, &oldProt)) {
+                    iatThunk->u1.Function = reinterpret_cast<ULONG_PTR>(replacement);
+                    DWORD restoreProt = 0;
+                    VirtualProtect(&iatThunk->u1.Function, sizeof(ULONG_PTR),
+                                   oldProt, &restoreProt);
+                    ++patched;
+                }
+            }
+        }
+    }
+    return patched;
+}
+
+} // namespace
+
+BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID) {
+    if (reason == DLL_PROCESS_ATTACH) {
+        DisableThreadLibraryCalls(hModule);
+
+        HMODULE k32 = GetModuleHandleW(L"kernel32.dll");
+        if (k32) {
+            g_origLoadLibraryA   = reinterpret_cast<LoadLibraryAFn>(GetProcAddress(k32, "LoadLibraryA"));
+            g_origLoadLibraryW   = reinterpret_cast<LoadLibraryWFn>(GetProcAddress(k32, "LoadLibraryW"));
+            g_origLoadLibraryExA = reinterpret_cast<LoadLibraryExAFn>(GetProcAddress(k32, "LoadLibraryExA"));
+            g_origLoadLibraryExW = reinterpret_cast<LoadLibraryExWFn>(GetProcAddress(k32, "LoadLibraryExW"));
+        }
+
+        DiscoverShimsWin32();
+        uint32_t patched = PatchModuleIat(GetModuleHandleW(nullptr));
+
+        char buf[128];
+        std::snprintf(buf, sizeof(buf),
+                      "-> armed %u runtime LoadLibrary IAT hook(s) across %zu discovered shim(s)",
+                      patched, g_shimsWide.size());
+        sc::log::Write(sc::log::Level::Info, "scarlett_hook", "DllMain", buf);
+    }
+    return TRUE;
+}

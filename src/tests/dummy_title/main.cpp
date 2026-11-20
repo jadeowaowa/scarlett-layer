@@ -3,9 +3,13 @@
 #include "shims/gameinput/gameinput.hpp"
 #include "shims/xg_xs/xg_xs.hpp"
 #include "shims/dstorage_xs/dstorage_xs.hpp"
+#include "shims/pixevt/pixevt.hpp"
 
 #include <d3dcompiler.h>
+#include <mmreg.h>
+#include <xaudio2.h>
 #include <wrl/client.h>
+
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -60,7 +64,201 @@ namespace {
 constexpr UINT kWidth = 1280;
 constexpr UINT kHeight = 720;
 constexpr UINT kTexSize = 256;
+constexpr uint32_t kAudioRate = 48000;
+constexpr float kTwoPi = 6.28318530718f;
 constexpr char kTitleScid[] = "00000000-0000-0000-0000-0000SCARLETT";
+
+// Procedural XAudio2 synthesizer routed entirely through our xaudio2_9.dll shim
+class TitleAudio {
+public:
+    bool Init() {
+        if (FAILED(XAudio2Create(&m_engine, 0, XAUDIO2_DEFAULT_PROCESSOR))) {
+            std::printf("[TITLE] XAudio2Create failed; continuing muted.\n");
+            return false;
+        }
+        if (FAILED(m_engine->CreateMasteringVoice(&m_master))) {
+            std::printf("[TITLE] No audio output device available; continuing muted.\n");
+            Shutdown();
+            return false;
+        }
+
+        BuildBootChordPcm();
+        BuildThrusterHumPcm();
+        BuildSaveChimePcm();
+
+        WAVEFORMATEX wf{};
+        wf.wFormatTag = WAVE_FORMAT_PCM;
+        wf.nChannels = 1;
+        wf.nSamplesPerSec = kAudioRate;
+        wf.wBitsPerSample = 16;
+        wf.nBlockAlign = wf.nChannels * (wf.wBitsPerSample / 8);
+        wf.nAvgBytesPerSec = wf.nSamplesPerSec * wf.nBlockAlign;
+
+        if (FAILED(m_engine->CreateSourceVoice(&m_bootVoice, &wf, 0, 2.0f)) ||
+            FAILED(m_engine->CreateSourceVoice(&m_humVoice, &wf, 0, 4.0f)) ||
+            FAILED(m_engine->CreateSourceVoice(&m_saveVoice, &wf, 0, 2.0f))) {
+            Shutdown();
+            return false;
+        }
+
+        // Start continuous looping thruster hum softly
+        XAUDIO2_BUFFER humBuf{};
+        humBuf.AudioBytes = static_cast<UINT32>(m_humPcm.size() * sizeof(int16_t));
+        humBuf.pAudioData = reinterpret_cast<const BYTE*>(m_humPcm.data());
+        humBuf.LoopCount = XAUDIO2_LOOP_INFINITE;
+        m_humVoice->SetVolume(0.03f);
+        m_humVoice->SetFrequencyRatio(0.85f);
+        m_humVoice->SubmitSourceBuffer(&humBuf);
+        m_humVoice->Start(0);
+
+        // Fire rising boot chord once
+        XAUDIO2_BUFFER bootBuf{};
+        bootBuf.AudioBytes = static_cast<UINT32>(m_bootPcm.size() * sizeof(int16_t));
+        bootBuf.pAudioData = reinterpret_cast<const BYTE*>(m_bootPcm.data());
+        bootBuf.Flags = XAUDIO2_END_OF_STREAM;
+        m_bootVoice->SetVolume(0.28f);
+        m_bootVoice->SubmitSourceBuffer(&bootBuf);
+        m_bootVoice->Start(0);
+
+        m_active = true;
+        return true;
+    }
+
+    void UpdateThruster(float moveMag, bool turbo, float dt) {
+        if (!m_active || !m_humVoice) {
+            return;
+        }
+        const float targetVol = turbo ? 0.20f : (0.03f + 0.08f * std::clamp(moveMag, 0.0f, 1.0f));
+        const float targetPitch = turbo ? 1.65f : (0.85f + 0.30f * std::clamp(moveMag, 0.0f, 1.0f));
+        const float blend = std::clamp(dt * 8.0f, 0.0f, 1.0f);
+
+        m_curVol += (targetVol - m_curVol) * blend;
+        m_curPitch += (targetPitch - m_curPitch) * blend;
+
+        m_humVoice->SetVolume(m_curVol);
+        m_humVoice->SetFrequencyRatio(m_curPitch);
+    }
+
+    void PlaySaveChime() {
+        if (!m_active || !m_saveVoice) {
+            return;
+        }
+        m_saveVoice->Stop(0);
+        m_saveVoice->FlushSourceBuffers();
+
+        XAUDIO2_BUFFER buf{};
+        buf.AudioBytes = static_cast<UINT32>(m_savePcm.size() * sizeof(int16_t));
+        buf.pAudioData = reinterpret_cast<const BYTE*>(m_savePcm.data());
+        buf.Flags = XAUDIO2_END_OF_STREAM;
+        m_saveVoice->SetVolume(0.32f);
+        m_saveVoice->SubmitSourceBuffer(&buf);
+        m_saveVoice->Start(0);
+    }
+
+    void Shutdown() {
+        m_active = false;
+        auto destroyVoice = [](IXAudio2SourceVoice*& v) {
+            if (v) {
+                v->Stop(0);
+                v->FlushSourceBuffers();
+                v->DestroyVoice();
+                v = nullptr;
+            }
+        };
+        destroyVoice(m_bootVoice);
+        destroyVoice(m_humVoice);
+        destroyVoice(m_saveVoice);
+        if (m_master) {
+            m_master->DestroyVoice();
+            m_master = nullptr;
+        }
+        m_engine.Reset();
+    }
+
+    ~TitleAudio() {
+        Shutdown();
+    }
+
+private:
+    static int16_t FloatToPcm16(float sample) {
+        float clamped = std::clamp(sample, -1.0f, 1.0f);
+        return static_cast<int16_t>(clamped * 32000.0f);
+    }
+
+    void BuildBootChordPcm() {
+        // Warm rising C-major-9th startup chord (C4, G4, D5, E5)
+        const uint32_t samples = static_cast<uint32_t>(kAudioRate * 0.90f);
+        m_bootPcm.resize(samples);
+        constexpr float freqs[4] = { 261.63f, 392.00f, 587.33f, 659.25f };
+        constexpr float starts[4] = { 0.00f, 0.07f, 0.14f, 0.21f };
+
+        for (uint32_t i = 0; i < samples; ++i) {
+            const float t = static_cast<float>(i) / static_cast<float>(kAudioRate);
+            float mix = 0.0f;
+            for (int n = 0; n < 4; ++n) {
+                if (t < starts[n]) {
+                    continue;
+                }
+                const float nt = t - starts[n];
+                const float env = std::min(1.0f, nt / 0.04f) * std::expf(-nt * 3.8f);
+                const float tone = std::sinf(kTwoPi * freqs[n] * nt)
+                                 + 0.25f * std::sinf(kTwoPi * freqs[n] * 2.0f * nt);
+                mix += tone * env * 0.24f;
+            }
+            m_bootPcm[i] = FloatToPcm16(mix);
+        }
+    }
+
+    void BuildThrusterHumPcm() {
+        // Exact integer-cycle 1.0-second seamless loop for pitch-shifted engine hum
+        const uint32_t samples = kAudioRate;
+        m_humPcm.resize(samples);
+        for (uint32_t i = 0; i < samples; ++i) {
+            const float t = static_cast<float>(i) / static_cast<float>(kAudioRate);
+            const float lfo = 0.85f + 0.15f * std::sinf(kTwoPi * 3.0f * t);
+            const float wave = 0.50f * std::sinf(kTwoPi * 84.0f * t)
+                             + 0.30f * std::sinf(kTwoPi * 126.0f * t)
+                             + 0.15f * std::sinf(kTwoPi * 168.0f * t)
+                             + 0.05f * std::sinf(kTwoPi * 252.0f * t);
+            m_humPcm[i] = FloatToPcm16(wave * lfo);
+        }
+    }
+
+    void BuildSaveChimePcm() {
+        // Two-note ascending bell chime (A5 -> E6)
+        const uint32_t samples = static_cast<uint32_t>(kAudioRate * 0.38f);
+        m_savePcm.resize(samples);
+        for (uint32_t i = 0; i < samples; ++i) {
+            const float t = static_cast<float>(i) / static_cast<float>(kAudioRate);
+            float mix = 0.0f;
+            {
+                const float env1 = std::min(1.0f, t / 0.006f) * std::expf(-t * 14.0f);
+                mix += std::sinf(kTwoPi * 880.0f * t) * env1 * 0.45f;
+            }
+            if (t >= 0.08f) {
+                const float t2 = t - 0.08f;
+                const float env2 = std::min(1.0f, t2 / 0.006f) * std::expf(-t2 * 10.0f);
+                mix += (std::sinf(kTwoPi * 1318.51f * t2) + 0.20f * std::sinf(kTwoPi * 2637.02f * t2))
+                     * env2 * 0.45f;
+            }
+            m_savePcm[i] = FloatToPcm16(mix);
+        }
+    }
+
+    // PCM buffers declared BEFORE voices/engine so they outlive audio playback
+    std::vector<int16_t> m_bootPcm;
+    std::vector<int16_t> m_humPcm;
+    std::vector<int16_t> m_savePcm;
+
+    ComPtr<IXAudio2>        m_engine;
+    IXAudio2MasteringVoice* m_master{nullptr};
+    IXAudio2SourceVoice*    m_bootVoice{nullptr};
+    IXAudio2SourceVoice*    m_humVoice{nullptr};
+    IXAudio2SourceVoice*    m_saveVoice{nullptr};
+    float                   m_curVol{0.03f};
+    float                   m_curPitch{0.85f};
+    bool                    m_active{false};
+};
 
 struct StarSaveData {
     uint32_t magic;
@@ -72,7 +270,6 @@ struct StarSaveData {
 };
 constexpr uint32_t kSaveMagic = 0x53434152U;
 
-// Pre-swizzled console texture asset package format (.scx)
 struct ScarlettTexAssetHeader {
     uint32_t magic;
     uint32_t width;
@@ -84,7 +281,7 @@ struct ScarlettTexAssetHeader {
     uint32_t fnv1aChecksum;
 };
 static_assert(sizeof(ScarlettTexAssetHeader) == 32, "Asset header must be 32 bytes");
-constexpr uint32_t kAssetMagic = 0x58544353U; // 'SCTX'
+constexpr uint32_t kAssetMagic = 0x58544353U;
 
 uint32_t ComputeFnv1a32(const uint8_t* data, size_t size) {
     uint32_t hash = 2166136261u;
@@ -395,6 +592,28 @@ bool CompileShader(const char* entry, const char* target, ComPtr<ID3DBlob>& outB
 int main() {
     std::printf("[TITLE][T:%05lu] Booting synthetic Series X title...\n", GetCurrentThreadId());
 
+    // 0. Exercise runtime LoadLibraryA/W IAT hooks (pixevt.dll is NOT statically linked!)
+    HMODULE hPix = LoadLibraryW(L"pixevt.dll");
+    PIXBeginEventFn pixBegin = nullptr;
+    PIXEndEventFn   pixEnd   = nullptr;
+    PIXSetMarkerFn  pixMark  = nullptr;
+    if (hPix) {
+        pixBegin = reinterpret_cast<PIXBeginEventFn>(GetProcAddress(hPix, "PIXBeginEvent"));
+        pixEnd   = reinterpret_cast<PIXEndEventFn>(GetProcAddress(hPix, "PIXEndEvent"));
+        pixMark  = reinterpret_cast<PIXSetMarkerFn>(GetProcAddress(hPix, "PIXSetMarker"));
+        if (pixMark) {
+            pixMark(0xFF00FF66ULL, "BootDynamicHooksVerified");
+        }
+    }
+
+    HMODULE hRuntimeDyn = LoadLibraryA("xgameruntime");
+    if (hRuntimeDyn) {
+        char dynPath[MAX_PATH]{};
+        GetModuleFileNameA(hRuntimeDyn, dynPath, MAX_PATH);
+        std::printf("[TITLE] Dynamic LoadLibraryA(\"xgameruntime\") -> %s\n", dynPath);
+        FreeLibrary(hRuntimeDyn);
+    }
+
     if (FAILED(XGameRuntimeInitialize())) {
         return 1;
     }
@@ -464,13 +683,17 @@ int main() {
         }
     }
 
-    // 3. Initialize GameInput
+    // 3. Initialize XAudio2 through our xaudio2_9.dll shim
+    TitleAudio audio;
+    audio.Init();
+
+    // 4. Initialize GameInput
     ComPtr<IGameInput> gameInput;
     if (FAILED(GameInputCreate(&gameInput))) {
         return 1;
     }
 
-    // 4. Scarlett D3D12.x graphics bootstrap
+    // 5. Scarlett D3D12.x graphics bootstrap
     D3D12XBOX_CREATE_DEVICE_PARAMETERS params{};
     params.Version = 1;
 
@@ -495,7 +718,7 @@ int main() {
     }
     HANDLE ioFenceEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
 
-    // 5. Velocity asset streaming: dstorage_xs.dll -> xg_xs.dll detile -> GPU upload
+    // 6. Velocity asset streaming: dstorage_xs.dll -> xg_xs.dll detile -> GPU upload
     XG_TEXTURE2D_DESC xgTiledDesc{};
     xgTiledDesc.Width = kTexSize;
     xgTiledDesc.Height = kTexSize;
@@ -508,7 +731,6 @@ int main() {
     XG_RESOURCE_LAYOUT tiledLayout{};
     if (FAILED(XGCreateTexture2DComputer(&xgTiledDesc, &tiledComputer)) ||
         FAILED(tiledComputer->GetResourceLayout(&tiledLayout))) {
-        std::printf("[TITLE] XGCreateTexture2DComputer failed!\n");
         return 1;
     }
 
@@ -521,7 +743,6 @@ int main() {
 
     const std::filesystem::path assetPath = std::filesystem::path(L"assets") / L"crest_2dthin.scx";
     if (!EnsureBakedConsoleTextureAsset(assetPath, tiledComputer.Get(), tiledLayout)) {
-        std::printf("[TITLE] Failed to prepare console texture asset!\n");
         return 1;
     }
 
@@ -533,7 +754,6 @@ int main() {
     ComPtr<IDStorageFactoryX> dsFactory;
     if (FAILED(DStorageGetFactory(IID_IDStorageFactoryX,
                                   reinterpret_cast<void**>(dsFactory.GetAddressOf())))) {
-        std::printf("[TITLE] DStorageGetFactory failed!\n");
         return 1;
     }
 
@@ -553,11 +773,9 @@ int main() {
                                    reinterpret_cast<void**>(dsFile.GetAddressOf()))) ||
         FAILED(dsFactory->CreateStatusArray(2, "AssetStatus", IID_IDStorageStatusArrayX,
                                             reinterpret_cast<void**>(dsStatus.GetAddressOf())))) {
-        std::printf("[TITLE] DirectStorage setup failed!\n");
         return 1;
     }
 
-    // Enqueue 2 batched file reads (header + 256 KB pre-swizzled payload) + status + D3D12 fence signal
     ScarlettTexAssetHeader streamedHdr{};
     std::vector<uint8_t> streamedTiledMem(static_cast<size_t>(tiledLayout.SizeBytes), 0);
 
@@ -591,7 +809,6 @@ int main() {
     dsQueue->EnqueueSignal(ioFence.Get(), 1);
     dsQueue->Submit();
 
-    // Wait on the ID3D12Fence signaled directly by dstorage_xs.dll's worker thread
     if (ioFence->GetCompletedValue() < 1) {
         ioFence->SetEventOnCompletion(1, ioFenceEvent);
         WaitForSingleObject(ioFenceEvent, INFINITE);
@@ -600,23 +817,22 @@ int main() {
     const bool statusOk = dsStatus->IsComplete(0) && SUCCEEDED(dsStatus->GetHResult(0));
     const uint32_t actualCrc = ComputeFnv1a32(streamedTiledMem.data(), streamedTiledMem.size());
     if (!statusOk || streamedHdr.magic != kAssetMagic || actualCrc != streamedHdr.fnv1aChecksum) {
-        std::printf("[TITLE] DirectStorage stream verification FAILED! status=%d crc=0x%08X\n",
-                    statusOk ? 1 : 0, actualCrc);
         return 1;
     }
 
     std::printf("[TITLE] DirectStorage streamed & verified '%s' via ID3D12Fence (crc=0x%08X MATCH)\n",
                 assetPath.string().c_str(), actualCrc);
+    if (pixMark) {
+        pixMark(0xFF00CCFFULL, "DirectStorageAssetReady");
+    }
 
     std::vector<uint8_t> detiledUploadMem(static_cast<size_t>(linearLayout.SizeBytes), 0);
     if (FAILED(tiledComputer->CopyFromSubresource(
             detiledUploadMem.data(), 0, streamedTiledMem.data(),
             linearLayout.Plane[0].MipLayout[0].PitchBytes, 0))) {
-        std::printf("[TITLE] xg_xs detile failed!\n");
         return 1;
     }
 
-    // Release streaming handles now that asset is resident in RAM
     dsFile->Close();
     dsFile.Reset();
     dsStatus.Reset();
@@ -625,7 +841,7 @@ int main() {
     CloseHandle(ioFenceEvent);
     ioFence.Reset();
 
-    // 6. Build Root Signature, PSO, Vertex Buffer, Texture SRV, and Render Target
+    // 7. Build Root Signature, PSO, Vertex Buffer, Texture SRV, and Render Target
     D3D12_DESCRIPTOR_RANGE srvRange{};
     srvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
     srvRange.NumDescriptors = 1;
@@ -836,7 +1052,6 @@ int main() {
     HANDLE fenceEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     UINT64 fenceVal = 0;
 
-    // Upload the streamed & detiled texture to GPU default memory
     {
         D3D12_TEXTURE_COPY_LOCATION dstLoc{};
         dstLoc.pResource = crestTexture.Get();
@@ -879,7 +1094,7 @@ int main() {
     D3D12_VIEWPORT viewport{ 0.0f, 0.0f, static_cast<float>(kWidth), static_cast<float>(kHeight), 0.0f, 1.0f };
     D3D12_RECT scissor{ 0, 0, static_cast<LONG>(kWidth), static_cast<LONG>(kHeight) };
 
-    std::printf("[TITLE] Controls: WASD/Stick = Move | Space/A = Turbo | F5/Menu = Quick-Save | R/B = Reset | ESC = Auto-Save & Exit\n");
+    std::printf("[TITLE] Controls: WASD/Stick = Move | Space/A = Turbo Hum | F5/Menu = Save Chime | R/B = Reset | ESC = Auto-Save & Exit\n");
 
     float elapsed = 0.0f;
     bool prevSavePressed = false;
@@ -887,6 +1102,10 @@ int main() {
     uint64_t frame = 0;
 
     while (true) {
+        if (pixBegin) {
+            pixBegin(0xFF00AA44ULL, "MainFrame");
+        }
+
         uint64_t nowTs = gameInput->GetCurrentTimestamp();
         float dt = static_cast<float>(nowTs - lastTs) / 1000000.0f;
         dt = std::clamp(dt, 0.0001f, 0.05f);
@@ -934,17 +1153,24 @@ int main() {
         }
 
         if (savePressed && !prevSavePressed && saveContainer) {
-            SaveStarState(queue, saveContainer, posX, posY, angle, saveCount);
+            if (SaveStarState(queue, saveContainer, posX, posY, angle, saveCount)) {
+                audio.PlaySaveChime();
+            }
         }
         prevSavePressed = savePressed;
+
+        const float clampedX = std::clamp(moveX, -1.0f, 1.0f);
+        const float clampedY = std::clamp(moveY, -1.0f, 1.0f);
+        const float moveMag = std::sqrtf(clampedX * clampedX + clampedY * clampedY);
+        audio.UpdateThruster(moveMag, turbo, dt);
 
         if (reset) {
             posX = 0.0f;
             posY = 0.0f;
         } else {
             const float speed = turbo ? 1.85f : 1.15f;
-            posX = std::clamp(posX + std::clamp(moveX, -1.0f, 1.0f) * speed * dt, -0.80f, 0.80f);
-            posY = std::clamp(posY + std::clamp(moveY, -1.0f, 1.0f) * speed * dt, -0.75f, 0.75f);
+            posX = std::clamp(posX + clampedX * speed * dt, -0.80f, 0.80f);
+            posY = std::clamp(posY + clampedY * speed * dt, -0.75f, 0.75f);
         }
 
         angle += (turbo ? 4.8f : 1.1f) * dt;
@@ -1018,6 +1244,10 @@ int main() {
             WaitForSingleObject(fenceEvent, INFINITE);
         }
 
+        if (pixEnd) {
+            pixEnd();
+        }
+
         if (presentHr == S_FALSE || FAILED(presentHr)) {
             break;
         }
@@ -1031,6 +1261,8 @@ int main() {
     if (saveProvider) {
         XGameSaveCloseProvider(saveProvider);
     }
+
+    audio.Shutdown();
 
     std::printf("[TITLE] Rendered %llu frames via PresentX. Shutting down...\n",
                 static_cast<unsigned long long>(frame));
@@ -1056,6 +1288,10 @@ int main() {
     }
     XTaskQueueCloseHandle(queue);
     XGameRuntimeUninitialize();
+
+    if (hPix) {
+        FreeLibrary(hPix);
+    }
 
     std::printf("[TITLE] Shutdown complete.\n");
     return 0;

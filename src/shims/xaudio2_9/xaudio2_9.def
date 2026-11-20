@@ -1,0 +1,3 @@
+LIBRARY xaudio2_9
+EXPORTS
+    XAudio2Create = ScarlettXAudio2Create

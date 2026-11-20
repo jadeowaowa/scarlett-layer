@@ -66,7 +66,7 @@ add_library(xg_xs SHARED
 target_link_libraries(xg_xs PRIVATE sc_common)
 sc_set_runtime_dir(xg_xs "${SC_BIN_DIR}/shims")
 
-# Shim #5: dstorage_xs.dll -> build/bin/shims/ (auto-discovered by loader.exe!)
+# Shim #5: dstorage_xs.dll -> build/bin/shims/
 add_library(dstorage_xs SHARED
     src/shims/dstorage_xs/dstorage_xs.cpp
     src/shims/dstorage_xs/dstorage_xs.def
@@ -74,11 +74,35 @@ add_library(dstorage_xs SHARED
 target_link_libraries(dstorage_xs PRIVATE sc_common)
 sc_set_runtime_dir(dstorage_xs "${SC_BIN_DIR}/shims")
 
+# Shim #6: pixevt.dll -> build/bin/shims/ (loaded dynamically by dummy_title)
+add_library(pixevt SHARED
+    src/shims/pixevt/pixevt.cpp
+    src/shims/pixevt/pixevt.def
+)
+target_link_libraries(pixevt PRIVATE sc_common)
+sc_set_runtime_dir(pixevt "${SC_BIN_DIR}/shims")
+
+# Shim #7: xaudio2_9.dll -> build/bin/shims/ (auto-discovered by loader.exe!)
+add_library(xaudio2_9 SHARED
+    src/shims/xaudio2_9/xaudio2_9.cpp
+    src/shims/xaudio2_9/xaudio2_9.def
+)
+target_link_libraries(xaudio2_9 PRIVATE sc_common ole32)
+sc_set_runtime_dir(xaudio2_9 "${SC_BIN_DIR}/shims")
+
+# Runtime LoadLibrary IAT hook DLL -> build/bin/
+add_library(scarlett_hook SHARED
+    src/loader/scarlett_hook.cpp
+)
+target_link_libraries(scarlett_hook PRIVATE sc_common)
+sc_set_runtime_dir(scarlett_hook "${SC_BIN_DIR}")
+
 # Isolated synthetic title -> build/bin/titles/dummy_title/
 add_executable(dummy_title
     src/tests/dummy_title/main.cpp
 )
-target_link_libraries(dummy_title PRIVATE sc_common xgameruntime d3d12_xs gameinput xg_xs dstorage_xs d3dcompiler)
+target_link_libraries(dummy_title PRIVATE sc_common xgameruntime d3d12_xs gameinput xg_xs dstorage_xs xaudio2_9 d3dcompiler)
+add_dependencies(dummy_title pixevt)
 sc_set_runtime_dir(dummy_title "${SC_BIN_DIR}/titles/dummy_title")
 
 # Host loader -> build/bin/
@@ -87,4 +111,5 @@ add_executable(loader
     src/loader/pe_patcher.cpp
 )
 target_link_libraries(loader PRIVATE sc_common)
+add_dependencies(loader scarlett_hook)
 sc_set_runtime_dir(loader "${SC_BIN_DIR}")

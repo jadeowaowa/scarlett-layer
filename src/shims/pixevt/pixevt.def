@@ -1,0 +1,5 @@
+LIBRARY pixevt
+EXPORTS
+    PIXBeginEvent
+    PIXEndEvent
+    PIXSetMarker

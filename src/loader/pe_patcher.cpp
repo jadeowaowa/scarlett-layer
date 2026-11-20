@@ -40,7 +40,6 @@ bool ReadRemoteAnsiString(HANDLE hProcess, uintptr_t addr, std::string& out, siz
     out.clear();
     uintptr_t cursor = addr;
     while (out.size() < maxLen) {
-        // Clamp each read to the current 4 KB page so we never fault past a section boundary
         size_t pageRemain = 0x1000 - static_cast<size_t>(cursor & 0xFFFULL);
         size_t chunkLen = std::min<size_t>(pageRemain, maxLen - out.size());
         std::vector<char> buf(chunkLen);
@@ -92,20 +91,17 @@ bool GetRemoteImageBase(HANDLE hProcess, uintptr_t& outImageBase) {
     }
 
     ScProcessBasicInfo pbi{};
-    LONG status = queryFn(hProcess, 0 /*ProcessBasicInformation*/,
-                          &pbi, sizeof(pbi), nullptr);
+    LONG status = queryFn(hProcess, 0, &pbi, sizeof(pbi), nullptr);
     if (status < 0 || !pbi.PebBaseAddress) {
         return false;
     }
 
-    // On x64 Windows, PEB::ImageBaseAddress sits at offset 0x10
     uintptr_t pebImageBaseField = reinterpret_cast<uintptr_t>(pbi.PebBaseAddress) + 0x10;
     return ReadRemote(hProcess, pebImageBaseField, outImageBase) && outImageBase != 0;
 }
 
-// Finds and commits a memory region strictly above imageBase within 32-bit RVA range
 uintptr_t AllocateNearImageBase(HANDLE hProcess, uintptr_t imageBase, DWORD sizeOfImage, size_t allocSize) {
-    constexpr uintptr_t kGranularity = 0x10000ULL; // 64 KB Windows allocation granularity
+    constexpr uintptr_t kGranularity = 0x10000ULL;
     uintptr_t searchStart = (imageBase + static_cast<uintptr_t>(sizeOfImage) + (kGranularity - 1))
                             & ~(kGranularity - 1);
     uintptr_t searchLimit = imageBase + 0xF0000000ULL;
@@ -204,7 +200,6 @@ bool RedirectImportsInSuspendedProcess(HANDLE hProcess, const std::filesystem::p
 
     std::vector<PatchTarget> patches;
 
-    // 1. Scan standard static imports
     const auto& importDir = nt.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
     if (importDir.VirtualAddress != 0 && importDir.Size != 0) {
         uintptr_t descAddr = imageBase + importDir.VirtualAddress;
@@ -234,7 +229,6 @@ bool RedirectImportsInSuspendedProcess(HANDLE hProcess, const std::filesystem::p
         }
     }
 
-    // 2. Scan delay-loaded imports (RVA-based on x64)
     const auto& delayDir = nt.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT];
     if (delayDir.VirtualAddress != 0 && delayDir.Size != 0) {
         uintptr_t descAddr = imageBase + delayDir.VirtualAddress;
@@ -270,7 +264,6 @@ bool RedirectImportsInSuspendedProcess(HANDLE hProcess, const std::filesystem::p
         return true;
     }
 
-    // 3. Build packed ANSI string table and allocate within 32-bit RVA reach of ImageBase
     std::vector<char> stringBlob;
     std::vector<size_t> offsets;
     offsets.reserve(patches.size());
@@ -298,7 +291,6 @@ bool RedirectImportsInSuspendedProcess(HANDLE hProcess, const std::filesystem::p
         return false;
     }
 
-    // Clear bound imports if present so ntdll never skips our redirected DLLs
     const auto& boundDir = nt.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BOUND_IMPORT];
     if (boundDir.VirtualAddress != 0 || boundDir.Size != 0) {
         uintptr_t boundField = ntAddr +
@@ -317,7 +309,6 @@ bool RedirectImportsInSuspendedProcess(HANDLE hProcess, const std::filesystem::p
         }
     }
 
-    // 4. Patch each matched import descriptor's Name RVA
     for (size_t i = 0; i < patches.size(); ++i) {
         const auto& p = patches[i];
         DWORD newRva = static_cast<DWORD>((remoteBlob + offsets[i]) - imageBase);
@@ -351,6 +342,54 @@ bool RedirectImportsInSuspendedProcess(HANDLE hProcess, const std::filesystem::p
     DWORD oldBlobProt = 0;
     VirtualProtectEx(hProcess, reinterpret_cast<LPVOID>(remoteBlob),
                      allocSize, PAGE_READONLY, &oldBlobProt);
+    return true;
+}
+
+bool InjectHookDllInSuspendedProcess(
+    HANDLE hProcess,
+    HANDLE hThread,
+    const std::filesystem::path& hookDllPath) {
+    std::error_code ec;
+    if (!std::filesystem::exists(hookDllPath, ec)) {
+        sc::log::Write(sc::log::Level::Warn, "loader", "InjectHook",
+                       "scarlett_hook.dll not found; skipping dynamic LoadLibrary hooks");
+        return true;
+    }
+
+    const std::wstring absPath = std::filesystem::absolute(hookDllPath, ec).wstring();
+    const size_t pathBytes = (absPath.size() + 1) * sizeof(wchar_t);
+
+    LPVOID remotePath = VirtualAllocEx(
+        hProcess, nullptr, pathBytes, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    if (!remotePath) {
+        sc::log::Write(sc::log::Level::Error, "loader", "InjectHook", "VirtualAllocEx failed");
+        return false;
+    }
+
+    SIZE_T written = 0;
+    if (!WriteProcessMemory(hProcess, remotePath, absPath.c_str(), pathBytes, &written) ||
+        written != pathBytes) {
+        sc::log::Write(sc::log::Level::Error, "loader", "InjectHook", "WriteProcessMemory failed");
+        return false;
+    }
+
+    HMODULE k32 = GetModuleHandleW(L"kernel32.dll");
+    FARPROC loadLibW = k32 ? GetProcAddress(k32, "LoadLibraryW") : nullptr;
+    if (!loadLibW) {
+        sc::log::Write(sc::log::Level::Error, "loader", "InjectHook",
+                       "Could not resolve kernel32!LoadLibraryW");
+        return false;
+    }
+
+    // Runs inside ntdll!LdrInitializeThunk via NtTestAlert right before target's entry point
+    if (QueueUserAPC(reinterpret_cast<PAPCFUNC>(loadLibW), hThread,
+                     reinterpret_cast<ULONG_PTR>(remotePath)) == 0) {
+        sc::log::Write(sc::log::Level::Error, "loader", "InjectHook", "QueueUserAPC failed");
+        return false;
+    }
+
+    std::string msg = "Queued pre-entrypoint APC -> " + hookDllPath.string();
+    sc::log::Write(sc::log::Level::Info, "loader", "InjectHook", msg.c_str());
     return true;
 }
 

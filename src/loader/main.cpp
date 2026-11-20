@@ -31,6 +31,7 @@ void PrependShimDirToPath(const std::filesystem::path& shimDir) {
 int wmain(int argc, wchar_t* argv[]) {
     const std::filesystem::path loaderDir = GetExecutableDir();
     const std::filesystem::path shimDir = loaderDir / L"shims";
+    const std::filesystem::path hookDll = loaderDir / L"scarlett_hook.dll";
 
     std::filesystem::path targetPath = (argc > 1)
         ? std::filesystem::absolute(argv[1])
@@ -49,7 +50,6 @@ int wmain(int argc, wchar_t* argv[]) {
         cmdLine += L"\"";
     }
 
-    // Inherit shims\ on PATH so transitive shim-to-shim dependencies resolve too
     PrependShimDirToPath(shimDir);
 
     std::string targetMsg = "Target: " + targetPath.string();
@@ -84,8 +84,9 @@ int wmain(int argc, wchar_t* argv[]) {
     std::snprintf(pidBuf, sizeof(pidBuf), "PID=%lu (suspended; patching PE imports...)", pi.dwProcessId);
     sc::log::Write(sc::log::Level::Info, "loader", "wmain", pidBuf);
 
-    if (!sc::loader::RedirectImportsInSuspendedProcess(pi.hProcess, shimDir)) {
-        sc::log::Write(sc::log::Level::Error, "loader", "wmain", "Import redirection failed; terminating target");
+    if (!sc::loader::RedirectImportsInSuspendedProcess(pi.hProcess, shimDir) ||
+        !sc::loader::InjectHookDllInSuspendedProcess(pi.hProcess, pi.hThread, hookDll)) {
+        sc::log::Write(sc::log::Level::Error, "loader", "wmain", "Bootstrap failed; terminating target");
         TerminateProcess(pi.hProcess, 1);
         CloseHandle(pi.hThread);
         CloseHandle(pi.hProcess);

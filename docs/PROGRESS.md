@@ -12,46 +12,46 @@
 | Sprint 6 | Shared async runtime + atomic disk-backed `XGameSave` Connected Storage | Done |
 | Sprint 7 | `xg_xs.dll` texture layout/swizzle shim, SRV textured pipeline, `DXBC`/`DXIL` chunk inspector | Done |
 | Sprint 8 | `dstorage_xs.dll` Velocity async asset streaming + pre-swizzled `.scx` texture pipeline | Done |
+| Sprint 9 | `scarlett_hook.dll` runtime `LoadLibrary` IAT hooks, `pixevt.dll`, and `--gen-stub` generator | Done |
+| Sprint 10 | `xaudio2_9.dll` real-ABI `IXAudio2` proxy shim, XMA2 inspector, and live procedural audio | Done |
 
 ## Shim & Export Coverage
 
+### `loader.exe` + `scarlett_hook.dll`
+- [x] In-memory static & delay-load PE import redirection
+- [x] Pre-entrypoint APC injection of `scarlett_hook.dll`
+- [x] Runtime IAT hooks for `LoadLibraryA`, `LoadLibraryW`, `LoadLibraryExA`, `LoadLibraryExW`
+- [x] `tools/audit_imports.py` coverage report + `--gen-stub` scaffolding
+
 ### `xgameruntime.dll`
-- [x] `XGameRuntimeInitialize`, `XGameRuntimeUninitialize`
-- [x] `XSystemGetDeviceType` (spoofs `XboxScarlettAnaconda = 0x07`)
-- [x] `XTaskQueueCreate`, `XTaskQueueDispatch`, `XTaskQueueCloseHandle`
-- [x] `XAsyncGetStatus`
+- [x] `XGameRuntimeInitialize`, `XGameRuntimeUninitialize`, `XSystemGetDeviceType`
+- [x] `XTaskQueueCreate`, `XTaskQueueDispatch`, `XTaskQueueCloseHandle`, `XAsyncGetStatus`
 - [x] `XUserAddAsync`, `XUserAddResult`, `XUserGetGamertag`, `XUserCloseHandle`
-- [x] `XGameSaveInitializeProviderAsync`, `XGameSaveInitializeProviderResult`, `XGameSaveCloseProvider`
-- [x] `XGameSaveCreateContainer`, `XGameSaveCloseContainer`
-- [x] `XGameSaveCreateUpdate`, `XGameSaveCloseUpdate`, `XGameSaveSubmitBlobWrite`, `XGameSaveSubmitBlobDelete`
-- [x] `XGameSaveSubmitUpdateAsync`, `XGameSaveSubmitUpdateResult`
-- [x] `XGameSaveReadBlobDataAsync`, `XGameSaveReadBlobDataResult`
+- [x] `XGameSave*` provider, container, atomic update, and blob read/write APIs
 
 ### `d3d12_xs.dll`
 - [x] `D3D12XboxCreateDevice`, `D3D12SerializeRootSignature`
-- [x] `ID3D12DeviceX`: `CreateCommandQueueX`, `CreateCommandAllocator`, `CreateCommandList`, `CreateDescriptorHeap`, `GetDescriptorHandleIncrementSize`, `CreateCommittedResource`, `CreateRenderTargetView`, `CreateShaderResourceView`, `CreateFence`, `CreateRootSignature`, `CreateGraphicsPipelineState`, `SetFrameIntervalX`, `ScheduleFrameEventX`, `WaitFrameEventX`
-- [x] `ID3D12CommandQueueX`: `ExecuteCommandLists`, `Signal`, `PresentX`
+- [x] `ID3D12DeviceX` & `ID3D12CommandQueueX` (`PresentX` -> DXGI Flip-Discard swapchain)
 - [x] `DXBC`/`DXIL` container header & chunk table inspector
 
 ### `gameinput.dll`
-- [x] `GameInputCreate`
-- [x] `IGameInput`: `GetCurrentTimestamp`, `GetCurrentReading`
-- [x] `IGameInputReading`: `GetInputKind`, `GetTimestamp`, `GetGamepadState`, `GetKeyCount`, `GetKeyState`
+- [x] `GameInputCreate`, `IGameInput`, `IGameInputReading` (XInput + Win32 keyboard)
 
 ### `xg_xs.dll`
-- [x] `XGCreateTexture2DComputer`, `XGComputeTexture2DLayout`
-- [x] `IXGTextureAddressComputer`: `GetResourceLayout`, `CopyIntoSubresource`, `CopyFromSubresource` (linear + 8x8 Morton `XG_TILE_MODE_2D_THIN`)
+- [x] `XGCreateTexture2DComputer`, `XGComputeTexture2DLayout`, `IXGTextureAddressComputer`
 
 ### `dstorage_xs.dll`
-- [x] `DStorageGetFactory`, `DStorageSetConfiguration`
-- [x] `IDStorageFactoryX`: `CreateQueue`, `OpenFile`, `CreateStatusArray`, `SetDebugFlags`, `SetStagingBufferSize`
-- [x] `IDStorageQueueX`: `EnqueueRequest` (file & memory sources), `EnqueueStatus`, `EnqueueSignal` (`ID3D12Fence`), `Submit`, `RetrieveErrorRecord`, `GetPendingRequestCount`
-- [x] `IDStorageFileX`: `Close`, `GetFileInformation`
-- [x] `IDStorageStatusArrayX`: `IsComplete`, `GetHResult`
+- [x] `DStorageGetFactory`, `DStorageSetConfiguration`, `IDStorageFactoryX`, `IDStorageQueueX`, `IDStorageFileX`, `IDStorageStatusArrayX`
+
+### `pixevt.dll`
+- [x] `PIXBeginEvent`, `PIXEndEvent`, `PIXSetMarker` (loaded dynamically via `scarlett_hook.dll`)
+
+### `xaudio2_9.dll`
+- [x] `XAudio2Create` proxying onto native `System32\xaudio2_9.dll`
+- [x] Full `IXAudio2` COM wrapper with `WAVE_FORMAT_XMA2` (`0x0166`) detection hook and performance telemetry
 
 ## Upcoming Subsystems
 - [ ] `xmem.dll` (aligned console memory pools + budget telemetry)
-- [ ] `pixevt.dll` (PIX event markers)
-- [ ] `loader.exe` runtime `LoadLibrary` / `GetProcAddress` hooks + stub generator
-- [ ] `xaudio2_9.dll` / XMA audio shim
-- [ ] Console RDNA2 / precompiled shader translation pipeline
+- [ ] Disk-backed PSO pipeline library + multi-module `scarlett_hook` IAT patching
+- [ ] Real ABI vtable / GUID alignment audit
+- [ ] Console RDNA2 shader container & translation research
