@@ -532,6 +532,53 @@ public:
             pOptimizedClearValue, riidResource, ppvResource);
     }
 
+    D3D12_RESOURCE_ALLOCATION_INFO STDMETHODCALLTYPE GetResourceAllocationInfo(
+        UINT visibleMask, UINT numResourceDescs, const D3D12_RESOURCE_DESC* pResourceDescs) override {
+        return m_device->GetResourceAllocationInfo(visibleMask, numResourceDescs, pResourceDescs);
+    }
+
+    HRESULT STDMETHODCALLTYPE CreateHeap(
+        const D3D12_HEAP_DESC* pDesc, REFIID riid, void** ppvHeap) override {
+        if (!pDesc || !ppvHeap) {
+            return E_INVALIDARG;
+        }
+        HRESULT hr = m_device->CreateHeap(pDesc, riid, ppvHeap);
+        if (SUCCEEDED(hr)) {
+            char buf[160];
+            std::snprintf(buf, sizeof(buf),
+                          "-> created GPU heap (%llu B, align=%llu B, type=%d, flags=0x%X)",
+                          static_cast<unsigned long long>(pDesc->SizeInBytes),
+                          static_cast<unsigned long long>(pDesc->Alignment),
+                          static_cast<int>(pDesc->Properties.Type),
+                          static_cast<unsigned>(pDesc->Flags));
+            sc::log::Write(sc::log::Level::Info, "d3d12_xs", "CreateHeap", buf);
+        }
+        return hr;
+    }
+
+    HRESULT STDMETHODCALLTYPE CreatePlacedResource(
+        ID3D12Heap* pHeap, UINT64 HeapOffset, const D3D12_RESOURCE_DESC* pDesc,
+        D3D12_RESOURCE_STATES InitialState, const D3D12_CLEAR_VALUE* pOptimizedClearValue,
+        REFIID riid, void** ppvResource) override {
+        if (!pHeap || !pDesc || !ppvResource) {
+            return E_INVALIDARG;
+        }
+        HRESULT hr = m_device->CreatePlacedResource(
+            pHeap, HeapOffset, pDesc, InitialState, pOptimizedClearValue, riid, ppvResource);
+        if (SUCCEEDED(hr)) {
+            char buf[160];
+            std::snprintf(buf, sizeof(buf),
+                          "-> placed resource @ heap+0x%llX (dim=%d, %llux%u, fmt=%d)",
+                          static_cast<unsigned long long>(HeapOffset),
+                          static_cast<int>(pDesc->Dimension),
+                          static_cast<unsigned long long>(pDesc->Width),
+                          static_cast<unsigned>(pDesc->Height),
+                          static_cast<int>(pDesc->Format));
+            sc::log::Write(sc::log::Level::Info, "d3d12_xs", "CreatePlacedResource", buf);
+        }
+        return hr;
+    }
+
     void STDMETHODCALLTYPE CreateRenderTargetView(
         ID3D12Resource* pResource, const D3D12_RENDER_TARGET_VIEW_DESC* pDesc,
         D3D12_CPU_DESCRIPTOR_HANDLE DestDescriptor) override {

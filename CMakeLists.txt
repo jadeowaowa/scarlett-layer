@@ -100,6 +100,14 @@ add_library(xmem SHARED
 target_link_libraries(xmem PRIVATE sc_common)
 sc_set_runtime_dir(xmem "${SC_BIN_DIR}/shims")
 
+# Shim #9: kernelx.dll -> build/bin/shims/ (auto-discovered by loader.exe!)
+add_library(kernelx SHARED
+    src/shims/kernelx/kernelx.cpp
+    src/shims/kernelx/kernelx.def
+)
+target_link_libraries(kernelx PRIVATE sc_common)
+sc_set_runtime_dir(kernelx "${SC_BIN_DIR}/shims")
+
 # Runtime multi-module LoadLibrary IAT hook DLL -> build/bin/
 add_library(scarlett_hook SHARED
     src/loader/scarlett_hook.cpp
@@ -119,7 +127,7 @@ sc_set_runtime_dir(engine_plugin "${SC_BIN_DIR}/titles/dummy_title")
 add_executable(dummy_title
     src/tests/dummy_title/main.cpp
 )
-target_link_libraries(dummy_title PRIVATE sc_common xgameruntime d3d12_xs gameinput xg_xs dstorage_xs xaudio2_9 xmem d3dcompiler)
+target_link_libraries(dummy_title PRIVATE sc_common xgameruntime d3d12_xs gameinput xg_xs dstorage_xs xaudio2_9 xmem kernelx d3dcompiler)
 add_dependencies(dummy_title pixevt engine_plugin)
 sc_set_runtime_dir(dummy_title "${SC_BIN_DIR}/titles/dummy_title")
 
@@ -127,7 +135,7 @@ sc_set_runtime_dir(dummy_title "${SC_BIN_DIR}/titles/dummy_title")
 add_executable(scarlett_tests
     src/tests/scarlett_tests/main.cpp
 )
-target_link_libraries(scarlett_tests PRIVATE sc_common xgameruntime d3d12_xs gameinput xg_xs dstorage_xs xaudio2_9 xmem d3dcompiler)
+target_link_libraries(scarlett_tests PRIVATE sc_common xgameruntime d3d12_xs gameinput xg_xs dstorage_xs xaudio2_9 xmem kernelx d3dcompiler)
 add_dependencies(scarlett_tests pixevt engine_plugin)
 sc_set_runtime_dir(scarlett_tests "${SC_BIN_DIR}/titles/scarlett_tests")
 

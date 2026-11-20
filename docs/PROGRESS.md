@@ -17,16 +17,17 @@
 | Sprint 11 | `xmem.dll` aligned console memory pools, allocator tagging, and peak/leak telemetry | Done |
 | Sprint 12 | Disk-backed `ID3D12PipelineLibrary` PSO cache, multi-module IAT hooking, `engine_plugin.dll` | Done |
 | Sprint 13 | Virtual console paths (`G:\`, `T:\`, `S:\`) and headless CTest verification suite (`scarlett_tests`) | Done |
+| Sprint 14 | `kernelx.dll` unified memory & CPU topology shim + `d3d12_xs.dll` `CreateHeap` / `CreatePlacedResource` | Done |
 
 ## Shim & Export Coverage
 
 ### `loader.exe` + `scarlett_hook.dll` + `common/vfs.hpp`
-- [x] In-memory static & delay-load PE import redirection
+- [x] In-memory static & delay-load PE import redirection across all 9 shims
 - [x] Pre-entrypoint APC injection of `scarlett_hook.dll`
 - [x] Multi-module runtime IAT hooks (`LoadLibraryA/W`, `LoadLibraryExA/W`) across main `.exe` and loaded sub-DLLs
 - [x] Virtual console drive mapping (`G:\` game root, `T:\` scratch, `S:\` save temp)
 - [x] `tools/audit_imports.py` coverage report + `--gen-stub` scaffolding
-- [x] Automated headless CTest suite (`scarlett_tests.exe` executed via `loader.exe`)
+- [x] Automated headless CTest suite (`scarlett_tests.exe`, 11 checks)
 
 ### `xgameruntime.dll`
 - [x] `XGameRuntimeInitialize`, `XGameRuntimeUninitialize`, `XSystemGetDeviceType`
@@ -36,7 +37,8 @@
 
 ### `d3d12_xs.dll`
 - [x] `D3D12XboxCreateDevice`, `D3D12SerializeRootSignature`
-- [x] `ID3D12DeviceX` & `ID3D12CommandQueueX` (`PresentX` -> DXGI Flip-Discard swapchain)
+- [x] `ID3D12DeviceX`: `CreateCommandQueueX`, `CreateCommittedResource`, `GetResourceAllocationInfo`, `CreateHeap`, `CreatePlacedResource`, `CreateRenderTargetView`, `CreateShaderResourceView`, `CreateRootSignature`, `CreateGraphicsPipelineState`, frame pacing
+- [x] `ID3D12CommandQueueX` (`PresentX` -> DXGI Flip-Discard swapchain)
 - [x] `DXBC`/`DXIL` container header & chunk table inspector
 - [x] Persistent disk-backed `ID3D12PipelineLibrary` PSO cache (`build/bin/cache/`)
 
@@ -61,7 +63,12 @@
 - [x] `XMemAlloc`, `XMemFree`, `XMemSize`, `XMemAllocDefault`, `XMemFreeDefault`, `XMemSizeDefault`
 - [x] 64 KB `VirtualAlloc` physical/graphics backing, aligned heap pools, per-allocator peak & leak report
 
+### `kernelx.dll`
+- [x] `TitleMemoryStatus` (13.5 GiB Series X title memory budget + live/peak virtual tracking)
+- [x] `VirtualAllocX`, `VirtualFreeX` (`SC_MEM_GRAPHICS` unified memory reservation + unload leak report)
+- [x] `GetConsoleProcessorInfo`, `SetThreadAffinityMaskX` (7-core/14-thread Series X topology + safe host mask clamping)
+
 ## Upcoming Subsystems
-- [ ] Shader Model 6.x (`DXIL`) container parsing & console shader lab
-- [ ] Unified memory & `kernelx.dll` + `CreatePlacedResource` heap support
+- [ ] Shader Model 6.x (`DXIL`) container parsing & pluggable console shader translator boundary
+- [ ] DirectStorage CPU decompression & compressed audio voice decode bridge
 - [ ] Real ABI vtable / GUID alignment audit

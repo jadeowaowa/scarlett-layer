@@ -6,6 +6,7 @@
 #include "shims/dstorage_xs/dstorage_xs.hpp"
 #include "shims/pixevt/pixevt.hpp"
 #include "shims/xmem/xmem.hpp"
+#include "shims/kernelx/kernelx.hpp"
 
 #include <d3dcompiler.h>
 #include <mmreg.h>
@@ -104,7 +105,6 @@ void Pump(XTaskQueueHandle queue, AsyncWaiter& waiter) {
     }
 }
 
-// 1. Virtual Console Path Translation (G:\, T:\, S:\)
 bool TestVfsPathTranslation() {
     bool isVirt = false;
     auto gPath = sc::vfs::TranslatePath(L"G:\\assets\\crest_2dthin.scx", &isVirt);
@@ -126,7 +126,6 @@ bool TestVfsPathTranslation() {
     return true;
 }
 
-// 2. xgameruntime: Device spoof, XTaskQueue, XUser & buffer-too-small check
 bool TestRuntimeAndXUser() {
     SC_EXPECT(SUCCEEDED(XGameRuntimeInitialize()));
     SC_EXPECT(XSystemGetDeviceType() == XSystemDeviceType::XboxScarlettAnaconda);
@@ -162,7 +161,6 @@ bool TestRuntimeAndXUser() {
     return true;
 }
 
-// 3. XGameSave: Missing blob, multi-blob write, buffer-too-small retry, and blob deletion
 bool TestXGameSaveEdgeCases() {
     XTaskQueueHandle queue = nullptr;
     SC_EXPECT(SUCCEEDED(XTaskQueueCreate(XTaskQueueDispatchMode::ThreadPool,
@@ -181,7 +179,6 @@ bool TestXGameSaveEdgeCases() {
     XGameSaveContainerHandle container = nullptr;
     SC_EXPECT(SUCCEEDED(XGameSaveCreateContainer(provider, "edge_cases", &container)));
 
-    // Ensure clean slate by reading a definitely-missing blob
     {
         AsyncWaiter w{};
         XAsyncBlock a{ queue, &w, OnDone, {} };
@@ -195,7 +192,6 @@ bool TestXGameSaveEdgeCases() {
         SC_EXPECT(hr == E_GS_BLOB_NOT_FOUND);
     }
 
-    // Write two blobs atomically
     const uint8_t payloadA[] = { 0x10, 0x20, 0x30, 0x40, 0x55, 0x66, 0x77 };
     const uint8_t payloadB[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0xBA, 0xBE, 0x01 };
     {
@@ -212,7 +208,6 @@ bool TestXGameSaveEdgeCases() {
         XGameSaveCloseUpdate(upd);
     }
 
-    // Read both back: first with an undersized buffer -> E_GS_PROVIDED_BUFFER_TOO_SMALL, then retry!
     {
         AsyncWaiter w{};
         XAsyncBlock a{ queue, &w, OnDone, {} };
@@ -241,7 +236,6 @@ bool TestXGameSaveEdgeCases() {
         SC_EXPECT(std::memcmp(blobs[1].data, payloadB, sizeof(payloadB)) == 0);
     }
 
-    // Delete 'alpha', verify 'alpha' is gone and 'beta' remains, then clean up 'beta'
     {
         XGameSaveUpdateHandle upd = nullptr;
         SC_EXPECT(SUCCEEDED(XGameSaveCreateUpdate(container, "DeleteAlpha", &upd)));
@@ -284,7 +278,6 @@ bool TestXGameSaveEdgeCases() {
     return true;
 }
 
-// 4. xg_xs: Non-power-of-two (77x53) 4-mip 2D_THIN swizzle & detile round-trip
 bool TestXgXsMultiMipAndNpotSwizzle() {
     XG_TEXTURE2D_DESC desc{};
     desc.Width = 77;
@@ -338,7 +331,6 @@ bool TestXgXsMultiMipAndNpotSwizzle() {
     return true;
 }
 
-// 5. dstorage_xs: VFS T:\ streaming + RetrieveErrorRecord on unsupported compression
 bool TestDStorageVfsAndErrorRecord() {
     const std::filesystem::path hostProbe = sc::vfs::TranslatePath(L"T:\\dstorage_probe.bin");
     std::error_code ec;
@@ -375,7 +367,6 @@ bool TestDStorageVfsAndErrorRecord() {
     SC_EXPECT(SUCCEEDED(factory->CreateStatusArray(2, "CTestStatus", IID_IDStorageStatusArrayX,
                                                    reinterpret_cast<void**>(status.GetAddressOf()))));
 
-    // Batch 1: Valid VFS read
     std::vector<uint8_t> actual(expected.size(), 0);
     DSTORAGE_REQUEST okReq{};
     okReq.Options.CompressionFormat = DSTORAGE_COMPRESSION_FORMAT_NONE;
@@ -399,7 +390,6 @@ bool TestDStorageVfsAndErrorRecord() {
     SC_EXPECT(SUCCEEDED(status->GetHResult(0)));
     SC_EXPECT(std::memcmp(expected.data(), actual.data(), expected.size()) == 0);
 
-    // Batch 2: Unsupported ZLIB compression -> verify status + RetrieveErrorRecord
     DSTORAGE_REQUEST badReq = okReq;
     badReq.Options.CompressionFormat = DSTORAGE_COMPRESSION_FORMAT_ZLIB;
     badReq.Name = "unsupported_zlib_req";
@@ -425,14 +415,13 @@ bool TestDStorageVfsAndErrorRecord() {
     return true;
 }
 
-// 6. xaudio2_9: Dynamic hook redirection + WAVE_FORMAT_XMA2 (0x0166) detection hook
 bool TestXAudio2Xma2Rejection() {
     ComPtr<IXAudio2> engine;
     SC_EXPECT(SUCCEEDED(XAudio2Create(&engine, 0, XAUDIO2_DEFAULT_PROCESSOR)));
     SC_EXPECT(engine != nullptr);
 
     WAVEFORMATEX xma2Fmt{};
-    xma2Fmt.wFormatTag = 0x0166; // WAVE_FORMAT_XMA2
+    xma2Fmt.wFormatTag = 0x0166;
     xma2Fmt.nChannels = 2;
     xma2Fmt.nSamplesPerSec = 48000;
     xma2Fmt.wBitsPerSample = 16;
@@ -444,7 +433,6 @@ bool TestXAudio2Xma2Rejection() {
     return true;
 }
 
-// 7. xmem: Physical 64KB + Heap alignments, zero-init, and XMemSize invariants
 bool TestXMemAlignmentAndInvariants() {
     struct Case {
         size_t size;
@@ -478,7 +466,6 @@ bool TestXMemAlignmentAndInvariants() {
     return true;
 }
 
-// 8. scarlett_hook: Dynamic unlinked pixevt + multi-module engine_plugin.dll
 bool TestDynamicAndMultiModuleHooks() {
     HMODULE hPix = LoadLibraryW(L"pixevt.dll");
     SC_EXPECT(hPix != nullptr);
@@ -506,7 +493,6 @@ bool TestDynamicAndMultiModuleHooks() {
     return true;
 }
 
-// 9. d3d12_xs: Headless device, frame tokens, DXBC shader inspection & PSO cache
 bool TestD3D12HeadlessDeviceAndPso() {
     D3D12XBOX_CREATE_DEVICE_PARAMETERS params{};
     params.Version = 1;
@@ -560,6 +546,101 @@ bool TestD3D12HeadlessDeviceAndPso() {
     return true;
 }
 
+// 10. kernelx: 13.5 GiB TitleMemoryStatus, MEM_GRAPHICS VirtualAllocX, CPU topology & affinity clamping
+bool TestKernelXMemoryAndTopology() {
+    TITLEMEMORYSTATUS before{};
+    before.dwLength = sizeof(before);
+    SC_EXPECT(TitleMemoryStatus(&before) != FALSE);
+    SC_EXPECT(before.ullTotalMem == SC_SERIES_X_TITLE_MEM_BYTES);
+
+    void* gfxBuf = VirtualAllocX(
+        nullptr, 256 * 1024, MEM_RESERVE | MEM_COMMIT | SC_MEM_GRAPHICS, PAGE_READWRITE);
+    SC_EXPECT(gfxBuf != nullptr);
+    SC_EXPECT((reinterpret_cast<uintptr_t>(gfxBuf) % 65536ULL) == 0);
+
+    TITLEMEMORYSTATUS during{};
+    during.dwLength = sizeof(during);
+    SC_EXPECT(TitleMemoryStatus(&during) != FALSE);
+    SC_EXPECT(during.ullTitleUsed >= before.ullTitleUsed + 256 * 1024);
+    SC_EXPECT(during.ullTitleAvail == during.ullTotalMem - during.ullTitleUsed);
+
+    SC_EXPECT(VirtualFreeX(gfxBuf, 0, MEM_RELEASE) != FALSE);
+
+    TITLEMEMORYSTATUS after{};
+    after.dwLength = sizeof(after);
+    SC_EXPECT(TitleMemoryStatus(&after) != FALSE);
+    SC_EXPECT(after.ullTitleUsed == before.ullTitleUsed);
+
+    SCARLETT_PROCESSOR_INFO cpu{};
+    SC_EXPECT(GetConsoleProcessorInfo(&cpu) != FALSE);
+    SC_EXPECT(cpu.TitleCoreCount == 7u);
+    SC_EXPECT(cpu.TitleLogicalThreadCount == 14u);
+    SC_EXPECT(cpu.HostLogicalThreadCount >= 1u);
+    SC_EXPECT(cpu.HostProcessAffinityMask != 0);
+
+    // Deliberately request an oversized 64-core mask and verify clamping succeeds cleanly
+    DWORD_PTR prevMask = SetThreadAffinityMaskX(GetCurrentThread(), static_cast<DWORD_PTR>(~0ULL));
+    SC_EXPECT(prevMask != 0);
+    SC_EXPECT(SetThreadAffinityMaskX(GetCurrentThread(), prevMask) != 0);
+    return true;
+}
+
+// 11. d3d12_xs: Explicit ID3D12Heap + two CreatePlacedResource textures at distinct 64KB offsets
+bool TestD3D12PlacedResourcesAndHeap() {
+    D3D12XBOX_CREATE_DEVICE_PARAMETERS params{};
+    params.Version = 1;
+    ComPtr<ID3D12DeviceX> deviceX;
+    SC_EXPECT(SUCCEEDED(D3D12XboxCreateDevice(
+        nullptr, &params, IID_ID3D12DeviceX,
+        reinterpret_cast<void**>(deviceX.GetAddressOf()))));
+
+    D3D12_RESOURCE_DESC texA{};
+    texA.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    texA.Width = 128;
+    texA.Height = 128;
+    texA.DepthOrArraySize = 1;
+    texA.MipLevels = 1;
+    texA.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    texA.SampleDesc.Count = 1;
+
+    D3D12_RESOURCE_DESC texB = texA;
+    texB.Width = 256;
+    texB.Height = 256;
+
+    D3D12_RESOURCE_ALLOCATION_INFO infoA = deviceX->GetResourceAllocationInfo(0, 1, &texA);
+    D3D12_RESOURCE_ALLOCATION_INFO infoB = deviceX->GetResourceAllocationInfo(0, 1, &texB);
+    SC_EXPECT(infoA.SizeInBytes > 0 && infoB.SizeInBytes > 0);
+
+    const UINT64 align = std::max<UINT64>(
+        std::max<UINT64>(infoA.Alignment, infoB.Alignment),
+        D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT);
+    const UINT64 offsetB = (infoA.SizeInBytes + (align - 1ULL)) & ~(align - 1ULL);
+    const UINT64 totalHeapBytes = offsetB + infoB.SizeInBytes;
+
+    D3D12_HEAP_DESC heapDesc{};
+    heapDesc.SizeInBytes = totalHeapBytes;
+    heapDesc.Properties.Type = D3D12_HEAP_TYPE_DEFAULT;
+    heapDesc.Alignment = align;
+    heapDesc.Flags = D3D12_HEAP_FLAG_ALLOW_ONLY_NON_RT_DS_TEXTURES;
+
+    ComPtr<ID3D12Heap> heap;
+    SC_EXPECT(SUCCEEDED(deviceX->CreateHeap(&heapDesc, IID_PPV_ARGS(&heap))));
+
+    ComPtr<ID3D12Resource> resA, resB;
+    SC_EXPECT(SUCCEEDED(deviceX->CreatePlacedResource(
+        heap.Get(), 0, &texA, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&resA))));
+    SC_EXPECT(SUCCEEDED(deviceX->CreatePlacedResource(
+        heap.Get(), offsetB, &texB, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&resB))));
+
+    SC_EXPECT(resA->GetDesc().Width == 128);
+    SC_EXPECT(resB->GetDesc().Width == 256);
+
+    resB.Reset();
+    resA.Reset();
+    heap.Reset();
+    return true;
+}
+
 } // namespace
 
 int main() {
@@ -574,6 +655,8 @@ int main() {
     RunTest("XMemAlignmentAndInvariants", TestXMemAlignmentAndInvariants);
     RunTest("DynamicAndMultiModuleHooks", TestDynamicAndMultiModuleHooks);
     RunTest("D3D12HeadlessDeviceAndPso",  TestD3D12HeadlessDeviceAndPso);
+    RunTest("KernelXMemoryAndTopology",   TestKernelXMemoryAndTopology);
+    RunTest("D3D12PlacedResourcesAndHeap", TestD3D12PlacedResourcesAndHeap);
 
     XGameRuntimeUninitialize();
 

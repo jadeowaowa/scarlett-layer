@@ -6,6 +6,7 @@
 #include "shims/dstorage_xs/dstorage_xs.hpp"
 #include "shims/pixevt/pixevt.hpp"
 #include "shims/xmem/xmem.hpp"
+#include "shims/kernelx/kernelx.hpp"
 
 #include <d3dcompiler.h>
 #include <mmreg.h>
@@ -653,7 +654,25 @@ bool CompileShader(const char* entry, const char* target, ComPtr<ID3DBlob>& outB
 int main() {
     std::printf("[TITLE][T:%05lu] Booting synthetic Series X title...\n", GetCurrentThreadId());
 
-    // 0a. Exercise direct runtime LoadLibraryA/W IAT hooks
+    // 0a. Query kernelx.dll console memory budget, CPU topology & MEM_GRAPHICS scratch arena
+    TITLEMEMORYSTATUS memStat{};
+    memStat.dwLength = sizeof(memStat);
+    if (TitleMemoryStatus(&memStat)) {
+        std::printf("[TITLE] kernelx TitleMemoryStatus: %.1f GiB total (%.1f GiB avail)\n",
+                    static_cast<double>(memStat.ullTotalMem) / (1024.0 * 1024.0 * 1024.0),
+                    static_cast<double>(memStat.ullTitleAvail) / (1024.0 * 1024.0 * 1024.0));
+    }
+
+    SCARLETT_PROCESSOR_INFO cpuInfo{};
+    if (GetConsoleProcessorInfo(&cpuInfo)) {
+        std::printf("[TITLE] kernelx CPU topology: %u console cores (%u threads) on %u-thread host\n",
+                    cpuInfo.TitleCoreCount, cpuInfo.TitleLogicalThreadCount, cpuInfo.HostLogicalThreadCount);
+    }
+
+    void* gfxScratch = VirtualAllocX(
+        nullptr, 65536, MEM_RESERVE | MEM_COMMIT | SC_MEM_GRAPHICS, PAGE_READWRITE);
+
+    // 0b. Exercise direct runtime LoadLibraryA/W IAT hooks
     HMODULE hPix = LoadLibraryW(L"pixevt.dll");
     PIXBeginEventFn pixBegin = nullptr;
     PIXEndEventFn   pixEnd   = nullptr;
@@ -667,7 +686,7 @@ int main() {
         }
     }
 
-    // 0b. Exercise multi-module hooking: load middleware DLL that dynamically loads Xbox shims!
+    // 0c. Exercise multi-module hooking: load middleware DLL that dynamically loads Xbox shims!
     HMODULE hPlugin = LoadLibraryW(L"engine_plugin.dll");
     if (hPlugin) {
         auto runDiag = reinterpret_cast<PluginRunDiagnosticsFn>(
@@ -926,7 +945,7 @@ int main() {
     CloseHandle(ioFenceEvent);
     ioFence.Reset();
 
-    // 7. Build Root Signature, PSO (cached by d3d12_xs!), Vertex Buffer, Texture SRV, and Render Target
+    // 7. Build Root Signature, PSO (cached by d3d12_xs!), Vertex Buffer, Placed Texture SRV & Render Target
     D3D12_DESCRIPTOR_RANGE srvRange{};
     srvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
     srvRange.NumDescriptors = 1;
@@ -1047,6 +1066,7 @@ int main() {
     vbView.StrideInBytes = sizeof(Vertex);
     vbView.SizeInBytes = sizeof(kStarVertices);
 
+    // Allocate an explicit 1 MiB unified GPU texture heap and place crestTexture inside it!
     D3D12_RESOURCE_DESC texDesc{};
     texDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
     texDesc.Width = kTexSize;
@@ -1056,9 +1076,21 @@ int main() {
     texDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
     texDesc.SampleDesc.Count = 1;
 
+    D3D12_RESOURCE_ALLOCATION_INFO texAllocInfo = deviceX->GetResourceAllocationInfo(0, 1, &texDesc);
+    D3D12_HEAP_DESC texHeapDesc{};
+    texHeapDesc.SizeInBytes = std::max<UINT64>(texAllocInfo.SizeInBytes, 1024ULL * 1024ULL);
+    texHeapDesc.Properties.Type = D3D12_HEAP_TYPE_DEFAULT;
+    texHeapDesc.Alignment = std::max<UINT64>(texAllocInfo.Alignment, D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT);
+    texHeapDesc.Flags = D3D12_HEAP_FLAG_ALLOW_ONLY_NON_RT_DS_TEXTURES;
+
+    ComPtr<ID3D12Heap> textureHeap;
+    if (FAILED(deviceX->CreateHeap(&texHeapDesc, IID_PPV_ARGS(&textureHeap)))) {
+        return 1;
+    }
+
     ComPtr<ID3D12Resource> crestTexture;
-    if (FAILED(deviceX->CreateCommittedResource(
-            &defaultHeap, D3D12_HEAP_FLAG_NONE, &texDesc,
+    if (FAILED(deviceX->CreatePlacedResource(
+            textureHeap.Get(), 0, &texDesc,
             D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&crestTexture)))) {
         return 1;
     }
@@ -1360,6 +1392,7 @@ int main() {
     rtvHeap.Reset();
     srvHeap.Reset();
     crestTexture.Reset();
+    textureHeap.Reset();
     renderTarget.Reset();
     vertexBuffer.Reset();
     pso.Reset();
@@ -1368,6 +1401,11 @@ int main() {
     deviceX.Reset();
     gameInput.Reset();
     tiledComputer.Reset();
+
+    if (gfxScratch) {
+        VirtualFreeX(gfxScratch, 0, MEM_RELEASE);
+        gfxScratch = nullptr;
+    }
 
     if (user) {
         XUserCloseHandle(user);

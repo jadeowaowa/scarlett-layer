@@ -1,0 +1,7 @@
+LIBRARY kernelx
+EXPORTS
+    TitleMemoryStatus
+    VirtualAllocX
+    VirtualFreeX
+    GetConsoleProcessorInfo
+    SetThreadAffinityMaskX

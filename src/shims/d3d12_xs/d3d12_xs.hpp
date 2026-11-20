@@ -88,6 +88,22 @@ struct ID3D12DeviceX : public IUnknown {
         const D3D12_CLEAR_VALUE* pOptimizedClearValue,
         REFIID riidResource,
         void** ppvResource) = 0;
+    virtual D3D12_RESOURCE_ALLOCATION_INFO STDMETHODCALLTYPE GetResourceAllocationInfo(
+        UINT visibleMask,
+        UINT numResourceDescs,
+        const D3D12_RESOURCE_DESC* pResourceDescs) = 0;
+    virtual HRESULT STDMETHODCALLTYPE CreateHeap(
+        const D3D12_HEAP_DESC* pDesc,
+        REFIID riid,
+        void** ppvHeap) = 0;
+    virtual HRESULT STDMETHODCALLTYPE CreatePlacedResource(
+        ID3D12Heap* pHeap,
+        UINT64 HeapOffset,
+        const D3D12_RESOURCE_DESC* pDesc,
+        D3D12_RESOURCE_STATES InitialState,
+        const D3D12_CLEAR_VALUE* pOptimizedClearValue,
+        REFIID riid,
+        void** ppvResource) = 0;
     virtual void STDMETHODCALLTYPE CreateRenderTargetView(
         ID3D12Resource* pResource,
         const D3D12_RENDER_TARGET_VIEW_DESC* pDesc,
