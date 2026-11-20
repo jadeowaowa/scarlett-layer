@@ -1,7 +1,7 @@
 # Scarlett Layer â€” AI Context Snapshot
 
-**Commit:** `2c95bab` (#27) | **Generated:** 2026-11-20 19:41 UTC  
-**Totals:** 49 files (14,379 LOC) | 9 shims | 23 CTest checks
+**Commit:** `4c41efe` (#28) | **Generated:** 2026-11-20 19:55 UTC  
+**Totals:** 49 files (14,772 LOC) | 9 shims | 24 CTest checks
 
 ---
 
@@ -72,15 +72,15 @@
   396  src/loader/pe_patcher.cpp
    19  src/loader/pe_patcher.hpp
   401  src/loader/scarlett_hook.cpp
- 1120  src/shims/d3d12_xs/d3d12_xs.cpp
+ 1123  src/shims/d3d12_xs/d3d12_xs.cpp
     4  src/shims/d3d12_xs/d3d12_xs.def
-  163  src/shims/d3d12_xs/d3d12_xs.hpp
+  166  src/shims/d3d12_xs/d3d12_xs.hpp
  1085  src/shims/d3d12_xs/rdna2_isa.hpp
   201  src/shims/d3d12_xs/shader_inspector.hpp
   364  src/shims/d3d12_xs/shader_translator.hpp
- 1104  src/shims/dstorage_xs/dstorage_xs.cpp
+ 1269  src/shims/dstorage_xs/dstorage_xs.cpp
     4  src/shims/dstorage_xs/dstorage_xs.def
-  174  src/shims/dstorage_xs/dstorage_xs.hpp
+  181  src/shims/dstorage_xs/dstorage_xs.hpp
   277  src/shims/gameinput/gameinput.cpp
     3  src/shims/gameinput/gameinput.def
    82  src/shims/gameinput/gameinput.hpp
@@ -109,7 +109,7 @@
  1651  src/tests/dummy_title/main.cpp
    59  src/tests/engine_plugin/engine_plugin.cpp
     3  src/tests/engine_plugin/engine_plugin.def
- 2575  src/tests/scarlett_tests/main.cpp
+ 2790  src/tests/scarlett_tests/main.cpp
   242  tools/audit_imports.py
   505  tools/build_wiki.py
   108  tools/test_brief.py
@@ -118,7 +118,7 @@
 ## 3. Shim Exports & COM VTable Layouts
 
 ## `d3d12_xs.dll`
-**Files:** `src/shims/d3d12_xs/d3d12_xs.cpp` (1120 L), `src/shims/d3d12_xs/d3d12_xs.def` (4 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (163 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1085 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_translator.hpp` (364 L)
+**Files:** `src/shims/d3d12_xs/d3d12_xs.cpp` (1123 L), `src/shims/d3d12_xs/d3d12_xs.def` (4 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (166 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1085 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_translator.hpp` (364 L)
 
 **DLL Exports (`.def`):** `D3D12XboxCreateDevice`, `D3D12SerializeRootSignature = ScarlettSerializeRootSignature`
 
@@ -153,7 +153,7 @@
 - `[21]` `HRESULT WaitFrameEventX( D3D12XBOX_FRAME_EVENT Event, DWORD TimeoutInMilliseconds, HANDLE hEvent, D3D12XBOX_FRAME_PIPELINE_TOKEN* pToken)`
 
 ## `dstorage_xs.dll`
-**Files:** `src/shims/dstorage_xs/dstorage_xs.cpp` (1104 L), `src/shims/dstorage_xs/dstorage_xs.def` (4 L), `src/shims/dstorage_xs/dstorage_xs.hpp` (174 L)
+**Files:** `src/shims/dstorage_xs/dstorage_xs.cpp` (1269 L), `src/shims/dstorage_xs/dstorage_xs.def` (4 L), `src/shims/dstorage_xs/dstorage_xs.hpp` (181 L)
 
 **DLL Exports (`.def`):** `DStorageGetFactory`, `DStorageSetConfiguration`
 
@@ -273,7 +273,7 @@
 - `VintrpOp`: kVintrpP1F32 = 0x00u, kVintrpP2F32 = 0x01u, kVintrpMovF32 = 0x02u
 - `InstFormat`: Sopp, Vop1, Vop2, Vop3, Exp, Mubuf, Smem, Vintrp
 
-## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 23 total)
+## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 24 total)
 ```cpp
     RunTest("VfsPathTranslation",         TestVfsPathTranslation);
     RunTest("RuntimeAndXUser",            TestRuntimeAndXUser);
@@ -298,9 +298,11 @@
     RunTest("XgXs64KbsAndBcnBlockSwizzle",       TestXgXs64KbsAndBcnBlockSwizzle);
     RunTest("DStorageGpuBufferStreaming",        TestDStorageGpuBufferStreaming);
     RunTest("DStorageGpuTextureStreaming",       TestDStorageGpuTextureStreaming);
+    RunTest("DStorageDeviceXBridgeAndMipChain",  TestDStorageDeviceXBridgeAndMipChain);
 ```
 
 ## 6. Recent Git History
+- `4c41efe Sprint 24: DirectStorage direct-to-VRAM GPU texture streaming + CTest #23`
 - `2c95bab Sprint 23: DirectStorage direct-to-VRAM GPU buffer streaming + CTest #22`
 - `9ab0d99 Tools: add directory-safe build.bat wrapper for Hermes Desktop`
 - `c4b8cc0 Sprint 22: xg_xs RDNA2 64KB_S swizzling and BC1/BC3/BC7 block compression`
@@ -310,4 +312,3 @@
 - `5eff0aa Sprint 21: binary RDNA2 VS lifter (SMEM CBVs, VINTRP, EXP pos0/param0) and full VS+PS pipeline`
 - `62d8374 Sprint 20: binary RDNA2 compute shader lifter (MUBUF + integer ALU) on async COMPUTE queue`
 - `d878d33 Sprint 19: d3d12_xs async COMPUTE command queues and cross-queue GPU sync`
-- `f45bc16 Sprint 18: RDNA2 ISA binary decoder, HLSL lifter, and live GPU execution`

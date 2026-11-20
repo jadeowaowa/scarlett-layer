@@ -27,6 +27,9 @@ constexpr GUID IID_ScarlettFileInternal =
 constexpr GUID IID_ScarlettStatusInternal =
     { 0x5c4a41F2, 0x9b70, 0x4d1e, { 0xa1, 0x20, 0x00, 0x53, 0x43, 0x41, 0x52, 0xF2 } };
 
+constexpr GUID IID_ScarlettNativeD3D12Device =
+    { 0x5c4a12F0, 0x9b70, 0x4d1e, { 0xa1, 0x20, 0x00, 0x53, 0x43, 0x41, 0x52, 0xF0 } };
+
 std::string WideToUtf8(const wchar_t* wstr) {
     if (!wstr || !*wstr) {
         return {};
@@ -254,17 +257,25 @@ public:
         : m_desc(desc)
         , m_name(desc.Name ? desc.Name : "unnamed_queue")
         , m_stagingSize(stagingSize > 0 ? stagingSize : (4u * 1024u * 1024u)) {
+        const char* gpuMode = "no";
         if (desc.Device) {
             auto* unk = static_cast<IUnknown*>(desc.Device);
-            unk->QueryInterface(__uuidof(ID3D12Device),
-                                reinterpret_cast<void**>(m_device.GetAddressOf()));
+            if (SUCCEEDED(unk->QueryInterface(
+                    IID_ScarlettNativeD3D12Device,
+                    reinterpret_cast<void**>(m_device.GetAddressOf())))) {
+                gpuMode = "yes(d3d12_xs)";
+            } else if (SUCCEEDED(unk->QueryInterface(
+                    __uuidof(ID3D12Device),
+                    reinterpret_cast<void**>(m_device.GetAddressOf())))) {
+                gpuMode = "yes(native)";
+            }
         }
         m_worker = std::thread([this]() { WorkerLoop(); });
         char buf[192];
         std::snprintf(buf, sizeof(buf), "-> created queue '%s' (capacity=%u, priority=%d, gpu=%s)",
                       m_name.c_str(), static_cast<unsigned>(m_desc.Capacity),
                       static_cast<int>(m_desc.Priority),
-                      m_device ? "yes" : "no");
+                      gpuMode);
         sc::log::Write(sc::log::Level::Info, "dstorage_xs", "CreateQueue", buf);
     }
 
@@ -325,6 +336,9 @@ public:
             op.dstTexture = request->Destination.Texture.Resource;
             op.dstSubresourceIndex = request->Destination.Texture.SubresourceIndex;
             op.dstRegion = request->Destination.Texture.Region;
+        } else if (request->Options.DestinationType == DSTORAGE_REQUEST_DESTINATION_MULTIPLE_SUBRESOURCES) {
+            op.dstTexture = request->Destination.MultipleSubresources.Resource;
+            op.dstSubresourceIndex = request->Destination.MultipleSubresources.FirstSubresource;
         } else {
             op.dstMemory = request->Destination.Memory.Buffer;
             op.dstSize = request->Destination.Memory.Size;
@@ -794,6 +808,152 @@ private:
         return S_OK;
     }
 
+    HRESULT ExecuteMultipleSubresourcesRequest(
+        const QueuedOp& op, uint64_t& outReadBytes, uint64_t& outProducedBytes) {
+        if (!m_device || !op.dstTexture) {
+            return E_INVALIDARG;
+        }
+
+        const D3D12_RESOURCE_DESC texDesc = op.dstTexture->GetDesc();
+        const uint32_t arrayCount = (texDesc.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE3D)
+            ? 1u : static_cast<uint32_t>(texDesc.DepthOrArraySize);
+        const uint32_t totalSubresources = static_cast<uint32_t>(texDesc.MipLevels) * arrayCount;
+        if (totalSubresources == 0 || op.dstSubresourceIndex >= totalSubresources) {
+            return E_INVALIDARG;
+        }
+
+        const uint32_t numSubresources = totalSubresources - op.dstSubresourceIndex;
+        std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> footprints(numSubresources);
+        std::vector<UINT> numRows(numSubresources);
+        std::vector<UINT64> rowSizes(numSubresources);
+        UINT64 totalStagingBytes = 0;
+
+        m_device->GetCopyableFootprints(
+            &texDesc, op.dstSubresourceIndex, numSubresources, 0,
+            footprints.data(), numRows.data(), rowSizes.data(), &totalStagingBytes);
+
+        if (totalStagingBytes == 0) {
+            return E_INVALIDARG;
+        }
+
+        uint64_t totalTightBytes = 0;
+        for (uint32_t i = 0; i < numSubresources; ++i) {
+            if (numRows[i] == 0 || rowSizes[i] == 0) {
+                return E_INVALIDARG;
+            }
+            totalTightBytes += rowSizes[i] * static_cast<uint64_t>(numRows[i]) *
+                               static_cast<uint64_t>(footprints[i].Footprint.Depth);
+        }
+
+        HRESULT hr = EnsureGpuCopyContext(totalStagingBytes);
+        if (FAILED(hr)) {
+            return hr;
+        }
+
+        std::vector<uint8_t> tightData;
+        if (op.options.CompressionFormat == DSTORAGE_COMPRESSION_FORMAT_NONE) {
+            if (op.srcSize < totalTightBytes) {
+                return HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
+            }
+            tightData.resize(static_cast<size_t>(totalTightBytes));
+            uint32_t bytesRead = 0;
+            hr = ReadRawSource(op, tightData.data(), static_cast<uint32_t>(totalTightBytes), bytesRead);
+            if (FAILED(hr)) {
+                return hr;
+            }
+            outReadBytes = bytesRead;
+            outProducedBytes = bytesRead;
+        } else if (op.options.CompressionFormat == DSTORAGE_COMPRESSION_FORMAT_SCARLETT_LZ) {
+            const uint64_t expectedOut = (op.uncompressedSize > 0) ? op.uncompressedSize : totalTightBytes;
+            if (expectedOut < totalTightBytes) {
+                return HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
+            }
+            std::vector<uint8_t> compressedStaging(op.srcSize);
+            uint32_t bytesRead = 0;
+            hr = ReadRawSource(op, compressedStaging.data(), op.srcSize, bytesRead);
+            if (FAILED(hr)) {
+                return hr;
+            }
+            outReadBytes = bytesRead;
+
+            tightData.resize(static_cast<size_t>(expectedOut));
+            size_t decompressedBytes = 0;
+            if (!sc::codec::DecompressLzBlock(
+                    compressedStaging.data(), bytesRead,
+                    tightData.data(), tightData.size(), decompressedBytes) ||
+                decompressedBytes != expectedOut) {
+                return E_FAIL;
+            }
+            outProducedBytes = decompressedBytes;
+        } else {
+            return E_NOTIMPL;
+        }
+
+        uint64_t srcOffset = 0;
+        for (uint32_t i = 0; i < numSubresources; ++i) {
+            const uint32_t depth = footprints[i].Footprint.Depth;
+            const uint64_t dstRowPitch = footprints[i].Footprint.RowPitch;
+            const uint64_t srcRowSize = rowSizes[i];
+            const uint64_t dstSlicePitch = dstRowPitch * static_cast<uint64_t>(numRows[i]);
+            uint8_t* dstBase = m_stagingMapped + footprints[i].Offset;
+
+            for (uint32_t z = 0; z < depth; ++z) {
+                for (UINT y = 0; y < numRows[i]; ++y) {
+                    std::memcpy(
+                        dstBase + z * dstSlicePitch + static_cast<uint64_t>(y) * dstRowPitch,
+                        tightData.data() + srcOffset,
+                        static_cast<size_t>(srcRowSize));
+                    srcOffset += srcRowSize;
+                }
+            }
+        }
+
+        hr = m_copyAllocator->Reset();
+        if (FAILED(hr)) {
+            return hr;
+        }
+        hr = m_copyList->Reset(m_copyAllocator.Get(), nullptr);
+        if (FAILED(hr)) {
+            return hr;
+        }
+
+        for (uint32_t i = 0; i < numSubresources; ++i) {
+            D3D12_TEXTURE_COPY_LOCATION dstLoc{};
+            dstLoc.pResource = op.dstTexture.Get();
+            dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+            dstLoc.SubresourceIndex = op.dstSubresourceIndex + i;
+
+            D3D12_TEXTURE_COPY_LOCATION srcLoc{};
+            srcLoc.pResource = m_stagingBuffer.Get();
+            srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+            srcLoc.PlacedFootprint = footprints[i];
+
+            m_copyList->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
+        }
+
+        hr = m_copyList->Close();
+        if (FAILED(hr)) {
+            return hr;
+        }
+
+        ID3D12CommandList* lists[] = { m_copyList.Get() };
+        m_copyQueue->ExecuteCommandLists(1, lists);
+
+        ++m_copyFenceValue;
+        hr = m_copyQueue->Signal(m_copyFence.Get(), m_copyFenceValue);
+        if (FAILED(hr)) {
+            return hr;
+        }
+        if (m_copyFence->GetCompletedValue() < m_copyFenceValue) {
+            hr = m_copyFence->SetEventOnCompletion(m_copyFenceValue, m_copyEvent);
+            if (FAILED(hr)) {
+                return hr;
+            }
+            WaitForSingleObject(m_copyEvent, INFINITE);
+        }
+        return S_OK;
+    }
+
     HRESULT ExecuteReadRequest(const QueuedOp& op, uint64_t& outReadBytes, uint64_t& outProducedBytes) {
         outReadBytes = 0;
         outProducedBytes = 0;
@@ -803,6 +963,9 @@ private:
         }
         if (op.options.DestinationType == DSTORAGE_REQUEST_DESTINATION_TEXTURE_REGION) {
             return ExecuteTextureRequest(op, outReadBytes, outProducedBytes);
+        }
+        if (op.options.DestinationType == DSTORAGE_REQUEST_DESTINATION_MULTIPLE_SUBRESOURCES) {
+            return ExecuteMultipleSubresourcesRequest(op, outReadBytes, outProducedBytes);
         }
 
         if (op.options.DestinationType != DSTORAGE_REQUEST_DESTINATION_MEMORY || !op.dstMemory) {
@@ -878,7 +1041,9 @@ private:
                         totalRead += bytesRead;
                         totalProduced += bytesProduced;
                         ++readCount;
-                        if (op.options.DestinationType == DSTORAGE_REQUEST_DESTINATION_BUFFER || op.options.DestinationType == DSTORAGE_REQUEST_DESTINATION_TEXTURE_REGION) {
+                        if (op.options.DestinationType == DSTORAGE_REQUEST_DESTINATION_BUFFER ||
+                            op.options.DestinationType == DSTORAGE_REQUEST_DESTINATION_TEXTURE_REGION ||
+                            op.options.DestinationType == DSTORAGE_REQUEST_DESTINATION_MULTIPLE_SUBRESOURCES) {
                             ++gpuReadCount;
                         }
                         if (FAILED(hr)) {

@@ -49,6 +49,9 @@ inline constexpr GUID IID_ID3D12DeviceX =
 inline constexpr GUID IID_ID3D12CommandQueueX =
     { 0x5c4a1202, 0x9b70, 0x4d1e, { 0xa1, 0x20, 0x00, 0x53, 0x43, 0x41, 0x52, 0x02 } };
 
+inline constexpr GUID IID_ScarlettNativeD3D12Device =
+    { 0x5c4a12F0, 0x9b70, 0x4d1e, { 0xa1, 0x20, 0x00, 0x53, 0x43, 0x41, 0x52, 0xF0 } };
+
 struct ID3D12CommandQueueX : public IUnknown {
     virtual void    STDMETHODCALLTYPE ExecuteCommandLists(
         UINT NumCommandLists, ID3D12CommandList* const* ppCommandLists) = 0;

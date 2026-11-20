@@ -2352,6 +2352,220 @@ bool TestDStorageGpuBufferStreaming() {
     return true;
 }
 
+bool TestDStorageDeviceXBridgeAndMipChain() {
+    D3D12XBOX_CREATE_DEVICE_PARAMETERS devParams{};
+    devParams.Version = 1;
+    ComPtr<ID3D12DeviceX> deviceX;
+    SC_EXPECT(SUCCEEDED(D3D12XboxCreateDevice(
+        nullptr, &devParams, IID_ID3D12DeviceX,
+        reinterpret_cast<void**>(deviceX.GetAddressOf()))));
+
+    constexpr uint32_t kMipCount = 3u;
+    constexpr uint32_t kBaseSize = 64u;
+    constexpr uint32_t kMipSizes[kMipCount] = { 64u, 32u, 16u };
+    constexpr uint32_t kAlignedPitch = 256u;
+
+    D3D12_HEAP_PROPERTIES defaultHeap{};
+    defaultHeap.Type = D3D12_HEAP_TYPE_DEFAULT;
+    D3D12_RESOURCE_DESC texDesc{};
+    texDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    texDesc.Width = kBaseSize;
+    texDesc.Height = kBaseSize;
+    texDesc.DepthOrArraySize = 1;
+    texDesc.MipLevels = static_cast<UINT16>(kMipCount);
+    texDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    texDesc.SampleDesc.Count = 1;
+    texDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+
+    ComPtr<ID3D12Resource> gpuTex;
+    SC_EXPECT(SUCCEEDED(deviceX->CreateCommittedResource(
+        &defaultHeap, D3D12_HEAP_FLAG_NONE, &texDesc,
+        D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&gpuTex))));
+
+    std::vector<uint8_t> tightChain;
+    uint32_t mipTightOffsets[kMipCount]{};
+    for (uint32_t m = 0; m < kMipCount; ++m) {
+        mipTightOffsets[m] = static_cast<uint32_t>(tightChain.size());
+        const uint32_t dim = kMipSizes[m];
+        for (uint32_t y = 0; y < dim; ++y) {
+            for (uint32_t x = 0; x < dim; ++x) {
+                tightChain.push_back(static_cast<uint8_t>((m + 1u) * 60u + x));
+                tightChain.push_back(static_cast<uint8_t>(y * 4u));
+                tightChain.push_back(static_cast<uint8_t>((x ^ y) + m * 37u));
+                tightChain.push_back(255u);
+            }
+        }
+    }
+
+    std::vector<uint8_t> compressed = sc::codec::CompressLzBlock(tightChain.data(), tightChain.size());
+    SC_EXPECT(!compressed.empty());
+
+    const std::filesystem::path hostProbe = sc::vfs::TranslatePath(L"T:\\gpu_mipchain_probe.sclz");
+    std::filesystem::create_directories(hostProbe.parent_path());
+    {
+        FILE* f = nullptr;
+        SC_EXPECT(_wfopen_s(&f, hostProbe.c_str(), L"wb") == 0 && f != nullptr);
+        SC_EXPECT(std::fwrite(compressed.data(), 1, compressed.size(), f) == compressed.size());
+        std::fclose(f);
+    }
+
+    ComPtr<IDStorageFactoryX> factory;
+    SC_EXPECT(SUCCEEDED(DStorageGetFactory(
+        IID_IDStorageFactoryX, reinterpret_cast<void**>(factory.GetAddressOf()))));
+
+    ComPtr<IDStorageFileX> file;
+    SC_EXPECT(SUCCEEDED(factory->OpenFile(
+        L"T:\\gpu_mipchain_probe.sclz", IID_IDStorageFileX,
+        reinterpret_cast<void**>(file.GetAddressOf()))));
+
+    DSTORAGE_QUEUE_DESC qDesc{};
+    qDesc.SourceType = DSTORAGE_REQUEST_SOURCE_FILE;
+    qDesc.Capacity = 32;
+    qDesc.Priority = DSTORAGE_PRIORITY_HIGH;
+    qDesc.Name = "devicex_mipchain_queue";
+    qDesc.Device = deviceX.Get();
+
+    ComPtr<IDStorageQueueX> queue;
+    SC_EXPECT(SUCCEEDED(factory->CreateQueue(
+        &qDesc, IID_IDStorageQueueX, reinterpret_cast<void**>(queue.GetAddressOf()))));
+
+    ComPtr<IDStorageStatusArrayX> status;
+    SC_EXPECT(SUCCEEDED(factory->CreateStatusArray(
+        2, "mipchain_status", IID_IDStorageStatusArrayX,
+        reinterpret_cast<void**>(status.GetAddressOf()))));
+
+    ComPtr<ID3D12Fence> fence;
+    SC_EXPECT(SUCCEEDED(deviceX->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence))));
+
+    DSTORAGE_REQUEST req{};
+    req.Options.CompressionFormat = DSTORAGE_COMPRESSION_FORMAT_SCARLETT_LZ;
+    req.Options.SourceType = DSTORAGE_REQUEST_SOURCE_FILE;
+    req.Options.DestinationType = DSTORAGE_REQUEST_DESTINATION_MULTIPLE_SUBRESOURCES;
+    req.Source.File.Source = file.Get();
+    req.Source.File.Offset = 0;
+    req.Source.File.Size = static_cast<uint32_t>(compressed.size());
+    req.Destination.MultipleSubresources.Resource = gpuTex.Get();
+    req.Destination.MultipleSubresources.FirstSubresource = 0;
+    req.UncompressedSize = static_cast<uint32_t>(tightChain.size());
+    req.Name = "gpu_lz_mipchain";
+
+    queue->EnqueueRequest(&req);
+    queue->EnqueueStatus(status.Get(), 0);
+    queue->EnqueueSignal(fence.Get(), 1);
+    queue->Submit();
+
+    HANDLE evt = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    SC_EXPECT(evt != nullptr);
+    if (fence->GetCompletedValue() < 1) {
+        SC_EXPECT(SUCCEEDED(fence->SetEventOnCompletion(1, evt)));
+        WaitForSingleObject(evt, INFINITE);
+    }
+    SC_EXPECT(status->IsComplete(0));
+    SC_EXPECT(status->GetHResult(0) == S_OK);
+
+    constexpr uint64_t kRbOffsets[kMipCount] = { 0u, 16384u, 24576u };
+    constexpr uint64_t kRbTotalBytes = 28672u;
+
+    D3D12_HEAP_PROPERTIES rbHeap{};
+    rbHeap.Type = D3D12_HEAP_TYPE_READBACK;
+    D3D12_RESOURCE_DESC rbDesc{};
+    rbDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    rbDesc.Width = kRbTotalBytes;
+    rbDesc.Height = 1;
+    rbDesc.DepthOrArraySize = 1;
+    rbDesc.MipLevels = 1;
+    rbDesc.Format = DXGI_FORMAT_UNKNOWN;
+    rbDesc.SampleDesc.Count = 1;
+    rbDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+    ComPtr<ID3D12Resource> rbBuf;
+    SC_EXPECT(SUCCEEDED(deviceX->CreateCommittedResource(
+        &rbHeap, D3D12_HEAP_FLAG_NONE, &rbDesc,
+        D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&rbBuf))));
+
+    D3D12_COMMAND_QUEUE_DESC dq{};
+    dq.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+    ComPtr<ID3D12CommandQueueX> directQueue;
+    SC_EXPECT(SUCCEEDED(deviceX->CreateCommandQueueX(&dq, &directQueue)));
+
+    ComPtr<ID3D12CommandAllocator> alloc;
+    SC_EXPECT(SUCCEEDED(deviceX->CreateCommandAllocator(
+        D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&alloc))));
+
+    ComPtr<ID3D12GraphicsCommandList> cmdList;
+    SC_EXPECT(SUCCEEDED(deviceX->CreateCommandList(
+        0, D3D12_COMMAND_LIST_TYPE_DIRECT, alloc.Get(), nullptr, IID_PPV_ARGS(&cmdList))));
+
+    for (uint32_t m = 0; m < kMipCount; ++m) {
+        D3D12_TEXTURE_COPY_LOCATION srcLoc{};
+        srcLoc.pResource = gpuTex.Get();
+        srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+        srcLoc.SubresourceIndex = m;
+
+        D3D12_TEXTURE_COPY_LOCATION dstLoc{};
+        dstLoc.pResource = rbBuf.Get();
+        dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+        dstLoc.PlacedFootprint.Offset = kRbOffsets[m];
+        dstLoc.PlacedFootprint.Footprint = {
+            DXGI_FORMAT_R8G8B8A8_UNORM, kMipSizes[m], kMipSizes[m], 1, kAlignedPitch
+        };
+        cmdList->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
+    }
+    SC_EXPECT(SUCCEEDED(cmdList->Close()));
+
+    ID3D12CommandList* lists[] = { cmdList.Get() };
+    directQueue->ExecuteCommandLists(1, lists);
+    SC_EXPECT(SUCCEEDED(directQueue->Signal(fence.Get(), 2)));
+    if (fence->GetCompletedValue() < 2) {
+        SC_EXPECT(SUCCEEDED(fence->SetEventOnCompletion(2, evt)));
+        WaitForSingleObject(evt, INFINITE);
+    }
+
+    void* mapped = nullptr;
+    D3D12_RANGE readRange{ 0, static_cast<SIZE_T>(kRbTotalBytes) };
+    SC_EXPECT(SUCCEEDED(rbBuf->Map(0, &readRange, &mapped)));
+    const auto* rbBytes = static_cast<const uint8_t*>(mapped);
+    bool allMatch = true;
+    for (uint32_t m = 0; m < kMipCount && allMatch; ++m) {
+        const uint32_t dim = kMipSizes[m];
+        const uint32_t tightRow = dim * 4u;
+        for (uint32_t y = 0; y < dim; ++y) {
+            const uint8_t* actualRow = rbBytes + kRbOffsets[m] + static_cast<uint64_t>(y) * kAlignedPitch;
+            const uint8_t* expectRow = tightChain.data() + mipTightOffsets[m] + static_cast<uint64_t>(y) * tightRow;
+            if (std::memcmp(actualRow, expectRow, tightRow) != 0) {
+                allMatch = false;
+                break;
+            }
+        }
+    }
+    D3D12_RANGE noWrite{ 0, 0 };
+    rbBuf->Unmap(0, &noWrite);
+    SC_EXPECT(allMatch);
+
+    DSTORAGE_REQUEST badReq = req;
+    badReq.Destination.MultipleSubresources.FirstSubresource = kMipCount;
+    badReq.Name = "oob_first_subresource";
+    queue->EnqueueRequest(&badReq);
+    queue->EnqueueStatus(status.Get(), 1);
+    queue->EnqueueSignal(fence.Get(), 3);
+    queue->Submit();
+
+    if (fence->GetCompletedValue() < 3) {
+        SC_EXPECT(SUCCEEDED(fence->SetEventOnCompletion(3, evt)));
+        WaitForSingleObject(evt, INFINITE);
+    }
+    CloseHandle(evt);
+
+    SC_EXPECT(status->IsComplete(1));
+    SC_EXPECT(status->GetHResult(1) == E_INVALIDARG);
+
+    DSTORAGE_ERROR_RECORD err{};
+    queue->RetrieveErrorRecord(&err);
+    SC_EXPECT(err.FailureCount == 1);
+    SC_EXPECT(err.FirstFailureHResult == E_INVALIDARG);
+    return true;
+}
+
 bool TestDStorageGpuTextureStreaming() {
     HMODULE hD3d12 = LoadLibraryW(L"d3d12.dll");
     SC_EXPECT(hD3d12 != nullptr);
@@ -2567,6 +2781,7 @@ int main() {
     RunTest("XgXs64KbsAndBcnBlockSwizzle",       TestXgXs64KbsAndBcnBlockSwizzle);
     RunTest("DStorageGpuBufferStreaming",        TestDStorageGpuBufferStreaming);
     RunTest("DStorageGpuTextureStreaming",       TestDStorageGpuTextureStreaming);
+    RunTest("DStorageDeviceXBridgeAndMipChain",  TestDStorageDeviceXBridgeAndMipChain);
 
     XGameRuntimeUninitialize();
 

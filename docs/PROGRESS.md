@@ -94,3 +94,9 @@
 - Added `DSTORAGE_REQUEST_DESTINATION_TEXTURE_REGION` and `DSTORAGE_DESTINATION_TEXTURE_REGION` to `dstorage_xs.hpp`.
 - Implemented `ExecuteTextureRequest` in `ScarlettStorageQueueX` using `GetCopyableFootprints`, automatic 256-byte row-pitch staging repacking (for unaligned/sub-region uploads), and `CopyTextureRegion` on the dedicated `COPY` queue.
 - Added CTest #23 (`DStorageGpuTextureStreaming`) verifying `SCARLETT_LZ`-compressed 64x64 `RGBA8_UNORM` streaming into a `DEFAULT` heap `TEXTURE2D`, bit-for-bit `DIRECT`-queue readback, and `E_INVALIDARG` error recording on inverted/empty `D3D12_BOX` regions (`23 passed, 0 failed`, zero leaks).
+
+## Sprint 25: d3d12_xs <-> dstorage_xs Bridge & Mip-Chain Streaming
+- Added `tools/verify.bat` (fail-fast build + CTest) and `tools/patch_lib.ps1` (strict single-match UTF-8 patch helper).
+- Exposed `IID_ScarlettNativeD3D12Device` in `ScarlettDeviceX::QueryInterface` (`d3d12_xs`) and wired `ScarlettStorageQueueX` (`dstorage_xs`) to unwrap shimmed `ID3D12DeviceX*` devices directly (`gpu=yes(d3d12_xs)`).
+- Added `DSTORAGE_REQUEST_DESTINATION_MULTIPLE_SUBRESOURCES` and `ExecuteMultipleSubresourcesRequest` to stream tightly packed mip chains in a single request using `GetCopyableFootprints` repacking on the `COPY` queue.
+- Added CTest #24 (`DStorageDeviceXBridgeAndMipChain`) verifying 3-mip `SCARLETT_LZ` streaming through `ID3D12DeviceX*`, bit-for-bit `ID3D12CommandQueueX` readback, and `E_INVALIDARG` on out-of-bounds `FirstSubresource` (`24 passed, 0 failed`, zero leaks).

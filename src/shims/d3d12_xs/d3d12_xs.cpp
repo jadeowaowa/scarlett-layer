@@ -488,6 +488,9 @@ public:
             AddRef();
             return S_OK;
         }
+        if (IsEqualGUID(riid, IID_ScarlettNativeD3D12Device)) {
+            return m_device->QueryInterface(__uuidof(ID3D12Device), ppvObject);
+        }
         *ppvObject = nullptr;
         return E_NOINTERFACE;
     }
