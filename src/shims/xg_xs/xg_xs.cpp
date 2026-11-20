@@ -1,4 +1,5 @@
 #include "xg_xs.hpp"
+#include "xg_64kbs.hpp"
 #include "common/stub.hpp"
 
 #include <algorithm>
@@ -259,6 +260,10 @@ extern "C" {
 HRESULT WINAPI XGComputeTexture2DLayout(
     const XG_TEXTURE2D_DESC* pDesc,
     XG_RESOURCE_LAYOUT* pLayout) {
+    if (pDesc && pLayout && (pDesc->TileMode == XG_TILE_MODE_64KB_S || sc::xg::IsBlockCompressed(pDesc->Format))) {
+        return sc::xg::ComputeBcnOr64KbsLayout(*pDesc, *pLayout);
+    }
+
     if (!pDesc || !pLayout) {
         return E_INVALIDARG;
     }
@@ -268,6 +273,10 @@ HRESULT WINAPI XGComputeTexture2DLayout(
 HRESULT WINAPI XGCreateTexture2DComputer(
     const XG_TEXTURE2D_DESC* pDesc,
     IXGTextureAddressComputer** ppComputer) {
+    if (pDesc && ppComputer && (pDesc->TileMode == XG_TILE_MODE_64KB_S || sc::xg::IsBlockCompressed(pDesc->Format))) {
+        return sc::xg::CreateBcnOr64KbsComputer(*pDesc, ppComputer);
+    }
+
     if (!pDesc || !ppComputer) {
         return E_INVALIDARG;
     }

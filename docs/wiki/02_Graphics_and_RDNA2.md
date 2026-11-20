@@ -52,7 +52,7 @@
 - `ScxsPayloadFormat`: EmbeddedDxbcOrDxil = 1, Rdna2Isa = 2
 
 ## `xg_xs.dll`
-**Files:** `src/shims/xg_xs/xg_xs.cpp` (295 L), `src/shims/xg_xs/xg_xs.def` (4 L), `src/shims/xg_xs/xg_xs.hpp` (75 L)
+**Files:** `src/shims/xg_xs/xg_64kbs.hpp` (325 L), `src/shims/xg_xs/xg_xs.cpp` (304 L), `src/shims/xg_xs/xg_xs.def` (4 L), `src/shims/xg_xs/xg_xs.hpp` (75 L)
 
 **DLL Exports (`.def`):** `XGCreateTexture2DComputer`, `XGComputeTexture2DLayout`
 

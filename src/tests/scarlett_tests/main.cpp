@@ -1900,6 +1900,297 @@ bool TestRdna2VertexAndPixelPipelineWithCbv() {
     return true;
 }
 
+// 21. xg_xs + d3d12_xs: RDNA2 64KB_S swizzle & BC1/BC3/BC7 NPOT multi-mip round-trips + RTX 5070 BC1 sample
+bool TestXgXs64KbsAndBcnBlockSwizzle() {
+    auto verifyBcnSwizzle = [](DXGI_FORMAT fmt, uint32_t w, uint32_t h, uint32_t mips, uint32_t bpe) -> bool {
+        XG_TEXTURE2D_DESC d{};
+        d.Width = w;
+        d.Height = h;
+        d.MipLevels = mips;
+        d.ArraySize = 1;
+        d.Format = fmt;
+        d.TileMode = XG_TILE_MODE_64KB_S;
+
+        ComPtr<IXGTextureAddressComputer> comp;
+        XG_RESOURCE_LAYOUT layout{};
+        SC_EXPECT(SUCCEEDED(XGCreateTexture2DComputer(&d, &comp)));
+        SC_EXPECT(SUCCEEDED(comp->GetResourceLayout(&layout)));
+        SC_EXPECT(layout.SizeBytes >= 65536ULL && (layout.SizeBytes % 65536ULL) == 0ULL);
+
+        const uint32_t physAttrs = MakeXAllocAttributes(
+            XALLOC_ID_TEXTURE_TILED, XALLOC_ALIGNMENT_64K, XALLOC_MEMTYPE_PHYSICAL, true);
+        void* tiledMem = XMemAlloc(static_cast<size_t>(layout.SizeBytes), physAttrs);
+        SC_EXPECT(tiledMem != nullptr);
+        SC_EXPECT((reinterpret_cast<uintptr_t>(tiledMem) % 65536ULL) == 0ULL);
+
+        std::vector<std::vector<uint8_t>> expectedMips(mips);
+        for (uint32_t m = 0; m < mips; ++m) {
+            const uint32_t bw = (std::max<uint32_t>(1u, w >> m) + 3u) / 4u;
+            const uint32_t bh = (std::max<uint32_t>(1u, h >> m) + 3u) / 4u;
+            const uint32_t rowBytes = bw * bpe;
+            expectedMips[m].resize(static_cast<size_t>(rowBytes) * bh);
+            for (size_t i = 0; i < expectedMips[m].size(); ++i) {
+                expectedMips[m][i] = static_cast<uint8_t>(((i * 37u) ^ (m * 97u) ^ (bpe * 13u)) & 0xFFu);
+            }
+            SC_EXPECT(SUCCEEDED(comp->CopyIntoSubresource(tiledMem, m, expectedMips[m].data(), rowBytes, 0)));
+        }
+
+        // Verify real swizzling altered layout on mip 0
+        SC_EXPECT(std::memcmp(tiledMem, expectedMips[0].data(), std::min<size_t>(256, expectedMips[0].size())) != 0);
+
+        bool allExact = true;
+        for (uint32_t m = 0; m < mips; ++m) {
+            const uint32_t bw = (std::max<uint32_t>(1u, w >> m) + 3u) / 4u;
+            const uint32_t rowBytes = bw * bpe;
+            std::vector<uint8_t> roundTrip(expectedMips[m].size(), 0xCCu);
+            if (FAILED(comp->CopyFromSubresource(roundTrip.data(), m, tiledMem, rowBytes, 0)) ||
+                std::memcmp(roundTrip.data(), expectedMips[m].data(), expectedMips[m].size()) != 0) {
+                allExact = false;
+                break;
+            }
+        }
+        XMemFree(tiledMem, physAttrs);
+        SC_EXPECT(allExact);
+        return true;
+    };
+
+    // NPOT multi-mip BC1 (8B), BC3 (16B), and multi-macro-tile BC7 (16B, 300x190 = 75x48 blocks > 64x64)
+    SC_EXPECT(verifyBcnSwizzle(DXGI_FORMAT_BC1_UNORM, 130,  90, 4,  8));
+    SC_EXPECT(verifyBcnSwizzle(DXGI_FORMAT_BC3_UNORM,  64,  64, 3, 16));
+    SC_EXPECT(verifyBcnSwizzle(DXGI_FORMAT_BC7_UNORM, 300, 190, 5, 16));
+
+    // End-to-end GPU test: BC1 16x16 swizzled in 64KB_S -> detiled to LINEAR -> uploaded & sampled on RTX 5070
+    constexpr UINT kSize = 16;
+    XG_TEXTURE2D_DESC bc1Tiled{};
+    bc1Tiled.Width = kSize;
+    bc1Tiled.Height = kSize;
+    bc1Tiled.MipLevels = 1;
+    bc1Tiled.ArraySize = 1;
+    bc1Tiled.Format = DXGI_FORMAT_BC1_UNORM;
+    bc1Tiled.TileMode = XG_TILE_MODE_64KB_S;
+
+    XG_TEXTURE2D_DESC bc1Linear = bc1Tiled;
+    bc1Linear.TileMode = XG_TILE_MODE_LINEAR;
+
+    ComPtr<IXGTextureAddressComputer> bc1Comp;
+    XG_RESOURCE_LAYOUT tiledLayout{}, linearLayout{};
+    SC_EXPECT(SUCCEEDED(XGCreateTexture2DComputer(&bc1Tiled, &bc1Comp)));
+    SC_EXPECT(SUCCEEDED(bc1Comp->GetResourceLayout(&tiledLayout)));
+    SC_EXPECT(SUCCEEDED(XGComputeTexture2DLayout(&bc1Linear, &linearLayout)));
+
+    // Solid BC1 block: color0 = 0xFC00 (R5=31->255, G6=32->130, B5=0->0), color1 = 0x0000, all indices = 0
+    std::vector<uint8_t> bc1Raw(4u * 4u * 8u, 0u);
+    for (size_t blk = 0; blk < 16u; ++blk) {
+        bc1Raw[blk * 8u + 0] = 0x00u;
+        bc1Raw[blk * 8u + 1] = 0xFCu;
+    }
+
+    const uint32_t physAttrs = MakeXAllocAttributes(
+        XALLOC_ID_TEXTURE_TILED, XALLOC_ALIGNMENT_64K, XALLOC_MEMTYPE_PHYSICAL, true);
+    void* tiledBuf = XMemAlloc(static_cast<size_t>(tiledLayout.SizeBytes), physAttrs);
+    SC_EXPECT(tiledBuf != nullptr);
+    SC_EXPECT(SUCCEEDED(bc1Comp->CopyIntoSubresource(tiledBuf, 0, bc1Raw.data(), 4u * 8u, 0)));
+
+    const UINT linearPitch = static_cast<UINT>(linearLayout.Plane[0].MipLayout[0].PitchBytes);
+    std::vector<uint8_t> detiledUpload(static_cast<size_t>(linearLayout.SizeBytes), 0u);
+    SC_EXPECT(SUCCEEDED(bc1Comp->CopyFromSubresource(detiledUpload.data(), 0, tiledBuf, linearPitch, 0)));
+    XMemFree(tiledBuf, physAttrs);
+
+    D3D12XBOX_CREATE_DEVICE_PARAMETERS params{};
+    params.Version = 1;
+    ComPtr<ID3D12DeviceX> deviceX;
+    SC_EXPECT(SUCCEEDED(D3D12XboxCreateDevice(
+        nullptr, &params, IID_ID3D12DeviceX, reinterpret_cast<void**>(deviceX.GetAddressOf()))));
+
+    D3D12_COMMAND_QUEUE_DESC qd{ D3D12_COMMAND_LIST_TYPE_DIRECT };
+    ComPtr<ID3D12CommandQueueX> cmdQueue;
+    SC_EXPECT(SUCCEEDED(deviceX->CreateCommandQueueX(&qd, &cmdQueue)));
+
+    const char* hlsl = R"HLSL(
+Texture2D<float4> gTex : register(t0);
+SamplerState gSamp : register(s0);
+float4 VSMain(uint id : SV_VertexID) : SV_POSITION {
+    return float4((id == 2) ? 3.0f : -1.0f, (id == 1) ? 3.0f : -1.0f, 0.0f, 1.0f);
+}
+float4 PSMain(float4 pos : SV_POSITION) : SV_TARGET {
+    return gTex.Sample(gSamp, float2(0.5f, 0.5f));
+}
+)HLSL";
+
+    ComPtr<ID3DBlob> vsBlob, psBlob, rsBlob, errBlob;
+    SC_EXPECT(SUCCEEDED(D3DCompile(hlsl, std::strlen(hlsl), "bc1_sample.hlsl", nullptr, nullptr,
+        "VSMain", "vs_5_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &vsBlob, &errBlob)));
+    SC_EXPECT(SUCCEEDED(D3DCompile(hlsl, std::strlen(hlsl), "bc1_sample.hlsl", nullptr, nullptr,
+        "PSMain", "ps_5_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &psBlob, &errBlob)));
+
+    D3D12_DESCRIPTOR_RANGE srvRange{ D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND };
+    D3D12_ROOT_PARAMETER rp{};
+    rp.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    rp.DescriptorTable = { 1, &srvRange };
+    rp.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+    D3D12_STATIC_SAMPLER_DESC samp{};
+    samp.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
+    samp.AddressU = samp.AddressV = samp.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    samp.MaxAnisotropy = 1;
+    samp.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
+    samp.MaxLOD = D3D12_FLOAT32_MAX;
+    samp.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+    D3D12_ROOT_SIGNATURE_DESC rsDesc{ 1, &rp, 1, &samp, D3D12_ROOT_SIGNATURE_FLAG_NONE };
+    SC_EXPECT(SUCCEEDED(D3D12SerializeRootSignature(&rsDesc, D3D_ROOT_SIGNATURE_VERSION_1, &rsBlob, &errBlob)));
+    ComPtr<ID3D12RootSignature> rootSig;
+    SC_EXPECT(SUCCEEDED(deviceX->CreateRootSignature(0, rsBlob->GetBufferPointer(), rsBlob->GetBufferSize(), IID_PPV_ARGS(&rootSig))));
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc{};
+    psoDesc.pRootSignature = rootSig.Get();
+    psoDesc.VS = { vsBlob->GetBufferPointer(), vsBlob->GetBufferSize() };
+    psoDesc.PS = { psBlob->GetBufferPointer(), psBlob->GetBufferSize() };
+    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    psoDesc.NumRenderTargets = 1;
+    psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+    psoDesc.SampleDesc.Count = 1;
+    psoDesc.SampleMask = UINT_MAX;
+    psoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
+    psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+    psoDesc.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+    ComPtr<ID3D12PipelineState> pso;
+    SC_EXPECT(SUCCEEDED(deviceX->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pso))));
+
+    D3D12_HEAP_PROPERTIES upHeap{ D3D12_HEAP_TYPE_UPLOAD };
+    D3D12_HEAP_PROPERTIES defHeap{ D3D12_HEAP_TYPE_DEFAULT };
+    D3D12_HEAP_PROPERTIES rbHeap{ D3D12_HEAP_TYPE_READBACK };
+
+    D3D12_RESOURCE_DESC bc1Desc{};
+    bc1Desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    bc1Desc.Width = kSize;
+    bc1Desc.Height = kSize;
+    bc1Desc.DepthOrArraySize = 1;
+    bc1Desc.MipLevels = 1;
+    bc1Desc.Format = DXGI_FORMAT_BC1_UNORM;
+    bc1Desc.SampleDesc.Count = 1;
+
+    D3D12_RESOURCE_DESC rtDesc = bc1Desc;
+    rtDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    rtDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+
+    auto mkBuf = [](UINT64 sz) {
+        D3D12_RESOURCE_DESC d{};
+        d.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+        d.Width = sz;
+        d.Height = 1;
+        d.DepthOrArraySize = 1;
+        d.MipLevels = 1;
+        d.SampleDesc.Count = 1;
+        d.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        return d;
+    };
+
+    constexpr UINT kRtPitch = D3D12_TEXTURE_DATA_PITCH_ALIGNMENT;
+    constexpr UINT kRbBytes = kRtPitch * kSize;
+    D3D12_RESOURCE_DESC upDesc = mkBuf(detiledUpload.size());
+    D3D12_RESOURCE_DESC rbDesc = mkBuf(kRbBytes);
+
+    ComPtr<ID3D12Resource> bc1Tex, upBuf, rtTex, rbBuf;
+    SC_EXPECT(SUCCEEDED(deviceX->CreateCommittedResource(&defHeap, D3D12_HEAP_FLAG_NONE, &bc1Desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&bc1Tex))));
+    SC_EXPECT(SUCCEEDED(deviceX->CreateCommittedResource(&upHeap,  D3D12_HEAP_FLAG_NONE, &upDesc,  D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&upBuf))));
+    SC_EXPECT(SUCCEEDED(deviceX->CreateCommittedResource(&defHeap, D3D12_HEAP_FLAG_NONE, &rtDesc,  D3D12_RESOURCE_STATE_RENDER_TARGET, nullptr, IID_PPV_ARGS(&rtTex))));
+    SC_EXPECT(SUCCEEDED(deviceX->CreateCommittedResource(&rbHeap,  D3D12_HEAP_FLAG_NONE, &rbDesc,  D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&rbBuf))));
+
+    D3D12_RANGE noRead{ 0, 0 };
+    void* mapped = nullptr;
+    SC_EXPECT(SUCCEEDED(upBuf->Map(0, &noRead, &mapped)));
+    std::memcpy(mapped, detiledUpload.data(), detiledUpload.size());
+    upBuf->Unmap(0, nullptr);
+
+    D3D12_DESCRIPTOR_HEAP_DESC srvHd{ D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 1, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, 0 };
+    D3D12_DESCRIPTOR_HEAP_DESC rtvHd{ D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 1, D3D12_DESCRIPTOR_HEAP_FLAG_NONE, 0 };
+    ComPtr<ID3D12DescriptorHeap> srvHeap, rtvHeap;
+    SC_EXPECT(SUCCEEDED(deviceX->CreateDescriptorHeap(&srvHd, IID_PPV_ARGS(&srvHeap))));
+    SC_EXPECT(SUCCEEDED(deviceX->CreateDescriptorHeap(&rtvHd, IID_PPV_ARGS(&rtvHeap))));
+
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srvDesc.Format = DXGI_FORMAT_BC1_UNORM;
+    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    srvDesc.Texture2D.MipLevels = 1;
+    deviceX->CreateShaderResourceView(bc1Tex.Get(), &srvDesc, srvHeap->GetCPUDescriptorHandleForHeapStart());
+    D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = rtvHeap->GetCPUDescriptorHandleForHeapStart();
+    deviceX->CreateRenderTargetView(rtTex.Get(), nullptr, rtvHandle);
+
+    ComPtr<ID3D12CommandAllocator> alloc;
+    ComPtr<ID3D12GraphicsCommandList> cmdList;
+    ComPtr<ID3D12Fence> fence;
+    SC_EXPECT(SUCCEEDED(deviceX->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&alloc))));
+    SC_EXPECT(SUCCEEDED(deviceX->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, alloc.Get(), pso.Get(), IID_PPV_ARGS(&cmdList))));
+    SC_EXPECT(SUCCEEDED(deviceX->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence))));
+
+    D3D12_TEXTURE_COPY_LOCATION dstTex{};
+    dstTex.pResource = bc1Tex.Get();
+    dstTex.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    dstTex.SubresourceIndex = 0;
+
+    D3D12_TEXTURE_COPY_LOCATION srcBuf{};
+    srcBuf.pResource = upBuf.Get();
+    srcBuf.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    srcBuf.PlacedFootprint.Footprint = { DXGI_FORMAT_BC1_UNORM, kSize, kSize, 1, linearPitch };
+    cmdList->CopyTextureRegion(&dstTex, 0, 0, 0, &srcBuf, nullptr);
+
+    D3D12_RESOURCE_BARRIER b1{};
+    b1.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    b1.Transition = { bc1Tex.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE };
+    cmdList->ResourceBarrier(1, &b1);
+
+    D3D12_VIEWPORT vp{ 0.0f, 0.0f, static_cast<float>(kSize), static_cast<float>(kSize), 0.0f, 1.0f };
+    D3D12_RECT sc{ 0, 0, static_cast<LONG>(kSize), static_cast<LONG>(kSize) };
+    ID3D12DescriptorHeap* heaps[] = { srvHeap.Get() };
+    cmdList->SetDescriptorHeaps(1, heaps);
+    cmdList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+    cmdList->RSSetViewports(1, &vp);
+    cmdList->RSSetScissorRects(1, &sc);
+    cmdList->SetGraphicsRootSignature(rootSig.Get());
+    cmdList->SetGraphicsRootDescriptorTable(0, srvHeap->GetGPUDescriptorHandleForHeapStart());
+    cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    cmdList->DrawInstanced(3, 1, 0, 0);
+
+    D3D12_RESOURCE_BARRIER b2{};
+    b2.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    b2.Transition = { rtTex.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_SOURCE };
+    cmdList->ResourceBarrier(1, &b2);
+
+    D3D12_TEXTURE_COPY_LOCATION rtSrc{};
+    rtSrc.pResource = rtTex.Get();
+    rtSrc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    rtSrc.SubresourceIndex = 0;
+
+    D3D12_TEXTURE_COPY_LOCATION rbDst{};
+    rbDst.pResource = rbBuf.Get();
+    rbDst.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    rbDst.PlacedFootprint.Footprint = { DXGI_FORMAT_R8G8B8A8_UNORM, kSize, kSize, 1, kRtPitch };
+    cmdList->CopyTextureRegion(&rbDst, 0, 0, 0, &rtSrc, nullptr);
+    SC_EXPECT(SUCCEEDED(cmdList->Close()));
+
+    ID3D12CommandList* lists[] = { cmdList.Get() };
+    cmdQueue->ExecuteCommandLists(1, lists);
+    SC_EXPECT(SUCCEEDED(cmdQueue->Signal(fence.Get(), 1)));
+
+    HANDLE evt = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    SC_EXPECT(evt != nullptr);
+    if (fence->GetCompletedValue() < 1) {
+        fence->SetEventOnCompletion(1, evt);
+        WaitForSingleObject(evt, INFINITE);
+    }
+    CloseHandle(evt);
+
+    D3D12_RANGE rr{ 0, kRbBytes };
+    SC_EXPECT(SUCCEEDED(rbBuf->Map(0, &rr, &mapped)));
+    const auto* px = static_cast<const uint8_t*>(mapped) + (8u * kRtPitch) + (8u * 4u);
+    const bool ok = (px[0] == 255) && (std::abs(static_cast<int>(px[1]) - 130) <= 2) && (px[2] == 0) && (px[3] == 255);
+    rbBuf->Unmap(0, &noRead);
+    SC_EXPECT(ok);
+    return true;
+}
+
 } // namespace
 
 int main() {
@@ -1925,6 +2216,7 @@ int main() {
     RunTest("D3D12AsyncComputeCrossQueueSync", TestD3D12AsyncComputeCrossQueueSync);
     RunTest("Rdna2ComputeIsaExecution", TestRdna2ComputeIsaExecution);
     RunTest("Rdna2VertexAndPixelPipelineWithCbv", TestRdna2VertexAndPixelPipelineWithCbv);
+    RunTest("XgXs64KbsAndBcnBlockSwizzle",       TestXgXs64KbsAndBcnBlockSwizzle);
 
     XGameRuntimeUninitialize();
 
