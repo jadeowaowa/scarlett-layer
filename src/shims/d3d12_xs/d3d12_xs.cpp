@@ -4,6 +4,7 @@
 #include <wrl/client.h>
 #include <atomic>
 #include <cstdio>
+#include <cstring>
 #include <string>
 
 using Microsoft::WRL::ComPtr;
@@ -24,6 +25,20 @@ std::string WideToUtf8(const wchar_t* wstr) {
     std::string out(static_cast<size_t>(len - 1), '\0');
     WideCharToMultiByte(CP_UTF8, 0, wstr, -1, out.data(), len, nullptr, nullptr);
     return out;
+}
+
+const char* ClassifyShaderBytecode(const D3D12_SHADER_BYTECODE& bc) {
+    if (!bc.pShaderBytecode || bc.BytecodeLength < 4) {
+        return "none";
+    }
+    const auto* bytes = static_cast<const uint8_t*>(bc.pShaderBytecode);
+    if (std::memcmp(bytes, "DXBC", 4) == 0) {
+        return "DXBC";
+    }
+    if (std::memcmp(bytes, "DXIL", 4) == 0) {
+        return "DXIL";
+    }
+    return "SCARLETT_ISA_OR_CUSTOM";
 }
 
 LRESULT CALLBACK ScarlettWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -226,7 +241,7 @@ private:
         m_hwnd = CreateWindowExW(
             0,
             kWindowClassName,
-            L"Scarlett Layer - Xbox Series X [d3d12_xs.dll]",
+            L"Scarlett Layer - Xbox Series X [d3d12_xs + gameinput]",
             WS_OVERLAPPEDWINDOW | WS_VISIBLE,
             CW_USEDEFAULT, CW_USEDEFAULT,
             rc.right - rc.left, rc.bottom - rc.top,
@@ -323,7 +338,6 @@ private:
     }
 
     std::atomic<ULONG> m_refs{1};
-    // Member order ensures child GPU resources release before device/factory
     ComPtr<IDXGIFactory6> m_factory;
     ComPtr<ID3D12Device> m_device;
     ComPtr<ID3D12CommandQueue> m_queue;
@@ -433,6 +447,35 @@ public:
         return m_device->CreateFence(InitialValue, Flags, riid, ppFence);
     }
 
+    HRESULT STDMETHODCALLTYPE CreateRootSignature(
+        UINT nodeMask,
+        const void* pBlobWithRootSignature,
+        SIZE_T blobLengthInBytes,
+        REFIID riid,
+        void** ppvRootSignature) override {
+        char buf[96];
+        std::snprintf(buf, sizeof(buf), "-> creating root signature (%zu bytes)", blobLengthInBytes);
+        sc::log::Write(sc::log::Level::Info, "d3d12_xs", "CreateRootSignature", buf);
+        return m_device->CreateRootSignature(
+            nodeMask, pBlobWithRootSignature, blobLengthInBytes, riid, ppvRootSignature);
+    }
+
+    HRESULT STDMETHODCALLTYPE CreateGraphicsPipelineState(
+        const D3D12_GRAPHICS_PIPELINE_STATE_DESC* pDesc,
+        REFIID riid,
+        void** ppPipelineState) override {
+        if (!pDesc) {
+            return E_INVALIDARG;
+        }
+        // Future RDNA2-to-DXIL shader translation pipeline plugs in right here
+        char buf[160];
+        std::snprintf(buf, sizeof(buf), "-> PSO VS=%s (%zu B), PS=%s (%zu B)",
+                      ClassifyShaderBytecode(pDesc->VS), pDesc->VS.BytecodeLength,
+                      ClassifyShaderBytecode(pDesc->PS), pDesc->PS.BytecodeLength);
+        sc::log::Write(sc::log::Level::Info, "d3d12_xs", "CreateGraphicsPipelineState", buf);
+        return m_device->CreateGraphicsPipelineState(pDesc, riid, ppPipelineState);
+    }
+
     HRESULT STDMETHODCALLTYPE SetFrameIntervalX(
         IDXGIOutput* /*pOutput*/, uint32_t PeriodInMicroseconds,
         uint32_t /*MaxLatency*/, uint32_t /*Flags*/) override {
@@ -539,6 +582,14 @@ HRESULT WINAPI D3D12XboxCreateDevice(
     hr = wrapper->QueryInterface(riid, ppDevice);
     wrapper->Release();
     return hr;
+}
+
+HRESULT WINAPI ScarlettSerializeRootSignature(
+    const D3D12_ROOT_SIGNATURE_DESC* pRootSignature,
+    D3D_ROOT_SIGNATURE_VERSION Version,
+    ID3DBlob** ppBlob,
+    ID3DBlob** ppErrorBlob) {
+    return ::D3D12SerializeRootSignature(pRootSignature, Version, ppBlob, ppErrorBlob);
 }
 
 } // extern "C"

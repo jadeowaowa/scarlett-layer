@@ -98,6 +98,16 @@ struct ID3D12DeviceX : public IUnknown {
         D3D12_FENCE_FLAGS Flags,
         REFIID riid,
         void** ppFence) = 0;
+    virtual HRESULT STDMETHODCALLTYPE CreateRootSignature(
+        UINT nodeMask,
+        const void* pBlobWithRootSignature,
+        SIZE_T blobLengthInBytes,
+        REFIID riid,
+        void** ppvRootSignature) = 0;
+    virtual HRESULT STDMETHODCALLTYPE CreateGraphicsPipelineState(
+        const D3D12_GRAPHICS_PIPELINE_STATE_DESC* pDesc,
+        REFIID riid,
+        void** ppPipelineState) = 0;
     virtual HRESULT STDMETHODCALLTYPE SetFrameIntervalX(
         IDXGIOutput* pOutput,
         uint32_t PeriodInMicroseconds,

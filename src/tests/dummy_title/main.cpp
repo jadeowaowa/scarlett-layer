@@ -1,11 +1,15 @@
 #include "shims/xgameruntime/gdk_types.hpp"
 #include "shims/d3d12_xs/d3d12_xs.hpp"
+#include "shims/gameinput/gameinput.hpp"
 
+#include <d3dcompiler.h>
 #include <wrl/client.h>
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstdint>
+#include <cstring>
 
 using Microsoft::WRL::ComPtr;
 
@@ -25,12 +29,17 @@ extern "C" {
     __declspec(dllimport) void    WINAPI XUserCloseHandle(XUserHandle user);
 }
 
+namespace {
+
+constexpr UINT kWidth = 1280;
+constexpr UINT kHeight = 720;
+
 struct SignInContext {
     std::atomic<bool> done{false};
     XUserHandle user{nullptr};
 };
 
-static void CALLBACK OnUserAdded(XAsyncBlock* async) {
+void CALLBACK OnUserAdded(XAsyncBlock* async) {
     auto* ctx = static_cast<SignInContext*>(async->context);
     HRESULT hr = XUserAddResult(async, &ctx->user);
     if (SUCCEEDED(hr) && ctx->user) {
@@ -44,6 +53,125 @@ static void CALLBACK OnUserAdded(XAsyncBlock* async) {
     ctx->done.store(true, std::memory_order_release);
 }
 
+struct Vertex {
+    float x, y;
+    float r, g, b;
+};
+
+struct DrawConstants {
+    float offsetX;
+    float offsetY;
+    float angle;
+    float pulse;
+    float aspect;
+    float scale;
+    float turbo;
+    float pad;
+};
+static_assert(sizeof(DrawConstants) == 32, "DrawConstants must be 8x 32-bit values");
+
+const char* kShaderSource = R"(
+cbuffer DrawParams : register(b0) {
+    float2 uOffset;
+    float  uAngle;
+    float  uPulse;
+    float  uAspect;
+    float  uScale;
+    float  uTurbo;
+    float  uPad;
+};
+
+struct VSIn {
+    float2 pos : POSITION;
+    float3 col : COLOR;
+};
+
+struct PSIn {
+    float4 pos : SV_POSITION;
+    float3 col : COLOR;
+};
+
+PSIn VSMain(VSIn input) {
+    PSIn o;
+    float s = sin(uAngle);
+    float c = cos(uAngle);
+    float2 rot = float2(
+        input.pos.x * c - input.pos.y * s,
+        input.pos.x * s + input.pos.y * c
+    );
+    rot *= uScale;
+    rot.x /= uAspect;
+    o.pos = float4(rot + uOffset, 0.0f, 1.0f);
+    o.col = input.col;
+    return o;
+}
+
+float4 PSMain(PSIn input) : SV_TARGET {
+    float3 turboTint = float3(0.20f, 0.95f, 1.00f);
+    float3 baseCol = lerp(input.col, turboTint, uTurbo * 0.45f);
+    float3 lit = saturate(baseCol * (0.85f + 0.30f * uPulse));
+    return float4(lit, 1.0f);
+}
+)";
+
+// 8-triangle (24-vertex) 4-pointed Scarlett star crest with bright core & neon tips
+const Vertex kStarVertices[] = {
+    // North-East blade (2 triangles)
+    {  0.00f,  0.00f,  0.92f, 1.00f, 0.95f },
+    {  0.00f,  0.55f,  0.08f, 0.92f, 0.32f },
+    {  0.14f,  0.14f,  0.04f, 0.55f, 0.25f },
+
+    {  0.00f,  0.00f,  0.92f, 1.00f, 0.95f },
+    {  0.14f,  0.14f,  0.04f, 0.55f, 0.25f },
+    {  0.55f,  0.00f,  0.06f, 0.85f, 0.72f },
+
+    // South-East blade
+    {  0.00f,  0.00f,  0.92f, 1.00f, 0.95f },
+    {  0.55f,  0.00f,  0.06f, 0.85f, 0.72f },
+    {  0.14f, -0.14f,  0.04f, 0.45f, 0.48f },
+
+    {  0.00f,  0.00f,  0.92f, 1.00f, 0.95f },
+    {  0.14f, -0.14f,  0.04f, 0.45f, 0.48f },
+    {  0.00f, -0.55f,  0.15f, 0.95f, 0.38f },
+
+    // South-West blade
+    {  0.00f,  0.00f,  0.92f, 1.00f, 0.95f },
+    {  0.00f, -0.55f,  0.15f, 0.95f, 0.38f },
+    { -0.14f, -0.14f,  0.04f, 0.55f, 0.25f },
+
+    {  0.00f,  0.00f,  0.92f, 1.00f, 0.95f },
+    { -0.14f, -0.14f,  0.04f, 0.55f, 0.25f },
+    { -0.55f,  0.00f,  0.06f, 0.85f, 0.72f },
+
+    // North-West blade
+    {  0.00f,  0.00f,  0.92f, 1.00f, 0.95f },
+    { -0.55f,  0.00f,  0.06f, 0.85f, 0.72f },
+    { -0.14f,  0.14f,  0.04f, 0.45f, 0.48f },
+
+    {  0.00f,  0.00f,  0.92f, 1.00f, 0.95f },
+    { -0.14f,  0.14f,  0.04f, 0.45f, 0.48f },
+    {  0.00f,  0.55f,  0.08f, 0.92f, 0.32f },
+};
+
+bool CompileShader(const char* entry, const char* target, ComPtr<ID3DBlob>& outBlob) {
+    ComPtr<ID3DBlob> errors;
+    HRESULT hr = D3DCompile(
+        kShaderSource, std::strlen(kShaderSource),
+        "scarlett_star.hlsl", nullptr, nullptr,
+        entry, target, D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION,
+        0, &outBlob, &errors);
+    if (FAILED(hr)) {
+        if (errors) {
+            std::printf("[TITLE] Shader compile error (%s): %s\n",
+                        entry, static_cast<const char*>(errors->GetBufferPointer()));
+        }
+        return false;
+    }
+    return true;
+}
+
+} // namespace
+
 int main() {
     std::printf("[TITLE][T:%05lu] Booting synthetic Series X title...\n", GetCurrentThreadId());
 
@@ -54,7 +182,7 @@ int main() {
     auto deviceType = XSystemGetDeviceType();
     std::printf("[TITLE] Device type: 0x%02X\n", static_cast<uint32_t>(deviceType));
 
-    // 1. Async profile sign-in via xgameruntime.dll
+    // 1. Async offline profile sign-in via xgameruntime.dll
     XTaskQueueHandle queue = nullptr;
     if (FAILED(XTaskQueueCreate(XTaskQueueDispatchMode::ThreadPool,
                                 XTaskQueueDispatchMode::Manual, &queue))) {
@@ -73,7 +201,14 @@ int main() {
         }
     }
 
-    // 2. Scarlett D3D12.x graphics bootstrap via d3d12_xs.dll
+    // 2. Initialize GameInput via auto-redirected gameinput.dll
+    ComPtr<IGameInput> gameInput;
+    if (FAILED(GameInputCreate(&gameInput))) {
+        std::printf("[TITLE] GameInputCreate failed!\n");
+        return 1;
+    }
+
+    // 3. Scarlett D3D12.x graphics bootstrap via d3d12_xs.dll
     D3D12XBOX_CREATE_DEVICE_PARAMETERS params{};
     params.Version = 1;
 
@@ -93,14 +228,108 @@ int main() {
         return 1;
     }
 
-    // Console-owned render target texture (no DXGI swapchain visible to the title!)
-    D3D12_HEAP_PROPERTIES heapProps{};
-    heapProps.Type = D3D12_HEAP_TYPE_DEFAULT;
+    // Build Root Signature (single 32-byte inline root constants slot at b0)
+    D3D12_ROOT_PARAMETER rootParam{};
+    rootParam.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+    rootParam.Constants.ShaderRegister = 0;
+    rootParam.Constants.RegisterSpace = 0;
+    rootParam.Constants.Num32BitValues = sizeof(DrawConstants) / sizeof(uint32_t);
+    rootParam.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+    D3D12_ROOT_SIGNATURE_DESC rsDesc{};
+    rsDesc.NumParameters = 1;
+    rsDesc.pParameters = &rootParam;
+    rsDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+
+    ComPtr<ID3DBlob> rsBlob;
+    ComPtr<ID3DBlob> rsErr;
+    if (FAILED(D3D12SerializeRootSignature(&rsDesc, D3D_ROOT_SIGNATURE_VERSION_1, &rsBlob, &rsErr))) {
+        return 1;
+    }
+
+    ComPtr<ID3D12RootSignature> rootSig;
+    if (FAILED(deviceX->CreateRootSignature(0, rsBlob->GetBufferPointer(), rsBlob->GetBufferSize(),
+                                            IID_PPV_ARGS(&rootSig)))) {
+        return 1;
+    }
+
+    // Compile HLSL shaders & create Graphics PSO through d3d12_xs.dll
+    ComPtr<ID3DBlob> vsBlob;
+    ComPtr<ID3DBlob> psBlob;
+    if (!CompileShader("VSMain", "vs_5_0", vsBlob) || !CompileShader("PSMain", "ps_5_0", psBlob)) {
+        return 1;
+    }
+
+    D3D12_INPUT_ELEMENT_DESC inputLayout[] = {
+        { "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT,    0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+        { "COLOR",    0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 8, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
+    };
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc{};
+    psoDesc.pRootSignature = rootSig.Get();
+    psoDesc.VS = { vsBlob->GetBufferPointer(), vsBlob->GetBufferSize() };
+    psoDesc.PS = { psBlob->GetBufferPointer(), psBlob->GetBufferSize() };
+    psoDesc.InputLayout = { inputLayout, static_cast<UINT>(_countof(inputLayout)) };
+    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    psoDesc.NumRenderTargets = 1;
+    psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+    psoDesc.SampleDesc.Count = 1;
+    psoDesc.SampleMask = UINT_MAX;
+
+    psoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
+    psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+    psoDesc.RasterizerState.DepthClipEnable = TRUE;
+
+    psoDesc.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+
+    ComPtr<ID3D12PipelineState> pso;
+    if (FAILED(deviceX->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pso)))) {
+        std::printf("[TITLE] CreateGraphicsPipelineState failed!\n");
+        return 1;
+    }
+
+    // Upload Vertex Buffer
+    D3D12_HEAP_PROPERTIES uploadHeap{};
+    uploadHeap.Type = D3D12_HEAP_TYPE_UPLOAD;
+
+    D3D12_RESOURCE_DESC vbDesc{};
+    vbDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    vbDesc.Width = sizeof(kStarVertices);
+    vbDesc.Height = 1;
+    vbDesc.DepthOrArraySize = 1;
+    vbDesc.MipLevels = 1;
+    vbDesc.Format = DXGI_FORMAT_UNKNOWN;
+    vbDesc.SampleDesc.Count = 1;
+    vbDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+    ComPtr<ID3D12Resource> vertexBuffer;
+    if (FAILED(deviceX->CreateCommittedResource(
+            &uploadHeap, D3D12_HEAP_FLAG_NONE, &vbDesc,
+            D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&vertexBuffer)))) {
+        return 1;
+    }
+
+    void* mappedVb = nullptr;
+    D3D12_RANGE readRange{ 0, 0 };
+    if (FAILED(vertexBuffer->Map(0, &readRange, &mappedVb))) {
+        return 1;
+    }
+    std::memcpy(mappedVb, kStarVertices, sizeof(kStarVertices));
+    vertexBuffer->Unmap(0, nullptr);
+
+    D3D12_VERTEX_BUFFER_VIEW vbView{};
+    vbView.BufferLocation = vertexBuffer->GetGPUVirtualAddress();
+    vbView.StrideInBytes = sizeof(Vertex);
+    vbView.SizeInBytes = sizeof(kStarVertices);
+
+    // Console-owned render target texture
+    D3D12_HEAP_PROPERTIES defaultHeap{};
+    defaultHeap.Type = D3D12_HEAP_TYPE_DEFAULT;
 
     D3D12_RESOURCE_DESC rtDesc{};
     rtDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-    rtDesc.Width = 1280;
-    rtDesc.Height = 720;
+    rtDesc.Width = kWidth;
+    rtDesc.Height = kHeight;
     rtDesc.DepthOrArraySize = 1;
     rtDesc.MipLevels = 1;
     rtDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -109,7 +338,7 @@ int main() {
 
     ComPtr<ID3D12Resource> renderTarget;
     if (FAILED(deviceX->CreateCommittedResource(
-            &heapProps, D3D12_HEAP_FLAG_NONE, &rtDesc,
+            &defaultHeap, D3D12_HEAP_FLAG_NONE, &rtDesc,
             D3D12_RESOURCE_STATE_PRESENT, nullptr, IID_PPV_ARGS(&renderTarget)))) {
         return 1;
     }
@@ -138,15 +367,79 @@ int main() {
     HANDLE fenceEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     UINT64 fenceVal = 0;
 
-    std::printf("[TITLE] Entering PresentX render loop -- press ESC or close the window to exit.\n");
+    D3D12_VIEWPORT viewport{ 0.0f, 0.0f, static_cast<float>(kWidth), static_cast<float>(kHeight), 0.0f, 1.0f };
+    D3D12_RECT scissor{ 0, 0, static_cast<LONG>(kWidth), static_cast<LONG>(kHeight) };
 
+    std::printf("[TITLE] Controls: WASD / Arrows / Left Stick = Move | Space / A = Turbo Spin | R / B = Reset | ESC = Exit\n");
+
+    float posX = 0.0f;
+    float posY = 0.0f;
+    float angle = 0.0f;
+    float elapsed = 0.0f;
+    uint64_t lastTs = gameInput->GetCurrentTimestamp();
     uint64_t frame = 0;
+
     while (true) {
+        uint64_t nowTs = gameInput->GetCurrentTimestamp();
+        float dt = static_cast<float>(nowTs - lastTs) / 1000000.0f;
+        dt = std::clamp(dt, 0.0001f, 0.05f);
+        lastTs = nowTs;
+        elapsed += dt;
+
+        // Poll GameInput (gamepad + keyboard)
+        float moveX = 0.0f;
+        float moveY = 0.0f;
+        bool turbo = false;
+        bool reset = false;
+
+        ComPtr<IGameInputReading> gpReading;
+        if (SUCCEEDED(gameInput->GetCurrentReading(GameInputKindGamepad, nullptr, &gpReading))) {
+            GameInputGamepadState gp{};
+            if (gpReading->GetGamepadState(&gp)) {
+                moveX += gp.leftThumbstickX;
+                moveY += gp.leftThumbstickY;
+                if ((gp.buttons & GameInputGamepadDPadLeft) != 0)  moveX -= 1.0f;
+                if ((gp.buttons & GameInputGamepadDPadRight) != 0) moveX += 1.0f;
+                if ((gp.buttons & GameInputGamepadDPadUp) != 0)    moveY += 1.0f;
+                if ((gp.buttons & GameInputGamepadDPadDown) != 0)  moveY -= 1.0f;
+                if ((gp.buttons & GameInputGamepadA) != 0 || gp.rightTrigger > 0.25f) turbo = true;
+                if ((gp.buttons & GameInputGamepadB) != 0) reset = true;
+            }
+        }
+
+        ComPtr<IGameInputReading> kbReading;
+        if (SUCCEEDED(gameInput->GetCurrentReading(GameInputKindKeyboard, nullptr, &kbReading))) {
+            GameInputKeyState keys[16]{};
+            uint32_t count = kbReading->GetKeyState(16, keys);
+            for (uint32_t i = 0; i < count; ++i) {
+                switch (keys[i].virtualKey) {
+                    case 'W': case VK_UP:    moveY += 1.0f; break;
+                    case 'S': case VK_DOWN:  moveY -= 1.0f; break;
+                    case 'A': case VK_LEFT:  moveX -= 1.0f; break;
+                    case 'D': case VK_RIGHT: moveX += 1.0f; break;
+                    case VK_SPACE: case VK_SHIFT: turbo = true; break;
+                    case 'R': reset = true; break;
+                    default: break;
+                }
+            }
+        }
+
+        if (reset) {
+            posX = 0.0f;
+            posY = 0.0f;
+        } else {
+            const float speed = turbo ? 1.85f : 1.15f;
+            posX = std::clamp(posX + std::clamp(moveX, -1.0f, 1.0f) * speed * dt, -0.80f, 0.80f);
+            posY = std::clamp(posY + std::clamp(moveY, -1.0f, 1.0f) * speed * dt, -0.75f, 0.75f);
+        }
+
+        angle += (turbo ? 4.8f : 1.1f) * dt;
+
         D3D12XBOX_FRAME_PIPELINE_TOKEN token = D3D12XBOX_FRAME_PIPELINE_TOKEN_NULL;
         deviceX->WaitFrameEventX(D3D12XBOX_FRAME_EVENT_ORIGIN, INFINITE, nullptr, &token);
 
         cmdAlloc->Reset();
-        cmdList->Reset(cmdAlloc.Get(), nullptr);
+        cmdList->Reset(cmdAlloc.Get(), pso.Get());
 
         D3D12_RESOURCE_BARRIER toRT{};
         toRT.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
@@ -156,15 +449,29 @@ int main() {
         toRT.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
         cmdList->ResourceBarrier(1, &toRT);
 
-        // Smooth pulsing Xbox-green / teal color cycle
-        float t = static_cast<float>(frame) * 0.03f;
-        float clearColor[4] = {
-            0.05f,
-            0.40f + 0.35f * std::sinf(t),
-            0.15f + 0.15f * std::cosf(t * 0.7f),
-            1.0f
-        };
-        cmdList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+        // Deep charcoal-emerald backdrop so the neon shader geometry pops
+        const float bgColor[4] = { 0.04f, 0.07f, 0.09f, 1.0f };
+        cmdList->ClearRenderTargetView(rtvHandle, bgColor, 0, nullptr);
+
+        cmdList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+        cmdList->RSSetViewports(1, &viewport);
+        cmdList->RSSetScissorRects(1, &scissor);
+
+        cmdList->SetGraphicsRootSignature(rootSig.Get());
+        DrawConstants dc{};
+        dc.offsetX = posX;
+        dc.offsetY = posY;
+        dc.angle   = angle;
+        dc.pulse   = 0.5f + 0.5f * std::sinf(elapsed * (turbo ? 12.0f : 3.0f));
+        dc.aspect  = static_cast<float>(kWidth) / static_cast<float>(kHeight);
+        dc.scale   = turbo ? 0.62f : 0.50f;
+        dc.turbo   = turbo ? 1.0f : 0.0f;
+        dc.pad     = 0.0f;
+
+        cmdList->SetGraphicsRoot32BitConstants(0, sizeof(DrawConstants) / sizeof(uint32_t), &dc, 0);
+        cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        cmdList->IASetVertexBuffers(0, 1, &vbView);
+        cmdList->DrawInstanced(static_cast<UINT>(_countof(kStarVertices)), 1, 0, 0);
 
         D3D12_RESOURCE_BARRIER toPresent{};
         toPresent.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
@@ -209,8 +516,12 @@ int main() {
     cmdAlloc.Reset();
     rtvHeap.Reset();
     renderTarget.Reset();
+    vertexBuffer.Reset();
+    pso.Reset();
+    rootSig.Reset();
     cmdQueue.Reset();
     deviceX.Reset();
+    gameInput.Reset();
 
     if (ctx.user) {
         XUserCloseHandle(ctx.user);

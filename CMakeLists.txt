@@ -30,6 +30,7 @@ endif()
 
 add_library(sc_common INTERFACE)
 target_include_directories(sc_common INTERFACE "${CMAKE_SOURCE_DIR}/src")
+target_compile_definitions(sc_common INTERFACE NOMINMAX WIN32_LEAN_AND_MEAN)
 
 # Shim #1: xgameruntime.dll -> build/bin/shims/
 add_library(xgameruntime SHARED
@@ -48,11 +49,19 @@ add_library(d3d12_xs SHARED
 target_link_libraries(d3d12_xs PRIVATE sc_common d3d12 dxgi user32)
 sc_set_runtime_dir(d3d12_xs "${SC_BIN_DIR}/shims")
 
-# Isolated synthetic title -> build/bin/titles/dummy_title/ (ZERO shims beside it!)
+# Shim #3: gameinput.dll -> build/bin/shims/ (auto-discovered by loader.exe!)
+add_library(gameinput SHARED
+    src/shims/gameinput/gameinput.cpp
+    src/shims/gameinput/gameinput.def
+)
+target_link_libraries(gameinput PRIVATE sc_common user32 xinput)
+sc_set_runtime_dir(gameinput "${SC_BIN_DIR}/shims")
+
+# Isolated synthetic title -> build/bin/titles/dummy_title/
 add_executable(dummy_title
     src/tests/dummy_title/main.cpp
 )
-target_link_libraries(dummy_title PRIVATE sc_common xgameruntime d3d12_xs)
+target_link_libraries(dummy_title PRIVATE sc_common xgameruntime d3d12_xs gameinput d3dcompiler)
 sc_set_runtime_dir(dummy_title "${SC_BIN_DIR}/titles/dummy_title")
 
 # Host loader -> build/bin/
@@ -61,5 +70,4 @@ add_executable(loader
     src/loader/pe_patcher.cpp
 )
 target_link_libraries(loader PRIVATE sc_common)
-sc_set_runtime_dir(loader "${SC_BIN_DIR}") 
-target_compile_definitions(sc_common INTERFACE NOMINMAX WIN32_LEAN_AND_MEAN) 
+sc_set_runtime_dir(loader "${SC_BIN_DIR}")
