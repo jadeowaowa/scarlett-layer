@@ -1,5 +1,6 @@
 #pragma once
 
+#include "rdna2_isa.hpp"
 #include "shader_inspector.hpp"
 
 #include <cstdint>
@@ -9,6 +10,8 @@
 #include <string>
 #include <vector>
 #include <d3d12.h>
+#include <d3dcompiler.h>
+#include <wrl/client.h>
 
 namespace sc::d3d12 {
 
@@ -108,13 +111,12 @@ inline std::vector<uint8_t> BuildScxsContainer(
 }
 
 struct TranslatedShader {
-    std::vector<uint8_t> bytecode;       // Non-empty when translator produced new host bytecode
+    std::vector<uint8_t> bytecode;
     std::string          translatorName;
     std::string          sourceTag;
     bool                 wasTranslated{false};
 };
 
-// Pluggable shader translation boundary (future RDNA2 -> DXIL compiler implements this interface)
 class IShaderTranslator {
 public:
     virtual ~IShaderTranslator() = default;
@@ -124,6 +126,89 @@ public:
         const D3D12_SHADER_BYTECODE& input,
         TranslatedShader& out,
         std::string& outError) const = 0;
+};
+
+// Proof-of-concept binary RDNA2 ISA -> HLSL -> DXBC translator plugin (Pixel Shader subset)
+class Rdna2IsaTranslator final : public IShaderTranslator {
+public:
+    const char* Name() const override { return "Rdna2IsaTranslator"; }
+
+    bool CanTranslate(const D3D12_SHADER_BYTECODE& input) const override {
+        if (!IsScxsContainer(input)) {
+            return false;
+        }
+        ScarlettShaderContainerHeader hdr{};
+        std::memcpy(&hdr, input.pShaderBytecode, sizeof(hdr));
+        return hdr.containerVersion == 1 &&
+               static_cast<ScxsPayloadFormat>(hdr.payloadFormat) == ScxsPayloadFormat::Rdna2Isa &&
+               static_cast<ScxsShaderStage>(hdr.stage) == ScxsShaderStage::Pixel;
+    }
+
+    HRESULT Translate(
+        const D3D12_SHADER_BYTECODE& input,
+        TranslatedShader& out,
+        std::string& outError) const override {
+        if (!input.pShaderBytecode || input.BytecodeLength < sizeof(ScarlettShaderContainerHeader)) {
+            outError = "SCXS RDNA2 container truncated";
+            return E_INVALIDARG;
+        }
+
+        const auto* raw = static_cast<const uint8_t*>(input.pShaderBytecode);
+        ScarlettShaderContainerHeader hdr{};
+        std::memcpy(&hdr, raw, sizeof(hdr));
+
+        if (hdr.payloadSize == 0 ||
+            sizeof(hdr) + static_cast<size_t>(hdr.payloadSize) > input.BytecodeLength) {
+            outError = "SCXS RDNA2 payload size out of bounds";
+            return E_INVALIDARG;
+        }
+
+        const uint8_t* payloadPtr = raw + sizeof(hdr);
+        const uint32_t actualCrc = ComputeScxsFnv1a32(payloadPtr, hdr.payloadSize);
+        if (actualCrc != hdr.payloadFnv1a) {
+            char buf[96];
+            std::snprintf(buf, sizeof(buf),
+                          "SCXS RDNA2 checksum mismatch (expected=0x%08X, actual=0x%08X)",
+                          hdr.payloadFnv1a, actualCrc);
+            outError = buf;
+            return E_INVALIDARG;
+        }
+
+        rdna2::DecodedProgram prog{};
+        if (!rdna2::DecodeProgram(payloadPtr, hdr.payloadSize, prog, outError)) {
+            return E_NOTIMPL;
+        }
+
+        std::string liftedHlsl;
+        if (!rdna2::LiftPixelShaderToHlsl(prog, liftedHlsl, outError)) {
+            return E_NOTIMPL;
+        }
+
+        Microsoft::WRL::ComPtr<ID3DBlob> dxbcBlob;
+        Microsoft::WRL::ComPtr<ID3DBlob> compileErr;
+        HRESULT hr = D3DCompile(
+            liftedHlsl.data(), liftedHlsl.size(),
+            "rdna2_lifted_ps.hlsl", nullptr, nullptr,
+            "PSMain", "ps_5_0", D3DCOMPILE_OPTIMIZATION_LEVEL3,
+            0, &dxbcBlob, &compileErr);
+        if (FAILED(hr) || !dxbcBlob) {
+            outError = compileErr
+                ? std::string("RDNA2 lifted HLSL compile failed: ") +
+                  static_cast<const char*>(compileErr->GetBufferPointer())
+                : "RDNA2 lifted HLSL compile failed";
+            return hr;
+        }
+
+        const auto* dxbcBytes = static_cast<const uint8_t*>(dxbcBlob->GetBufferPointer());
+        out.bytecode.assign(dxbcBytes, dxbcBytes + dxbcBlob->GetBufferSize());
+        out.translatorName = Name();
+        out.wasTranslated = true;
+
+        char tag[64];
+        std::snprintf(tag, sizeof(tag), "SCXS(RDNA2-ISA/%zu insts)->HLSL->", prog.insts.size());
+        out.sourceTag = tag;
+        return S_OK;
+    }
 };
 
 class ScxsContainerTranslator final : public IShaderTranslator {
@@ -222,6 +307,7 @@ public:
 class ShaderTranslatorRegistry {
 public:
     ShaderTranslatorRegistry() {
+        Register(std::make_unique<Rdna2IsaTranslator>());
         Register(std::make_unique<ScxsContainerTranslator>());
         Register(std::make_unique<DxbcDxilPassthroughTranslator>());
     }

@@ -21,6 +21,7 @@
 | Sprint 15 | SM 6.x `DXIL` LLVM bitcode inspector & pluggable `IShaderTranslator` (`SCXS` container pipeline) | Done |
 | Sprint 16 | `dstorage_xs.dll` live `SCLZ` CPU decompression & `xaudio2_9.dll` live IMA-ADPCM decode voice bridge | Done |
 | Sprint 17 | `d3d12_xs.dll` Compute PSOs (`CreateComputePipelineState`), UAVs, and live CS 5.0 procedural pass | Done |
+| Sprint 18 | Proof-of-concept RDNA2 ISA binary decoder, HLSL lifter & `Rdna2IsaTranslator` GPU execution | Done |
 
 ## Shim & Export Coverage
 
@@ -30,7 +31,7 @@
 - [x] Multi-module runtime IAT hooks (`LoadLibraryA/W`, `LoadLibraryExA/W`) across main `.exe` and loaded sub-DLLs
 - [x] Virtual console drive mapping (`G:\` game root, `T:\` scratch, `S:\` save temp)
 - [x] Zero-dependency `SCLZ` LZ77 block codec + standard IMA-ADPCM (`0x0011`) audio codec
-- [x] Automated headless CTest suite (`scarlett_tests.exe`, 16 checks)
+- [x] Automated headless CTest suite (`scarlett_tests.exe`, 17 checks)
 
 ### `xgameruntime.dll`
 - [x] `XGameRuntimeInitialize`, `XGameRuntimeUninitialize`, `XSystemGetDeviceType`
@@ -43,7 +44,7 @@
 - [x] `ID3D12DeviceX`: `CreateCommandQueueX`, `CreateCommittedResource`, `GetResourceAllocationInfo`, `CreateHeap`, `CreatePlacedResource`, `CreateRenderTargetView`, `CreateShaderResourceView`, `CreateUnorderedAccessView`, `CreateRootSignature`, `CreateGraphicsPipelineState`, `CreateComputePipelineState`, frame pacing
 - [x] `ID3D12CommandQueueX` (`PresentX` -> DXGI Flip-Discard swapchain)
 - [x] Deep `DXBC` + SM 6.x `DXIL` (`DxilProgramHeader`, LLVM `BC\xC0\xDE`, `PSV0`) container inspector
-- [x] Pluggable `IShaderTranslator` registry & `SCXS` console shader container translator + in-memory translation cache
+- [x] Pluggable `IShaderTranslator` registry: `Rdna2IsaTranslator` (GFX10.3 `SOPP`/`VOP1`/`VOP2`/`VOP3`/`EXP` -> HLSL -> DXBC) + `ScxsContainerTranslator` + translation cache
 - [x] Persistent disk-backed `ID3D12PipelineLibrary` cache for both Graphics (`GFX_*`) and Compute (`CMP_*`) PSOs
 
 ### `gameinput.dll`
@@ -75,6 +76,6 @@
 - [x] `GetConsoleProcessorInfo`, `SetThreadAffinityMaskX` (7-core/14-thread Series X topology + safe host mask clamping)
 
 ## Upcoming Subsystems
-- [ ] Proof-of-concept RDNA2 ISA decoder & `Rdna2IsaTranslator` backend
-- [ ] Async compute command queues (`D3D12_COMMAND_LIST_TYPE_COMPUTE`) & multi-queue GPU fence sync
+- [ ] Async compute command queues (`D3D12_COMMAND_LIST_TYPE_COMPUTE`) & cross-queue GPU fence sync
+- [ ] RDNA2 `64KB_S` swizzling & BCn block-compressed texture support (`xg_xs.dll`)
 - [ ] Next scheduled revision of `docs/ARCHITECTURE_PAPER.md`: Sprint 21
