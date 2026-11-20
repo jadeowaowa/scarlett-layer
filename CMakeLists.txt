@@ -30,7 +30,7 @@ endif()
 
 add_library(sc_common INTERFACE)
 target_include_directories(sc_common INTERFACE "${CMAKE_SOURCE_DIR}/src")
-target_compile_definitions(sc_common INTERFACE NOMINMAX WIN32_LEAN_AND_MEAN)
+target_compile_definitions(sc_common INTERFACE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
 
 # Shim #1: xgameruntime.dll -> build/bin/shims/
 add_library(xgameruntime SHARED
@@ -58,7 +58,7 @@ add_library(gameinput SHARED
 target_link_libraries(gameinput PRIVATE sc_common user32 xinput)
 sc_set_runtime_dir(gameinput "${SC_BIN_DIR}/shims")
 
-# Shim #4: xg_xs.dll -> build/bin/shims/ (auto-discovered by loader.exe!)
+# Shim #4: xg_xs.dll -> build/bin/shims/
 add_library(xg_xs SHARED
     src/shims/xg_xs/xg_xs.cpp
     src/shims/xg_xs/xg_xs.def
@@ -66,11 +66,19 @@ add_library(xg_xs SHARED
 target_link_libraries(xg_xs PRIVATE sc_common)
 sc_set_runtime_dir(xg_xs "${SC_BIN_DIR}/shims")
 
+# Shim #5: dstorage_xs.dll -> build/bin/shims/ (auto-discovered by loader.exe!)
+add_library(dstorage_xs SHARED
+    src/shims/dstorage_xs/dstorage_xs.cpp
+    src/shims/dstorage_xs/dstorage_xs.def
+)
+target_link_libraries(dstorage_xs PRIVATE sc_common)
+sc_set_runtime_dir(dstorage_xs "${SC_BIN_DIR}/shims")
+
 # Isolated synthetic title -> build/bin/titles/dummy_title/
 add_executable(dummy_title
     src/tests/dummy_title/main.cpp
 )
-target_link_libraries(dummy_title PRIVATE sc_common xgameruntime d3d12_xs gameinput xg_xs d3dcompiler)
+target_link_libraries(dummy_title PRIVATE sc_common xgameruntime d3d12_xs gameinput xg_xs dstorage_xs d3dcompiler)
 sc_set_runtime_dir(dummy_title "${SC_BIN_DIR}/titles/dummy_title")
 
 # Host loader -> build/bin/

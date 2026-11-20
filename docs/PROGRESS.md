@@ -11,6 +11,7 @@
 | Sprint 5 | `d3d12_xs.dll` Root Signatures + PSOs + HLSL draw pipeline, `gameinput.dll` shim | Done |
 | Sprint 6 | Shared async runtime + atomic disk-backed `XGameSave` Connected Storage | Done |
 | Sprint 7 | `xg_xs.dll` texture layout/swizzle shim, SRV textured pipeline, `DXBC`/`DXIL` chunk inspector | Done |
+| Sprint 8 | `dstorage_xs.dll` Velocity async asset streaming + pre-swizzled `.scx` texture pipeline | Done |
 
 ## Shim & Export Coverage
 
@@ -41,9 +42,16 @@
 - [x] `XGCreateTexture2DComputer`, `XGComputeTexture2DLayout`
 - [x] `IXGTextureAddressComputer`: `GetResourceLayout`, `CopyIntoSubresource`, `CopyFromSubresource` (linear + 8x8 Morton `XG_TILE_MODE_2D_THIN`)
 
+### `dstorage_xs.dll`
+- [x] `DStorageGetFactory`, `DStorageSetConfiguration`
+- [x] `IDStorageFactoryX`: `CreateQueue`, `OpenFile`, `CreateStatusArray`, `SetDebugFlags`, `SetStagingBufferSize`
+- [x] `IDStorageQueueX`: `EnqueueRequest` (file & memory sources), `EnqueueStatus`, `EnqueueSignal` (`ID3D12Fence`), `Submit`, `RetrieveErrorRecord`, `GetPendingRequestCount`
+- [x] `IDStorageFileX`: `Close`, `GetFileInformation`
+- [x] `IDStorageStatusArrayX`: `IsComplete`, `GetHResult`
+
 ## Upcoming Subsystems
 - [ ] `xmem.dll` (aligned console memory pools + budget telemetry)
 - [ ] `pixevt.dll` (PIX event markers)
-- [ ] `dstorage_xs.dll` (DirectStorage / Velocity async streaming queues)
+- [ ] `loader.exe` runtime `LoadLibrary` / `GetProcAddress` hooks + stub generator
 - [ ] `xaudio2_9.dll` / XMA audio shim
 - [ ] Console RDNA2 / precompiled shader translation pipeline

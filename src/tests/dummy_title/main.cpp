@@ -2,6 +2,7 @@
 #include "shims/d3d12_xs/d3d12_xs.hpp"
 #include "shims/gameinput/gameinput.hpp"
 #include "shims/xg_xs/xg_xs.hpp"
+#include "shims/dstorage_xs/dstorage_xs.hpp"
 
 #include <d3dcompiler.h>
 #include <wrl/client.h>
@@ -11,6 +12,8 @@
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <vector>
 
 using Microsoft::WRL::ComPtr;
@@ -68,6 +71,29 @@ struct StarSaveData {
     uint32_t saveCount;
 };
 constexpr uint32_t kSaveMagic = 0x53434152U;
+
+// Pre-swizzled console texture asset package format (.scx)
+struct ScarlettTexAssetHeader {
+    uint32_t magic;
+    uint32_t width;
+    uint32_t height;
+    uint32_t dxgiFormat;
+    uint32_t tileMode;
+    uint32_t dataOffset;
+    uint32_t dataSize;
+    uint32_t fnv1aChecksum;
+};
+static_assert(sizeof(ScarlettTexAssetHeader) == 32, "Asset header must be 32 bytes");
+constexpr uint32_t kAssetMagic = 0x58544353U; // 'SCTX'
+
+uint32_t ComputeFnv1a32(const uint8_t* data, size_t size) {
+    uint32_t hash = 2166136261u;
+    for (size_t i = 0; i < size; ++i) {
+        hash ^= data[i];
+        hash *= 16777619u;
+    }
+    return hash;
+}
 
 struct AsyncWaiter {
     std::atomic<bool> done{false};
@@ -302,6 +328,51 @@ std::vector<uint8_t> BuildProceduralCrestTexture(uint32_t size) {
     return pixels;
 }
 
+bool EnsureBakedConsoleTextureAsset(
+    const std::filesystem::path& assetPath,
+    IXGTextureAddressComputer* tiledComputer,
+    const XG_RESOURCE_LAYOUT& tiledLayout) {
+    std::error_code ec;
+    if (std::filesystem::exists(assetPath, ec)) {
+        return true;
+    }
+
+    std::filesystem::create_directories(assetPath.parent_path(), ec);
+    std::vector<uint8_t> linearSrc = BuildProceduralCrestTexture(kTexSize);
+    std::vector<uint8_t> swizzled(static_cast<size_t>(tiledLayout.SizeBytes), 0);
+
+    if (FAILED(tiledComputer->CopyIntoSubresource(
+            swizzled.data(), 0, linearSrc.data(), kTexSize * 4, 0))) {
+        return false;
+    }
+
+    ScarlettTexAssetHeader hdr{};
+    hdr.magic = kAssetMagic;
+    hdr.width = kTexSize;
+    hdr.height = kTexSize;
+    hdr.dxgiFormat = static_cast<uint32_t>(DXGI_FORMAT_R8G8B8A8_UNORM);
+    hdr.tileMode = static_cast<uint32_t>(XG_TILE_MODE_2D_THIN);
+    hdr.dataOffset = sizeof(ScarlettTexAssetHeader);
+    hdr.dataSize = static_cast<uint32_t>(swizzled.size());
+    hdr.fnv1aChecksum = ComputeFnv1a32(swizzled.data(), swizzled.size());
+
+    std::ofstream out(assetPath, std::ios::binary | std::ios::trunc);
+    if (!out.is_open()) {
+        return false;
+    }
+    out.write(reinterpret_cast<const char*>(&hdr), sizeof(hdr));
+    out.write(reinterpret_cast<const char*>(swizzled.data()),
+              static_cast<std::streamsize>(swizzled.size()));
+    out.flush();
+    if (!out.good()) {
+        return false;
+    }
+
+    std::printf("[TITLE] Baked pre-swizzled console texture asset: %s (%u B payload, crc=0x%08X)\n",
+                assetPath.string().c_str(), hdr.dataSize, hdr.fnv1aChecksum);
+    return true;
+}
+
 bool CompileShader(const char* entry, const char* target, ComPtr<ID3DBlob>& outBlob) {
     ComPtr<ID3DBlob> errors;
     HRESULT hr = D3DCompile(
@@ -393,10 +464,38 @@ int main() {
         }
     }
 
-    // 3. Exercise xg_xs.dll texture tiling & detiling round-trip
-    std::vector<uint8_t> sourcePixels = BuildProceduralCrestTexture(kTexSize);
-    const uint32_t srcRowPitch = kTexSize * 4;
+    // 3. Initialize GameInput
+    ComPtr<IGameInput> gameInput;
+    if (FAILED(GameInputCreate(&gameInput))) {
+        return 1;
+    }
 
+    // 4. Scarlett D3D12.x graphics bootstrap
+    D3D12XBOX_CREATE_DEVICE_PARAMETERS params{};
+    params.Version = 1;
+
+    ComPtr<ID3D12DeviceX> deviceX;
+    if (FAILED(D3D12XboxCreateDevice(nullptr, &params, IID_ID3D12DeviceX,
+                                     reinterpret_cast<void**>(deviceX.GetAddressOf())))) {
+        return 1;
+    }
+
+    deviceX->SetFrameIntervalX(nullptr, 16667, 1, D3D12XBOX_FRAME_INTERVAL_FLAG_NONE);
+
+    D3D12_COMMAND_QUEUE_DESC qDesc{};
+    qDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+    ComPtr<ID3D12CommandQueueX> cmdQueue;
+    if (FAILED(deviceX->CreateCommandQueueX(&qDesc, &cmdQueue))) {
+        return 1;
+    }
+
+    ComPtr<ID3D12Fence> ioFence;
+    if (FAILED(deviceX->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&ioFence)))) {
+        return 1;
+    }
+    HANDLE ioFenceEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+
+    // 5. Velocity asset streaming: dstorage_xs.dll -> xg_xs.dll detile -> GPU upload
     XG_TEXTURE2D_DESC xgTiledDesc{};
     xgTiledDesc.Width = kTexSize;
     xgTiledDesc.Height = kTexSize;
@@ -420,59 +519,113 @@ int main() {
         return 1;
     }
 
-    std::vector<uint8_t> consoleTiledMem(static_cast<size_t>(tiledLayout.SizeBytes), 0);
+    const std::filesystem::path assetPath = std::filesystem::path(L"assets") / L"crest_2dthin.scx";
+    if (!EnsureBakedConsoleTextureAsset(assetPath, tiledComputer.Get(), tiledLayout)) {
+        std::printf("[TITLE] Failed to prepare console texture asset!\n");
+        return 1;
+    }
+
+    DSTORAGE_CONFIGURATION dsCfg{};
+    dsCfg.NumSubmitThreads = 1;
+    dsCfg.NumBuiltInCpuDecompressionThreads = 1;
+    DStorageSetConfiguration(&dsCfg);
+
+    ComPtr<IDStorageFactoryX> dsFactory;
+    if (FAILED(DStorageGetFactory(IID_IDStorageFactoryX,
+                                  reinterpret_cast<void**>(dsFactory.GetAddressOf())))) {
+        std::printf("[TITLE] DStorageGetFactory failed!\n");
+        return 1;
+    }
+
+    DSTORAGE_QUEUE_DESC dsQueueDesc{};
+    dsQueueDesc.SourceType = DSTORAGE_REQUEST_SOURCE_FILE;
+    dsQueueDesc.Capacity = 64;
+    dsQueueDesc.Priority = DSTORAGE_PRIORITY_HIGH;
+    dsQueueDesc.Name = "AssetStreamQueue";
+    dsQueueDesc.Device = deviceX.Get();
+
+    ComPtr<IDStorageQueueX> dsQueue;
+    ComPtr<IDStorageFileX> dsFile;
+    ComPtr<IDStorageStatusArrayX> dsStatus;
+    if (FAILED(dsFactory->CreateQueue(&dsQueueDesc, IID_IDStorageQueueX,
+                                      reinterpret_cast<void**>(dsQueue.GetAddressOf()))) ||
+        FAILED(dsFactory->OpenFile(assetPath.c_str(), IID_IDStorageFileX,
+                                   reinterpret_cast<void**>(dsFile.GetAddressOf()))) ||
+        FAILED(dsFactory->CreateStatusArray(2, "AssetStatus", IID_IDStorageStatusArrayX,
+                                            reinterpret_cast<void**>(dsStatus.GetAddressOf())))) {
+        std::printf("[TITLE] DirectStorage setup failed!\n");
+        return 1;
+    }
+
+    // Enqueue 2 batched file reads (header + 256 KB pre-swizzled payload) + status + D3D12 fence signal
+    ScarlettTexAssetHeader streamedHdr{};
+    std::vector<uint8_t> streamedTiledMem(static_cast<size_t>(tiledLayout.SizeBytes), 0);
+
+    DSTORAGE_REQUEST hdrReq{};
+    hdrReq.Options.CompressionFormat = DSTORAGE_COMPRESSION_FORMAT_NONE;
+    hdrReq.Options.SourceType = DSTORAGE_REQUEST_SOURCE_FILE;
+    hdrReq.Options.DestinationType = DSTORAGE_REQUEST_DESTINATION_MEMORY;
+    hdrReq.Source.File.Source = dsFile.Get();
+    hdrReq.Source.File.Offset = 0;
+    hdrReq.Source.File.Size = sizeof(ScarlettTexAssetHeader);
+    hdrReq.Destination.Memory.Buffer = &streamedHdr;
+    hdrReq.Destination.Memory.Size = sizeof(ScarlettTexAssetHeader);
+    hdrReq.UncompressedSize = sizeof(ScarlettTexAssetHeader);
+    hdrReq.Name = "crest_header";
+
+    DSTORAGE_REQUEST bodyReq{};
+    bodyReq.Options.CompressionFormat = DSTORAGE_COMPRESSION_FORMAT_NONE;
+    bodyReq.Options.SourceType = DSTORAGE_REQUEST_SOURCE_FILE;
+    bodyReq.Options.DestinationType = DSTORAGE_REQUEST_DESTINATION_MEMORY;
+    bodyReq.Source.File.Source = dsFile.Get();
+    bodyReq.Source.File.Offset = sizeof(ScarlettTexAssetHeader);
+    bodyReq.Source.File.Size = static_cast<uint32_t>(streamedTiledMem.size());
+    bodyReq.Destination.Memory.Buffer = streamedTiledMem.data();
+    bodyReq.Destination.Memory.Size = static_cast<uint32_t>(streamedTiledMem.size());
+    bodyReq.UncompressedSize = static_cast<uint32_t>(streamedTiledMem.size());
+    bodyReq.Name = "crest_2dthin_payload";
+
+    dsQueue->EnqueueRequest(&hdrReq);
+    dsQueue->EnqueueRequest(&bodyReq);
+    dsQueue->EnqueueStatus(dsStatus.Get(), 0);
+    dsQueue->EnqueueSignal(ioFence.Get(), 1);
+    dsQueue->Submit();
+
+    // Wait on the ID3D12Fence signaled directly by dstorage_xs.dll's worker thread
+    if (ioFence->GetCompletedValue() < 1) {
+        ioFence->SetEventOnCompletion(1, ioFenceEvent);
+        WaitForSingleObject(ioFenceEvent, INFINITE);
+    }
+
+    const bool statusOk = dsStatus->IsComplete(0) && SUCCEEDED(dsStatus->GetHResult(0));
+    const uint32_t actualCrc = ComputeFnv1a32(streamedTiledMem.data(), streamedTiledMem.size());
+    if (!statusOk || streamedHdr.magic != kAssetMagic || actualCrc != streamedHdr.fnv1aChecksum) {
+        std::printf("[TITLE] DirectStorage stream verification FAILED! status=%d crc=0x%08X\n",
+                    statusOk ? 1 : 0, actualCrc);
+        return 1;
+    }
+
+    std::printf("[TITLE] DirectStorage streamed & verified '%s' via ID3D12Fence (crc=0x%08X MATCH)\n",
+                assetPath.string().c_str(), actualCrc);
+
     std::vector<uint8_t> detiledUploadMem(static_cast<size_t>(linearLayout.SizeBytes), 0);
-
-    if (FAILED(tiledComputer->CopyIntoSubresource(consoleTiledMem.data(), 0,
-                                                  sourcePixels.data(), srcRowPitch, 0)) ||
-        FAILED(tiledComputer->CopyFromSubresource(detiledUploadMem.data(), 0,
-                                                  consoleTiledMem.data(),
-                                                  linearLayout.Plane[0].MipLayout[0].PitchBytes, 0))) {
-        std::printf("[TITLE] xg_xs swizzle/detile transfer failed!\n");
+    if (FAILED(tiledComputer->CopyFromSubresource(
+            detiledUploadMem.data(), 0, streamedTiledMem.data(),
+            linearLayout.Plane[0].MipLayout[0].PitchBytes, 0))) {
+        std::printf("[TITLE] xg_xs detile failed!\n");
         return 1;
     }
 
-    bool roundTripExact = true;
-    for (uint32_t y = 0; y < kTexSize; ++y) {
-        const uint8_t* a = sourcePixels.data() + static_cast<size_t>(y) * srcRowPitch;
-        const uint8_t* b = detiledUploadMem.data() +
-                           static_cast<size_t>(y) * linearLayout.Plane[0].MipLayout[0].PitchBytes;
-        if (std::memcmp(a, b, srcRowPitch) != 0) {
-            roundTripExact = false;
-            break;
-        }
-    }
-    std::printf("[TITLE] xg_xs 2D_THIN swizzle -> detile round-trip: %s (pitch=%u B, tiled=%llu B)\n",
-                roundTripExact ? "BIT-EXACT" : "MISMATCH",
-                linearLayout.Plane[0].MipLayout[0].PitchBytes,
-                static_cast<unsigned long long>(tiledLayout.SizeBytes));
+    // Release streaming handles now that asset is resident in RAM
+    dsFile->Close();
+    dsFile.Reset();
+    dsStatus.Reset();
+    dsQueue.Reset();
+    dsFactory.Reset();
+    CloseHandle(ioFenceEvent);
+    ioFence.Reset();
 
-    // 4. Initialize GameInput
-    ComPtr<IGameInput> gameInput;
-    if (FAILED(GameInputCreate(&gameInput))) {
-        return 1;
-    }
-
-    // 5. Scarlett D3D12.x graphics bootstrap
-    D3D12XBOX_CREATE_DEVICE_PARAMETERS params{};
-    params.Version = 1;
-
-    ComPtr<ID3D12DeviceX> deviceX;
-    if (FAILED(D3D12XboxCreateDevice(nullptr, &params, IID_ID3D12DeviceX,
-                                     reinterpret_cast<void**>(deviceX.GetAddressOf())))) {
-        return 1;
-    }
-
-    deviceX->SetFrameIntervalX(nullptr, 16667, 1, D3D12XBOX_FRAME_INTERVAL_FLAG_NONE);
-
-    D3D12_COMMAND_QUEUE_DESC qDesc{};
-    qDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
-    ComPtr<ID3D12CommandQueueX> cmdQueue;
-    if (FAILED(deviceX->CreateCommandQueueX(&qDesc, &cmdQueue))) {
-        return 1;
-    }
-
-    // Root Signature: [0] 32-bit constants b0, [1] SRV descriptor table t0, plus Static Sampler s0
+    // 6. Build Root Signature, PSO, Vertex Buffer, Texture SRV, and Render Target
     D3D12_DESCRIPTOR_RANGE srvRange{};
     srvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
     srvRange.NumDescriptors = 1;
@@ -563,7 +716,6 @@ int main() {
     D3D12_HEAP_PROPERTIES defaultHeap{};
     defaultHeap.Type = D3D12_HEAP_TYPE_DEFAULT;
 
-    // Upload Vertex Buffer
     D3D12_RESOURCE_DESC vbDesc{};
     vbDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
     vbDesc.Width = sizeof(kStarVertices);
@@ -594,7 +746,6 @@ int main() {
     vbView.StrideInBytes = sizeof(Vertex);
     vbView.SizeInBytes = sizeof(kStarVertices);
 
-    // Create GPU texture + upload staging buffer sized via xg_xs.dll
     D3D12_RESOURCE_DESC texDesc{};
     texDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
     texDesc.Width = kTexSize;
@@ -628,7 +779,6 @@ int main() {
     std::memcpy(mappedTex, detiledUploadMem.data(), detiledUploadMem.size());
     texUpload->Unmap(0, nullptr);
 
-    // Shader-visible SRV descriptor heap
     D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc{};
     srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
     srvHeapDesc.NumDescriptors = 1;
@@ -646,7 +796,6 @@ int main() {
     deviceX->CreateShaderResourceView(crestTexture.Get(), &srvDesc,
                                       srvHeap->GetCPUDescriptorHandleForHeapStart());
 
-    // Console-owned render target texture
     D3D12_RESOURCE_DESC rtDesc{};
     rtDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
     rtDesc.Width = kWidth;
@@ -687,7 +836,7 @@ int main() {
     HANDLE fenceEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     UINT64 fenceVal = 0;
 
-    // Upload the xg_xs-laid-out texture to default GPU memory & transition to PIXEL_SHADER_RESOURCE
+    // Upload the streamed & detiled texture to GPU default memory
     {
         D3D12_TEXTURE_COPY_LOCATION dstLoc{};
         dstLoc.pResource = crestTexture.Get();

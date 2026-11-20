@@ -1,0 +1,4 @@
+LIBRARY dstorage_xs
+EXPORTS
+    DStorageGetFactory
+    DStorageSetConfiguration
