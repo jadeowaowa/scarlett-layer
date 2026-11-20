@@ -2352,6 +2352,193 @@ bool TestDStorageGpuBufferStreaming() {
     return true;
 }
 
+bool TestDStorageGpuTextureStreaming() {
+    HMODULE hD3d12 = LoadLibraryW(L"d3d12.dll");
+    SC_EXPECT(hD3d12 != nullptr);
+    auto pfnCreateDevice = reinterpret_cast<PFN_D3D12_CREATE_DEVICE>(
+        GetProcAddress(hD3d12, "D3D12CreateDevice"));
+    SC_EXPECT(pfnCreateDevice != nullptr);
+
+    ComPtr<ID3D12Device> device;
+    SC_EXPECT(SUCCEEDED(pfnCreateDevice(nullptr, D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&device))));
+
+    constexpr uint32_t kWidth = 64u;
+    constexpr uint32_t kHeight = 64u;
+    constexpr uint32_t kRowPitch = kWidth * 4u; // 256 bytes (D3D12 aligned)
+    constexpr uint32_t kTexBytes = kRowPitch * kHeight;
+
+    D3D12_HEAP_PROPERTIES defaultHeap{};
+    defaultHeap.Type = D3D12_HEAP_TYPE_DEFAULT;
+    D3D12_RESOURCE_DESC texDesc{};
+    texDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    texDesc.Width = kWidth;
+    texDesc.Height = kHeight;
+    texDesc.DepthOrArraySize = 1;
+    texDesc.MipLevels = 1;
+    texDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    texDesc.SampleDesc.Count = 1;
+    texDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+
+    ComPtr<ID3D12Resource> gpuTex;
+    SC_EXPECT(SUCCEEDED(device->CreateCommittedResource(
+        &defaultHeap, D3D12_HEAP_FLAG_NONE, &texDesc,
+        D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&gpuTex))));
+
+    D3D12_HEAP_PROPERTIES rbHeap{};
+    rbHeap.Type = D3D12_HEAP_TYPE_READBACK;
+    D3D12_RESOURCE_DESC rbDesc{};
+    rbDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    rbDesc.Width = kTexBytes;
+    rbDesc.Height = 1;
+    rbDesc.DepthOrArraySize = 1;
+    rbDesc.MipLevels = 1;
+    rbDesc.Format = DXGI_FORMAT_UNKNOWN;
+    rbDesc.SampleDesc.Count = 1;
+    rbDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+    ComPtr<ID3D12Resource> rbBuf;
+    SC_EXPECT(SUCCEEDED(device->CreateCommittedResource(
+        &rbHeap, D3D12_HEAP_FLAG_NONE, &rbDesc,
+        D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&rbBuf))));
+
+    std::vector<uint8_t> pixels(kTexBytes);
+    for (uint32_t y = 0; y < kHeight; ++y) {
+        for (uint32_t x = 0; x < kWidth; ++x) {
+            const size_t idx = (static_cast<size_t>(y) * kWidth + x) * 4u;
+            pixels[idx + 0] = static_cast<uint8_t>(x * 4u);
+            pixels[idx + 1] = static_cast<uint8_t>(y * 4u);
+            pixels[idx + 2] = static_cast<uint8_t>((x ^ y) * 3u);
+            pixels[idx + 3] = 255u;
+        }
+    }
+
+    std::vector<uint8_t> compressed = sc::codec::CompressLzBlock(pixels.data(), pixels.size());
+    SC_EXPECT(!compressed.empty());
+
+    const std::filesystem::path hostProbe = sc::vfs::TranslatePath(L"T:\\gpu_tex_probe.sclz");
+    std::filesystem::create_directories(hostProbe.parent_path());
+    {
+        FILE* f = nullptr;
+        SC_EXPECT(_wfopen_s(&f, hostProbe.c_str(), L"wb") == 0 && f != nullptr);
+        SC_EXPECT(std::fwrite(compressed.data(), 1, compressed.size(), f) == compressed.size());
+        std::fclose(f);
+    }
+
+    ComPtr<IDStorageFactoryX> factory;
+    SC_EXPECT(SUCCEEDED(DStorageGetFactory(IID_IDStorageFactoryX, reinterpret_cast<void**>(factory.GetAddressOf()))));
+
+    ComPtr<IDStorageFileX> file;
+    SC_EXPECT(SUCCEEDED(factory->OpenFile(L"T:\\gpu_tex_probe.sclz", IID_IDStorageFileX, reinterpret_cast<void**>(file.GetAddressOf()))));
+
+    DSTORAGE_QUEUE_DESC qDesc{};
+    qDesc.SourceType = DSTORAGE_REQUEST_SOURCE_FILE;
+    qDesc.Capacity = 32;
+    qDesc.Priority = DSTORAGE_PRIORITY_NORMAL;
+    qDesc.Name = "gpu_tex_stream_queue";
+    qDesc.Device = device.Get();
+
+    ComPtr<IDStorageQueueX> queue;
+    SC_EXPECT(SUCCEEDED(factory->CreateQueue(&qDesc, IID_IDStorageQueueX, reinterpret_cast<void**>(queue.GetAddressOf()))));
+
+    ComPtr<IDStorageStatusArrayX> status;
+    SC_EXPECT(SUCCEEDED(factory->CreateStatusArray(2, "gpu_tex_status", IID_IDStorageStatusArrayX, reinterpret_cast<void**>(status.GetAddressOf()))));
+
+    ComPtr<ID3D12Fence> fence;
+    SC_EXPECT(SUCCEEDED(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence))));
+
+    DSTORAGE_REQUEST req{};
+    req.Options.CompressionFormat = DSTORAGE_COMPRESSION_FORMAT_SCARLETT_LZ;
+    req.Options.SourceType = DSTORAGE_REQUEST_SOURCE_FILE;
+    req.Options.DestinationType = DSTORAGE_REQUEST_DESTINATION_TEXTURE_REGION;
+    req.Source.File.Source = file.Get();
+    req.Source.File.Offset = 0;
+    req.Source.File.Size = static_cast<uint32_t>(compressed.size());
+    req.Destination.Texture.Resource = gpuTex.Get();
+    req.Destination.Texture.SubresourceIndex = 0;
+    req.Destination.Texture.Region = { 0, 0, 0, kWidth, kHeight, 1 };
+    req.UncompressedSize = kTexBytes;
+    req.Name = "gpu_lz_tex_stream";
+
+    queue->EnqueueRequest(&req);
+    queue->EnqueueStatus(status.Get(), 0);
+    queue->EnqueueSignal(fence.Get(), 1);
+    queue->Submit();
+
+    HANDLE evt = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    SC_EXPECT(evt != nullptr);
+    if (fence->GetCompletedValue() < 1) {
+        SC_EXPECT(SUCCEEDED(fence->SetEventOnCompletion(1, evt)));
+        WaitForSingleObject(evt, INFINITE);
+    }
+    SC_EXPECT(status->IsComplete(0));
+    SC_EXPECT(status->GetHResult(0) == S_OK);
+
+    // Readback texture on DIRECT queue and verify bit-for-bit
+    D3D12_COMMAND_QUEUE_DESC dq{};
+    dq.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+    ComPtr<ID3D12CommandQueue> directQueue;
+    SC_EXPECT(SUCCEEDED(device->CreateCommandQueue(&dq, IID_PPV_ARGS(&directQueue))));
+
+    ComPtr<ID3D12CommandAllocator> alloc;
+    SC_EXPECT(SUCCEEDED(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&alloc))));
+
+    ComPtr<ID3D12GraphicsCommandList> cmdList;
+    SC_EXPECT(SUCCEEDED(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, alloc.Get(), nullptr, IID_PPV_ARGS(&cmdList))));
+
+    D3D12_TEXTURE_COPY_LOCATION srcLoc{};
+    srcLoc.pResource = gpuTex.Get();
+    srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    srcLoc.SubresourceIndex = 0;
+
+    D3D12_TEXTURE_COPY_LOCATION dstLoc{};
+    dstLoc.pResource = rbBuf.Get();
+    dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    dstLoc.PlacedFootprint.Footprint = { DXGI_FORMAT_R8G8B8A8_UNORM, kWidth, kHeight, 1, kRowPitch };
+
+    cmdList->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
+    SC_EXPECT(SUCCEEDED(cmdList->Close()));
+
+    ID3D12CommandList* lists[] = { cmdList.Get() };
+    directQueue->ExecuteCommandLists(1, lists);
+    SC_EXPECT(SUCCEEDED(directQueue->Signal(fence.Get(), 2)));
+    if (fence->GetCompletedValue() < 2) {
+        SC_EXPECT(SUCCEEDED(fence->SetEventOnCompletion(2, evt)));
+        WaitForSingleObject(evt, INFINITE);
+    }
+
+    void* mapped = nullptr;
+    D3D12_RANGE readRange{ 0, kTexBytes };
+    SC_EXPECT(SUCCEEDED(rbBuf->Map(0, &readRange, &mapped)));
+    const bool match = (std::memcmp(mapped, pixels.data(), kTexBytes) == 0);
+    D3D12_RANGE noWrite{ 0, 0 };
+    rbBuf->Unmap(0, &noWrite);
+    SC_EXPECT(match);
+
+    // Negative test: empty/inverted region must record E_INVALIDARG
+    DSTORAGE_REQUEST badReq = req;
+    badReq.Destination.Texture.Region = { 16, 0, 0, 16, kHeight, 1 };
+    badReq.Name = "invalid_tex_region";
+    queue->EnqueueRequest(&badReq);
+    queue->EnqueueStatus(status.Get(), 1);
+    queue->EnqueueSignal(fence.Get(), 3);
+    queue->Submit();
+
+    if (fence->GetCompletedValue() < 3) {
+        SC_EXPECT(SUCCEEDED(fence->SetEventOnCompletion(3, evt)));
+        WaitForSingleObject(evt, INFINITE);
+    }
+    CloseHandle(evt);
+
+    SC_EXPECT(status->IsComplete(1));
+    SC_EXPECT(status->GetHResult(1) == E_INVALIDARG);
+
+    DSTORAGE_ERROR_RECORD err{};
+    queue->RetrieveErrorRecord(&err);
+    SC_EXPECT(err.FailureCount == 1);
+    SC_EXPECT(err.FirstFailureHResult == E_INVALIDARG);
+    return true;
+}
+
 } // namespace
 
 int main() {
@@ -2379,6 +2566,7 @@ int main() {
     RunTest("Rdna2VertexAndPixelPipelineWithCbv", TestRdna2VertexAndPixelPipelineWithCbv);
     RunTest("XgXs64KbsAndBcnBlockSwizzle",       TestXgXs64KbsAndBcnBlockSwizzle);
     RunTest("DStorageGpuBufferStreaming",        TestDStorageGpuBufferStreaming);
+    RunTest("DStorageGpuTextureStreaming",       TestDStorageGpuTextureStreaming);
 
     XGameRuntimeUninitialize();
 

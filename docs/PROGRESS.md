@@ -89,3 +89,8 @@
 - Implemented dedicated D3D12_COMMAND_LIST_TYPE_COPY queue, fence/event sync, and auto-growing persistently mapped UPLOAD staging buffer in ScarlettStorageQueueX.
 - Added DSTORAGE_REQUEST_DESTINATION_BUFFER support (raw + SCARLETT_LZ decompression directly into staging -> CopyBufferRegion to DEFAULT VRAM) with GPU telemetry logging.
 - Added CTest #22 (DStorageGpuBufferStreaming) verifying bit-for-bit GPU readback and E_INVALIDARG error recording on null GPU resources (22 passed, 0 failed, zero leaks).
+
+## Sprint 24: DirectStorage Direct-to-VRAM GPU Texture Streaming
+- Added `DSTORAGE_REQUEST_DESTINATION_TEXTURE_REGION` and `DSTORAGE_DESTINATION_TEXTURE_REGION` to `dstorage_xs.hpp`.
+- Implemented `ExecuteTextureRequest` in `ScarlettStorageQueueX` using `GetCopyableFootprints`, automatic 256-byte row-pitch staging repacking (for unaligned/sub-region uploads), and `CopyTextureRegion` on the dedicated `COPY` queue.
+- Added CTest #23 (`DStorageGpuTextureStreaming`) verifying `SCARLETT_LZ`-compressed 64x64 `RGBA8_UNORM` streaming into a `DEFAULT` heap `TEXTURE2D`, bit-for-bit `DIRECT`-queue readback, and `E_INVALIDARG` error recording on inverted/empty `D3D12_BOX` regions (`23 passed, 0 failed`, zero leaks).

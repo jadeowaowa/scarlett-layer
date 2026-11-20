@@ -235,6 +235,9 @@ struct QueuedOp {
     ComPtr<ID3D12Resource> dstBuffer;
     uint64_t dstBufferOffset{0};
     uint32_t dstBufferSize{0};
+    ComPtr<ID3D12Resource> dstTexture;
+    uint32_t dstSubresourceIndex{0};
+    D3D12_BOX dstRegion{};
     uint32_t uncompressedSize{0};
     std::string reqName;
 
@@ -318,6 +321,10 @@ public:
             op.dstBuffer = request->Destination.Buffer.Resource;
             op.dstBufferOffset = request->Destination.Buffer.Offset;
             op.dstBufferSize = request->Destination.Buffer.Size;
+        } else if (request->Options.DestinationType == DSTORAGE_REQUEST_DESTINATION_TEXTURE_REGION) {
+            op.dstTexture = request->Destination.Texture.Resource;
+            op.dstSubresourceIndex = request->Destination.Texture.SubresourceIndex;
+            op.dstRegion = request->Destination.Texture.Region;
         } else {
             op.dstMemory = request->Destination.Memory.Buffer;
             op.dstSize = request->Destination.Memory.Size;
@@ -630,12 +637,172 @@ private:
         return S_OK;
     }
 
+    HRESULT ExecuteTextureRequest(const QueuedOp& op, uint64_t& outReadBytes, uint64_t& outProducedBytes) {
+        if (!m_device || !op.dstTexture ||
+            op.dstRegion.right <= op.dstRegion.left ||
+            op.dstRegion.bottom <= op.dstRegion.top ||
+            op.dstRegion.back <= op.dstRegion.front) {
+            return E_INVALIDARG;
+        }
+
+        const D3D12_RESOURCE_DESC texDesc = op.dstTexture->GetDesc();
+        const uint32_t regW = op.dstRegion.right - op.dstRegion.left;
+        const uint32_t regH = op.dstRegion.bottom - op.dstRegion.top;
+        const uint32_t regD = op.dstRegion.back - op.dstRegion.front;
+
+        D3D12_RESOURCE_DESC regionDesc = texDesc;
+        regionDesc.Width = regW;
+        regionDesc.Height = regH;
+        regionDesc.DepthOrArraySize = static_cast<UINT16>(regD);
+        regionDesc.MipLevels = 1;
+        regionDesc.Alignment = 0;
+
+        D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};
+        UINT numRows = 0;
+        UINT64 rowSizeInBytes = 0;
+        UINT64 totalStagingBytes = 0;
+        m_device->GetCopyableFootprints(
+            &regionDesc, 0, 1, 0, &footprint, &numRows, &rowSizeInBytes, &totalStagingBytes);
+
+        if (numRows == 0 || rowSizeInBytes == 0 || totalStagingBytes == 0) {
+            return E_INVALIDARG;
+        }
+
+        const uint64_t tightBytes = rowSizeInBytes * static_cast<uint64_t>(numRows) * static_cast<uint64_t>(regD);
+        HRESULT hr = EnsureGpuCopyContext(totalStagingBytes);
+        if (FAILED(hr)) {
+            return hr;
+        }
+
+        std::vector<uint8_t> decoded;
+        const uint8_t* srcPixels = nullptr;
+
+        if (op.options.CompressionFormat == DSTORAGE_COMPRESSION_FORMAT_NONE) {
+            if (op.srcSize < tightBytes) {
+                return HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
+            }
+            if (footprint.Footprint.RowPitch == rowSizeInBytes) {
+                uint32_t bytesRead = 0;
+                hr = ReadRawSource(op, m_stagingMapped, static_cast<uint32_t>(tightBytes), bytesRead);
+                if (FAILED(hr)) {
+                    return hr;
+                }
+                outReadBytes = bytesRead;
+                outProducedBytes = bytesRead;
+            } else {
+                decoded.resize(static_cast<size_t>(tightBytes));
+                uint32_t bytesRead = 0;
+                hr = ReadRawSource(op, decoded.data(), static_cast<uint32_t>(tightBytes), bytesRead);
+                if (FAILED(hr)) {
+                    return hr;
+                }
+                outReadBytes = bytesRead;
+                outProducedBytes = bytesRead;
+                srcPixels = decoded.data();
+            }
+        } else if (op.options.CompressionFormat == DSTORAGE_COMPRESSION_FORMAT_SCARLETT_LZ) {
+            const uint64_t expectedOut = (op.uncompressedSize > 0) ? op.uncompressedSize : tightBytes;
+            if (expectedOut < tightBytes) {
+                return HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
+            }
+            std::vector<uint8_t> compressedStaging(op.srcSize);
+            uint32_t bytesRead = 0;
+            hr = ReadRawSource(op, compressedStaging.data(), op.srcSize, bytesRead);
+            if (FAILED(hr)) {
+                return hr;
+            }
+            outReadBytes = bytesRead;
+
+            size_t decompressedBytes = 0;
+            if (footprint.Footprint.RowPitch == rowSizeInBytes && expectedOut == tightBytes) {
+                if (!sc::codec::DecompressLzBlock(
+                        compressedStaging.data(), bytesRead,
+                        m_stagingMapped, static_cast<size_t>(expectedOut), decompressedBytes) ||
+                    decompressedBytes != expectedOut) {
+                    return E_FAIL;
+                }
+            } else {
+                decoded.resize(static_cast<size_t>(expectedOut));
+                if (!sc::codec::DecompressLzBlock(
+                        compressedStaging.data(), bytesRead,
+                        decoded.data(), decoded.size(), decompressedBytes) ||
+                    decompressedBytes != expectedOut) {
+                    return E_FAIL;
+                }
+                srcPixels = decoded.data();
+            }
+            outProducedBytes = decompressedBytes;
+        } else {
+            return E_NOTIMPL;
+        }
+
+        if (srcPixels) {
+            const uint64_t dstSlicePitch = static_cast<uint64_t>(footprint.Footprint.RowPitch) * numRows;
+            const uint64_t srcSlicePitch = rowSizeInBytes * numRows;
+            for (uint32_t z = 0; z < regD; ++z) {
+                for (UINT y = 0; y < numRows; ++y) {
+                    std::memcpy(
+                        m_stagingMapped + z * dstSlicePitch + static_cast<uint64_t>(y) * footprint.Footprint.RowPitch,
+                        srcPixels + z * srcSlicePitch + static_cast<uint64_t>(y) * rowSizeInBytes,
+                        static_cast<size_t>(rowSizeInBytes));
+                }
+            }
+        }
+
+        hr = m_copyAllocator->Reset();
+        if (FAILED(hr)) {
+            return hr;
+        }
+        hr = m_copyList->Reset(m_copyAllocator.Get(), nullptr);
+        if (FAILED(hr)) {
+            return hr;
+        }
+
+        D3D12_TEXTURE_COPY_LOCATION dstLoc{};
+        dstLoc.pResource = op.dstTexture.Get();
+        dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+        dstLoc.SubresourceIndex = op.dstSubresourceIndex;
+
+        D3D12_TEXTURE_COPY_LOCATION srcLoc{};
+        srcLoc.pResource = m_stagingBuffer.Get();
+        srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+        srcLoc.PlacedFootprint = footprint;
+
+        m_copyList->CopyTextureRegion(
+            &dstLoc, op.dstRegion.left, op.dstRegion.top, op.dstRegion.front, &srcLoc, nullptr);
+
+        hr = m_copyList->Close();
+        if (FAILED(hr)) {
+            return hr;
+        }
+
+        ID3D12CommandList* lists[] = { m_copyList.Get() };
+        m_copyQueue->ExecuteCommandLists(1, lists);
+
+        ++m_copyFenceValue;
+        hr = m_copyQueue->Signal(m_copyFence.Get(), m_copyFenceValue);
+        if (FAILED(hr)) {
+            return hr;
+        }
+        if (m_copyFence->GetCompletedValue() < m_copyFenceValue) {
+            hr = m_copyFence->SetEventOnCompletion(m_copyFenceValue, m_copyEvent);
+            if (FAILED(hr)) {
+                return hr;
+            }
+            WaitForSingleObject(m_copyEvent, INFINITE);
+        }
+        return S_OK;
+    }
+
     HRESULT ExecuteReadRequest(const QueuedOp& op, uint64_t& outReadBytes, uint64_t& outProducedBytes) {
         outReadBytes = 0;
         outProducedBytes = 0;
 
         if (op.options.DestinationType == DSTORAGE_REQUEST_DESTINATION_BUFFER) {
             return ExecuteBufferRequest(op, outReadBytes, outProducedBytes);
+        }
+        if (op.options.DestinationType == DSTORAGE_REQUEST_DESTINATION_TEXTURE_REGION) {
+            return ExecuteTextureRequest(op, outReadBytes, outProducedBytes);
         }
 
         if (op.options.DestinationType != DSTORAGE_REQUEST_DESTINATION_MEMORY || !op.dstMemory) {
@@ -711,7 +878,7 @@ private:
                         totalRead += bytesRead;
                         totalProduced += bytesProduced;
                         ++readCount;
-                        if (op.options.DestinationType == DSTORAGE_REQUEST_DESTINATION_BUFFER) {
+                        if (op.options.DestinationType == DSTORAGE_REQUEST_DESTINATION_BUFFER || op.options.DestinationType == DSTORAGE_REQUEST_DESTINATION_TEXTURE_REGION) {
                             ++gpuReadCount;
                         }
                         if (FAILED(hr)) {
