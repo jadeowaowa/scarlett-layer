@@ -3,4 +3,11 @@ EXPORTS
     XGameRuntimeInitialize
     XGameRuntimeUninitialize
     XSystemGetDeviceType
+    XTaskQueueCreate
+    XTaskQueueDispatch
+    XTaskQueueCloseHandle
+    XAsyncGetStatus
     XUserAddAsync
+    XUserAddResult
+    XUserGetGamertag
+    XUserCloseHandle
