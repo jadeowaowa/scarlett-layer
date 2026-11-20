@@ -43,7 +43,6 @@ struct D3D12XBOX_PRESENT_PARAMETERS {
     uint32_t ImmediateThresholdPercent;
 };
 
-// Clean-room GUIDs for our Scarlett wrapper interfaces
 inline constexpr GUID IID_ID3D12DeviceX =
     { 0x5c4a1201, 0x9b70, 0x4d1e, { 0xa1, 0x20, 0x00, 0x53, 0x43, 0x41, 0x52, 0x01 } };
 
@@ -92,6 +91,10 @@ struct ID3D12DeviceX : public IUnknown {
     virtual void STDMETHODCALLTYPE CreateRenderTargetView(
         ID3D12Resource* pResource,
         const D3D12_RENDER_TARGET_VIEW_DESC* pDesc,
+        D3D12_CPU_DESCRIPTOR_HANDLE DestDescriptor) = 0;
+    virtual void STDMETHODCALLTYPE CreateShaderResourceView(
+        ID3D12Resource* pResource,
+        const D3D12_SHADER_RESOURCE_VIEW_DESC* pDesc,
         D3D12_CPU_DESCRIPTOR_HANDLE DestDescriptor) = 0;
     virtual HRESULT STDMETHODCALLTYPE CreateFence(
         UINT64 InitialValue,

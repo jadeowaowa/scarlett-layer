@@ -1,0 +1,4 @@
+LIBRARY xg_xs
+EXPORTS
+    XGCreateTexture2DComputer
+    XGComputeTexture2DLayout

@@ -1,6 +1,7 @@
 #include "shims/xgameruntime/gdk_types.hpp"
 #include "shims/d3d12_xs/d3d12_xs.hpp"
 #include "shims/gameinput/gameinput.hpp"
+#include "shims/xg_xs/xg_xs.hpp"
 
 #include <d3dcompiler.h>
 #include <wrl/client.h>
@@ -10,6 +11,7 @@
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
+#include <vector>
 
 using Microsoft::WRL::ComPtr;
 
@@ -54,6 +56,7 @@ namespace {
 
 constexpr UINT kWidth = 1280;
 constexpr UINT kHeight = 720;
+constexpr UINT kTexSize = 256;
 constexpr char kTitleScid[] = "00000000-0000-0000-0000-0000SCARLETT";
 
 struct StarSaveData {
@@ -64,7 +67,7 @@ struct StarSaveData {
     float    angle;
     uint32_t saveCount;
 };
-constexpr uint32_t kSaveMagic = 0x53434152U; // 'SCAR'
+constexpr uint32_t kSaveMagic = 0x53434152U;
 
 struct AsyncWaiter {
     std::atomic<bool> done{false};
@@ -173,6 +176,7 @@ bool SaveStarState(
 struct Vertex {
     float x, y;
     float r, g, b;
+    float u, v;
 };
 
 struct DrawConstants {
@@ -183,11 +187,14 @@ struct DrawConstants {
     float aspect;
     float scale;
     float turbo;
-    float pad;
+    float timeSec;
 };
 static_assert(sizeof(DrawConstants) == 32, "DrawConstants must be 8x 32-bit values");
 
 const char* kShaderSource = R"(
+Texture2D<float4> gCrestTex : register(t0);
+SamplerState      gSampler  : register(s0);
+
 cbuffer DrawParams : register(b0) {
     float2 uOffset;
     float  uAngle;
@@ -195,17 +202,19 @@ cbuffer DrawParams : register(b0) {
     float  uAspect;
     float  uScale;
     float  uTurbo;
-    float  uPad;
+    float  uTime;
 };
 
 struct VSIn {
     float2 pos : POSITION;
     float3 col : COLOR;
+    float2 uv  : TEXCOORD0;
 };
 
 struct PSIn {
     float4 pos : SV_POSITION;
     float3 col : COLOR;
+    float2 uv  : TEXCOORD0;
 };
 
 PSIn VSMain(VSIn input) {
@@ -220,56 +229,84 @@ PSIn VSMain(VSIn input) {
     rot.x /= uAspect;
     o.pos = float4(rot + uOffset, 0.0f, 1.0f);
     o.col = input.col;
+    o.uv  = input.uv;
     return o;
 }
 
 float4 PSMain(PSIn input) : SV_TARGET {
-    float3 turboTint = float3(0.20f, 0.95f, 1.00f);
-    float3 baseCol = lerp(input.col, turboTint, uTurbo * 0.45f);
-    float3 lit = saturate(baseCol * (0.85f + 0.30f * uPulse));
+    float2 animUv = input.uv + float2(uTime * 0.08f, -uTime * 0.05f);
+    float3 texCol = gCrestTex.Sample(gSampler, animUv).rgb;
+    float3 turboTint = float3(0.18f, 0.96f, 1.00f);
+    float3 combined = lerp(input.col * (0.45f + 0.90f * texCol), turboTint * (0.55f + 0.75f * texCol), uTurbo * 0.55f);
+    float3 lit = saturate(combined * (0.85f + 0.30f * uPulse));
     return float4(lit, 1.0f);
 }
 )";
 
 const Vertex kStarVertices[] = {
-    {  0.00f,  0.00f,  0.92f, 1.00f, 0.95f },
-    {  0.00f,  0.55f,  0.08f, 0.92f, 0.32f },
-    {  0.14f,  0.14f,  0.04f, 0.55f, 0.25f },
+    {  0.00f,  0.00f,  0.92f, 1.00f, 0.95f,  0.50f, 0.50f },
+    {  0.00f,  0.55f,  0.10f, 0.95f, 0.35f,  0.50f, 0.00f },
+    {  0.14f,  0.14f,  0.06f, 0.65f, 0.32f,  0.63f, 0.37f },
 
-    {  0.00f,  0.00f,  0.92f, 1.00f, 0.95f },
-    {  0.14f,  0.14f,  0.04f, 0.55f, 0.25f },
-    {  0.55f,  0.00f,  0.06f, 0.85f, 0.72f },
+    {  0.00f,  0.00f,  0.92f, 1.00f, 0.95f,  0.50f, 0.50f },
+    {  0.14f,  0.14f,  0.06f, 0.65f, 0.32f,  0.63f, 0.37f },
+    {  0.55f,  0.00f,  0.08f, 0.88f, 0.78f,  1.00f, 0.50f },
 
-    {  0.00f,  0.00f,  0.92f, 1.00f, 0.95f },
-    {  0.55f,  0.00f,  0.06f, 0.85f, 0.72f },
-    {  0.14f, -0.14f,  0.04f, 0.45f, 0.48f },
+    {  0.00f,  0.00f,  0.92f, 1.00f, 0.95f,  0.50f, 0.50f },
+    {  0.55f,  0.00f,  0.08f, 0.88f, 0.78f,  1.00f, 0.50f },
+    {  0.14f, -0.14f,  0.06f, 0.55f, 0.55f,  0.63f, 0.63f },
 
-    {  0.00f,  0.00f,  0.92f, 1.00f, 0.95f },
-    {  0.14f, -0.14f,  0.04f, 0.45f, 0.48f },
-    {  0.00f, -0.55f,  0.15f, 0.95f, 0.38f },
+    {  0.00f,  0.00f,  0.92f, 1.00f, 0.95f,  0.50f, 0.50f },
+    {  0.14f, -0.14f,  0.06f, 0.55f, 0.55f,  0.63f, 0.63f },
+    {  0.00f, -0.55f,  0.18f, 0.96f, 0.40f,  0.50f, 1.00f },
 
-    {  0.00f,  0.00f,  0.92f, 1.00f, 0.95f },
-    {  0.00f, -0.55f,  0.15f, 0.95f, 0.38f },
-    { -0.14f, -0.14f,  0.04f, 0.55f, 0.25f },
+    {  0.00f,  0.00f,  0.92f, 1.00f, 0.95f,  0.50f, 0.50f },
+    {  0.00f, -0.55f,  0.18f, 0.96f, 0.40f,  0.50f, 1.00f },
+    { -0.14f, -0.14f,  0.06f, 0.65f, 0.32f,  0.37f, 0.63f },
 
-    {  0.00f,  0.00f,  0.92f, 1.00f, 0.95f },
-    { -0.14f, -0.14f,  0.04f, 0.55f, 0.25f },
-    { -0.55f,  0.00f,  0.06f, 0.85f, 0.72f },
+    {  0.00f,  0.00f,  0.92f, 1.00f, 0.95f,  0.50f, 0.50f },
+    { -0.14f, -0.14f,  0.06f, 0.65f, 0.32f,  0.37f, 0.63f },
+    { -0.55f,  0.00f,  0.08f, 0.88f, 0.78f,  0.00f, 0.50f },
 
-    {  0.00f,  0.00f,  0.92f, 1.00f, 0.95f },
-    { -0.55f,  0.00f,  0.06f, 0.85f, 0.72f },
-    { -0.14f,  0.14f,  0.04f, 0.45f, 0.48f },
+    {  0.00f,  0.00f,  0.92f, 1.00f, 0.95f,  0.50f, 0.50f },
+    { -0.55f,  0.00f,  0.08f, 0.88f, 0.78f,  0.00f, 0.50f },
+    { -0.14f,  0.14f,  0.06f, 0.55f, 0.55f,  0.37f, 0.37f },
 
-    {  0.00f,  0.00f,  0.92f, 1.00f, 0.95f },
-    { -0.14f,  0.14f,  0.04f, 0.45f, 0.48f },
-    {  0.00f,  0.55f,  0.08f, 0.92f, 0.32f },
+    {  0.00f,  0.00f,  0.92f, 1.00f, 0.95f,  0.50f, 0.50f },
+    { -0.14f,  0.14f,  0.06f, 0.55f, 0.55f,  0.37f, 0.37f },
+    {  0.00f,  0.55f,  0.10f, 0.95f, 0.35f,  0.50f, 0.00f },
 };
+
+std::vector<uint8_t> BuildProceduralCrestTexture(uint32_t size) {
+    std::vector<uint8_t> pixels(static_cast<size_t>(size) * size * 4);
+    for (uint32_t y = 0; y < size; ++y) {
+        for (uint32_t x = 0; x < size; ++x) {
+            const uint32_t cell = 32;
+            const bool gridLine = ((x % cell) < 3) || ((y % cell) < 3);
+            const bool checker = (((x / cell) + (y / cell)) & 1u) != 0;
+            const float fx = (static_cast<float>(x) / static_cast<float>(size)) * 2.0f - 1.0f;
+            const float fy = (static_cast<float>(y) / static_cast<float>(size)) * 2.0f - 1.0f;
+            const float ring = 0.5f + 0.5f * std::sinf(std::sqrtf(fx * fx + fy * fy) * 18.0f);
+
+            uint8_t r = gridLine ? 210 : (checker ? 42 : 24);
+            uint8_t g = gridLine ? 255 : static_cast<uint8_t>(110 + 115 * ring);
+            uint8_t b = gridLine ? 235 : static_cast<uint8_t>(checker ? (145 + 75 * ring) : (85 + 65 * ring));
+
+            const size_t idx = (static_cast<size_t>(y) * size + x) * 4;
+            pixels[idx + 0] = r;
+            pixels[idx + 1] = g;
+            pixels[idx + 2] = b;
+            pixels[idx + 3] = 255;
+        }
+    }
+    return pixels;
+}
 
 bool CompileShader(const char* entry, const char* target, ComPtr<ID3DBlob>& outBlob) {
     ComPtr<ID3DBlob> errors;
     HRESULT hr = D3DCompile(
         kShaderSource, std::strlen(kShaderSource),
-        "scarlett_star.hlsl", nullptr, nullptr,
+        "scarlett_star_textured.hlsl", nullptr, nullptr,
         entry, target, D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION,
         0, &outBlob, &errors);
     if (FAILED(hr)) {
@@ -356,14 +393,67 @@ int main() {
         }
     }
 
-    // 3. Initialize GameInput
-    ComPtr<IGameInput> gameInput;
-    if (FAILED(GameInputCreate(&gameInput))) {
-        std::printf("[TITLE] GameInputCreate failed!\n");
+    // 3. Exercise xg_xs.dll texture tiling & detiling round-trip
+    std::vector<uint8_t> sourcePixels = BuildProceduralCrestTexture(kTexSize);
+    const uint32_t srcRowPitch = kTexSize * 4;
+
+    XG_TEXTURE2D_DESC xgTiledDesc{};
+    xgTiledDesc.Width = kTexSize;
+    xgTiledDesc.Height = kTexSize;
+    xgTiledDesc.MipLevels = 1;
+    xgTiledDesc.ArraySize = 1;
+    xgTiledDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    xgTiledDesc.TileMode = XG_TILE_MODE_2D_THIN;
+
+    ComPtr<IXGTextureAddressComputer> tiledComputer;
+    XG_RESOURCE_LAYOUT tiledLayout{};
+    if (FAILED(XGCreateTexture2DComputer(&xgTiledDesc, &tiledComputer)) ||
+        FAILED(tiledComputer->GetResourceLayout(&tiledLayout))) {
+        std::printf("[TITLE] XGCreateTexture2DComputer failed!\n");
         return 1;
     }
 
-    // 4. Scarlett D3D12.x graphics bootstrap
+    XG_TEXTURE2D_DESC xgLinearDesc = xgTiledDesc;
+    xgLinearDesc.TileMode = XG_TILE_MODE_LINEAR;
+    XG_RESOURCE_LAYOUT linearLayout{};
+    if (FAILED(XGComputeTexture2DLayout(&xgLinearDesc, &linearLayout))) {
+        return 1;
+    }
+
+    std::vector<uint8_t> consoleTiledMem(static_cast<size_t>(tiledLayout.SizeBytes), 0);
+    std::vector<uint8_t> detiledUploadMem(static_cast<size_t>(linearLayout.SizeBytes), 0);
+
+    if (FAILED(tiledComputer->CopyIntoSubresource(consoleTiledMem.data(), 0,
+                                                  sourcePixels.data(), srcRowPitch, 0)) ||
+        FAILED(tiledComputer->CopyFromSubresource(detiledUploadMem.data(), 0,
+                                                  consoleTiledMem.data(),
+                                                  linearLayout.Plane[0].MipLayout[0].PitchBytes, 0))) {
+        std::printf("[TITLE] xg_xs swizzle/detile transfer failed!\n");
+        return 1;
+    }
+
+    bool roundTripExact = true;
+    for (uint32_t y = 0; y < kTexSize; ++y) {
+        const uint8_t* a = sourcePixels.data() + static_cast<size_t>(y) * srcRowPitch;
+        const uint8_t* b = detiledUploadMem.data() +
+                           static_cast<size_t>(y) * linearLayout.Plane[0].MipLayout[0].PitchBytes;
+        if (std::memcmp(a, b, srcRowPitch) != 0) {
+            roundTripExact = false;
+            break;
+        }
+    }
+    std::printf("[TITLE] xg_xs 2D_THIN swizzle -> detile round-trip: %s (pitch=%u B, tiled=%llu B)\n",
+                roundTripExact ? "BIT-EXACT" : "MISMATCH",
+                linearLayout.Plane[0].MipLayout[0].PitchBytes,
+                static_cast<unsigned long long>(tiledLayout.SizeBytes));
+
+    // 4. Initialize GameInput
+    ComPtr<IGameInput> gameInput;
+    if (FAILED(GameInputCreate(&gameInput))) {
+        return 1;
+    }
+
+    // 5. Scarlett D3D12.x graphics bootstrap
     D3D12XBOX_CREATE_DEVICE_PARAMETERS params{};
     params.Version = 1;
 
@@ -382,16 +472,45 @@ int main() {
         return 1;
     }
 
-    D3D12_ROOT_PARAMETER rootParam{};
-    rootParam.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-    rootParam.Constants.ShaderRegister = 0;
-    rootParam.Constants.RegisterSpace = 0;
-    rootParam.Constants.Num32BitValues = sizeof(DrawConstants) / sizeof(uint32_t);
-    rootParam.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+    // Root Signature: [0] 32-bit constants b0, [1] SRV descriptor table t0, plus Static Sampler s0
+    D3D12_DESCRIPTOR_RANGE srvRange{};
+    srvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    srvRange.NumDescriptors = 1;
+    srvRange.BaseShaderRegister = 0;
+    srvRange.RegisterSpace = 0;
+    srvRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+
+    D3D12_ROOT_PARAMETER rootParams[2]{};
+    rootParams[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+    rootParams[0].Constants.ShaderRegister = 0;
+    rootParams[0].Constants.RegisterSpace = 0;
+    rootParams[0].Constants.Num32BitValues = sizeof(DrawConstants) / sizeof(uint32_t);
+    rootParams[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+    rootParams[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    rootParams[1].DescriptorTable.NumDescriptorRanges = 1;
+    rootParams[1].DescriptorTable.pDescriptorRanges = &srvRange;
+    rootParams[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+    D3D12_STATIC_SAMPLER_DESC staticSampler{};
+    staticSampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+    staticSampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+    staticSampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+    staticSampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+    staticSampler.MaxAnisotropy = 1;
+    staticSampler.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
+    staticSampler.BorderColor = D3D12_STATIC_BORDER_COLOR_OPAQUE_BLACK;
+    staticSampler.MinLOD = 0.0f;
+    staticSampler.MaxLOD = D3D12_FLOAT32_MAX;
+    staticSampler.ShaderRegister = 0;
+    staticSampler.RegisterSpace = 0;
+    staticSampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
     D3D12_ROOT_SIGNATURE_DESC rsDesc{};
-    rsDesc.NumParameters = 1;
-    rsDesc.pParameters = &rootParam;
+    rsDesc.NumParameters = 2;
+    rsDesc.pParameters = rootParams;
+    rsDesc.NumStaticSamplers = 1;
+    rsDesc.pStaticSamplers = &staticSampler;
     rsDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
 
     ComPtr<ID3DBlob> rsBlob;
@@ -413,8 +532,9 @@ int main() {
     }
 
     D3D12_INPUT_ELEMENT_DESC inputLayout[] = {
-        { "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT,    0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-        { "COLOR",    0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 8, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
+        { "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT,    0, 0,  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+        { "COLOR",    0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 8,  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+        { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,    0, 20, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
     };
 
     D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc{};
@@ -440,6 +560,10 @@ int main() {
     D3D12_HEAP_PROPERTIES uploadHeap{};
     uploadHeap.Type = D3D12_HEAP_TYPE_UPLOAD;
 
+    D3D12_HEAP_PROPERTIES defaultHeap{};
+    defaultHeap.Type = D3D12_HEAP_TYPE_DEFAULT;
+
+    // Upload Vertex Buffer
     D3D12_RESOURCE_DESC vbDesc{};
     vbDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
     vbDesc.Width = sizeof(kStarVertices);
@@ -470,9 +594,59 @@ int main() {
     vbView.StrideInBytes = sizeof(Vertex);
     vbView.SizeInBytes = sizeof(kStarVertices);
 
-    D3D12_HEAP_PROPERTIES defaultHeap{};
-    defaultHeap.Type = D3D12_HEAP_TYPE_DEFAULT;
+    // Create GPU texture + upload staging buffer sized via xg_xs.dll
+    D3D12_RESOURCE_DESC texDesc{};
+    texDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    texDesc.Width = kTexSize;
+    texDesc.Height = kTexSize;
+    texDesc.DepthOrArraySize = 1;
+    texDesc.MipLevels = 1;
+    texDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    texDesc.SampleDesc.Count = 1;
 
+    ComPtr<ID3D12Resource> crestTexture;
+    if (FAILED(deviceX->CreateCommittedResource(
+            &defaultHeap, D3D12_HEAP_FLAG_NONE, &texDesc,
+            D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&crestTexture)))) {
+        return 1;
+    }
+
+    D3D12_RESOURCE_DESC texUploadDesc = vbDesc;
+    texUploadDesc.Width = linearLayout.SizeBytes;
+
+    ComPtr<ID3D12Resource> texUpload;
+    if (FAILED(deviceX->CreateCommittedResource(
+            &uploadHeap, D3D12_HEAP_FLAG_NONE, &texUploadDesc,
+            D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&texUpload)))) {
+        return 1;
+    }
+
+    void* mappedTex = nullptr;
+    if (FAILED(texUpload->Map(0, &readRange, &mappedTex))) {
+        return 1;
+    }
+    std::memcpy(mappedTex, detiledUploadMem.data(), detiledUploadMem.size());
+    texUpload->Unmap(0, nullptr);
+
+    // Shader-visible SRV descriptor heap
+    D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc{};
+    srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+    srvHeapDesc.NumDescriptors = 1;
+    srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+    ComPtr<ID3D12DescriptorHeap> srvHeap;
+    if (FAILED(deviceX->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&srvHeap)))) {
+        return 1;
+    }
+
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    srvDesc.Texture2D.MipLevels = 1;
+    deviceX->CreateShaderResourceView(crestTexture.Get(), &srvDesc,
+                                      srvHeap->GetCPUDescriptorHandleForHeapStart());
+
+    // Console-owned render target texture
     D3D12_RESOURCE_DESC rtDesc{};
     rtDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
     rtDesc.Width = kWidth;
@@ -509,10 +683,49 @@ int main() {
         FAILED(deviceX->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)))) {
         return 1;
     }
-    cmdList->Close();
 
     HANDLE fenceEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     UINT64 fenceVal = 0;
+
+    // Upload the xg_xs-laid-out texture to default GPU memory & transition to PIXEL_SHADER_RESOURCE
+    {
+        D3D12_TEXTURE_COPY_LOCATION dstLoc{};
+        dstLoc.pResource = crestTexture.Get();
+        dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+        dstLoc.SubresourceIndex = 0;
+
+        D3D12_TEXTURE_COPY_LOCATION srcLoc{};
+        srcLoc.pResource = texUpload.Get();
+        srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+        srcLoc.PlacedFootprint.Offset = linearLayout.Plane[0].MipLayout[0].OffsetBytes;
+        srcLoc.PlacedFootprint.Footprint.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        srcLoc.PlacedFootprint.Footprint.Width = kTexSize;
+        srcLoc.PlacedFootprint.Footprint.Height = kTexSize;
+        srcLoc.PlacedFootprint.Footprint.Depth = 1;
+        srcLoc.PlacedFootprint.Footprint.RowPitch = linearLayout.Plane[0].MipLayout[0].PitchBytes;
+
+        cmdList->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
+
+        D3D12_RESOURCE_BARRIER texBarrier{};
+        texBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        texBarrier.Transition.pResource = crestTexture.Get();
+        texBarrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+        texBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+        texBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+        cmdList->ResourceBarrier(1, &texBarrier);
+        cmdList->Close();
+
+        ID3D12CommandList* initLists[] = { cmdList.Get() };
+        cmdQueue->ExecuteCommandLists(1, initLists);
+
+        ++fenceVal;
+        cmdQueue->Signal(fence.Get(), fenceVal);
+        if (fence->GetCompletedValue() < fenceVal) {
+            fence->SetEventOnCompletion(fenceVal, fenceEvent);
+            WaitForSingleObject(fenceEvent, INFINITE);
+        }
+        texUpload.Reset();
+    }
 
     D3D12_VIEWPORT viewport{ 0.0f, 0.0f, static_cast<float>(kWidth), static_cast<float>(kHeight), 0.0f, 1.0f };
     D3D12_RECT scissor{ 0, 0, static_cast<LONG>(kWidth), static_cast<LONG>(kHeight) };
@@ -601,7 +814,7 @@ int main() {
         toRT.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
         cmdList->ResourceBarrier(1, &toRT);
 
-        const float bgColor[4] = { 0.04f, 0.07f, 0.09f, 1.0f };
+        const float bgColor[4] = { 0.03f, 0.06f, 0.08f, 1.0f };
         cmdList->ClearRenderTargetView(rtvHandle, bgColor, 0, nullptr);
 
         cmdList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
@@ -609,17 +822,21 @@ int main() {
         cmdList->RSSetScissorRects(1, &scissor);
 
         cmdList->SetGraphicsRootSignature(rootSig.Get());
+        ID3D12DescriptorHeap* heaps[] = { srvHeap.Get() };
+        cmdList->SetDescriptorHeaps(1, heaps);
+
         DrawConstants dc{};
         dc.offsetX = posX;
         dc.offsetY = posY;
         dc.angle   = angle;
         dc.pulse   = 0.5f + 0.5f * std::sinf(elapsed * (turbo ? 12.0f : 3.0f));
         dc.aspect  = static_cast<float>(kWidth) / static_cast<float>(kHeight);
-        dc.scale   = turbo ? 0.62f : 0.50f;
+        dc.scale   = turbo ? 0.65f : 0.52f;
         dc.turbo   = turbo ? 1.0f : 0.0f;
-        dc.pad     = 0.0f;
+        dc.timeSec = elapsed;
 
         cmdList->SetGraphicsRoot32BitConstants(0, sizeof(DrawConstants) / sizeof(uint32_t), &dc, 0);
+        cmdList->SetGraphicsRootDescriptorTable(1, srvHeap->GetGPUDescriptorHandleForHeapStart());
         cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         cmdList->IASetVertexBuffers(0, 1, &vbView);
         cmdList->DrawInstanced(static_cast<UINT>(_countof(kStarVertices)), 1, 0, 0);
@@ -658,7 +875,6 @@ int main() {
         ++frame;
     }
 
-    // Auto-save position on exit
     if (saveContainer) {
         SaveStarState(queue, saveContainer, posX, posY, angle, saveCount);
         XGameSaveCloseContainer(saveContainer);
@@ -675,6 +891,8 @@ int main() {
     cmdList.Reset();
     cmdAlloc.Reset();
     rtvHeap.Reset();
+    srvHeap.Reset();
+    crestTexture.Reset();
     renderTarget.Reset();
     vertexBuffer.Reset();
     pso.Reset();
@@ -682,6 +900,7 @@ int main() {
     cmdQueue.Reset();
     deviceX.Reset();
     gameInput.Reset();
+    tiledComputer.Reset();
 
     if (user) {
         XUserCloseHandle(user);

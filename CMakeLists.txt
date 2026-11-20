@@ -58,11 +58,19 @@ add_library(gameinput SHARED
 target_link_libraries(gameinput PRIVATE sc_common user32 xinput)
 sc_set_runtime_dir(gameinput "${SC_BIN_DIR}/shims")
 
+# Shim #4: xg_xs.dll -> build/bin/shims/ (auto-discovered by loader.exe!)
+add_library(xg_xs SHARED
+    src/shims/xg_xs/xg_xs.cpp
+    src/shims/xg_xs/xg_xs.def
+)
+target_link_libraries(xg_xs PRIVATE sc_common)
+sc_set_runtime_dir(xg_xs "${SC_BIN_DIR}/shims")
+
 # Isolated synthetic title -> build/bin/titles/dummy_title/
 add_executable(dummy_title
     src/tests/dummy_title/main.cpp
 )
-target_link_libraries(dummy_title PRIVATE sc_common xgameruntime d3d12_xs gameinput d3dcompiler)
+target_link_libraries(dummy_title PRIVATE sc_common xgameruntime d3d12_xs gameinput xg_xs d3dcompiler)
 sc_set_runtime_dir(dummy_title "${SC_BIN_DIR}/titles/dummy_title")
 
 # Host loader -> build/bin/

@@ -1,10 +1,10 @@
 #include "d3d12_xs.hpp"
+#include "shader_inspector.hpp"
 #include "common/stub.hpp"
 
 #include <wrl/client.h>
 #include <atomic>
 #include <cstdio>
-#include <cstring>
 #include <string>
 
 using Microsoft::WRL::ComPtr;
@@ -25,20 +25,6 @@ std::string WideToUtf8(const wchar_t* wstr) {
     std::string out(static_cast<size_t>(len - 1), '\0');
     WideCharToMultiByte(CP_UTF8, 0, wstr, -1, out.data(), len, nullptr, nullptr);
     return out;
-}
-
-const char* ClassifyShaderBytecode(const D3D12_SHADER_BYTECODE& bc) {
-    if (!bc.pShaderBytecode || bc.BytecodeLength < 4) {
-        return "none";
-    }
-    const auto* bytes = static_cast<const uint8_t*>(bc.pShaderBytecode);
-    if (std::memcmp(bytes, "DXBC", 4) == 0) {
-        return "DXBC";
-    }
-    if (std::memcmp(bytes, "DXIL", 4) == 0) {
-        return "DXIL";
-    }
-    return "SCARLETT_ISA_OR_CUSTOM";
 }
 
 LRESULT CALLBACK ScarlettWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -241,7 +227,7 @@ private:
         m_hwnd = CreateWindowExW(
             0,
             kWindowClassName,
-            L"Scarlett Layer - Xbox Series X [d3d12_xs + gameinput]",
+            L"Scarlett Layer - Xbox Series X [d3d12_xs + xg_xs + gameinput]",
             WS_OVERLAPPEDWINDOW | WS_VISIBLE,
             CW_USEDEFAULT, CW_USEDEFAULT,
             rc.right - rc.left, rc.bottom - rc.top,
@@ -442,6 +428,12 @@ public:
         m_device->CreateRenderTargetView(pResource, pDesc, DestDescriptor);
     }
 
+    void STDMETHODCALLTYPE CreateShaderResourceView(
+        ID3D12Resource* pResource, const D3D12_SHADER_RESOURCE_VIEW_DESC* pDesc,
+        D3D12_CPU_DESCRIPTOR_HANDLE DestDescriptor) override {
+        m_device->CreateShaderResourceView(pResource, pDesc, DestDescriptor);
+    }
+
     HRESULT STDMETHODCALLTYPE CreateFence(
         UINT64 InitialValue, D3D12_FENCE_FLAGS Flags, REFIID riid, void** ppFence) override {
         return m_device->CreateFence(InitialValue, Flags, riid, ppFence);
@@ -467,12 +459,10 @@ public:
         if (!pDesc) {
             return E_INVALIDARG;
         }
-        // Future RDNA2-to-DXIL shader translation pipeline plugs in right here
-        char buf[160];
-        std::snprintf(buf, sizeof(buf), "-> PSO VS=%s (%zu B), PS=%s (%zu B)",
-                      ClassifyShaderBytecode(pDesc->VS), pDesc->VS.BytecodeLength,
-                      ClassifyShaderBytecode(pDesc->PS), pDesc->PS.BytecodeLength);
-        sc::log::Write(sc::log::Level::Info, "d3d12_xs", "CreateGraphicsPipelineState", buf);
+        std::string vsInfo = sc::d3d12::InspectShaderBytecode(pDesc->VS);
+        std::string psInfo = sc::d3d12::InspectShaderBytecode(pDesc->PS);
+        std::string msg = "-> PSO VS=" + vsInfo + " | PS=" + psInfo;
+        sc::log::Write(sc::log::Level::Info, "d3d12_xs", "CreateGraphicsPipelineState", msg.c_str());
         return m_device->CreateGraphicsPipelineState(pDesc, riid, ppPipelineState);
     }
 
