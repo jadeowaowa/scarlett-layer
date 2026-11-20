@@ -1,10 +1,11 @@
 #include "common/stub.hpp"
 #include "gdk_types.hpp"
+#include "runtime_internal.hpp"
 #include "task_queue.hpp"
 
 #include <atomic>
-#include <condition_variable>
 #include <cstring>
+#include <memory>
 #include <mutex>
 #include <string>
 
@@ -14,33 +15,24 @@ struct XUser {
     std::atomic<uint32_t> refs{1};
 };
 
+namespace sc::runtime {
+
+uint64_t GetUserXuid(XUserHandle user) {
+    return user ? user->xuid : 0x0009000000000001ULL;
+}
+
+} // namespace sc::runtime
+
 namespace {
 
-struct AsyncState {
-    std::mutex mtx;
-    std::condition_variable cv;
-    HRESULT status{E_PENDING};
-    bool completed{false};
-    void* payload{nullptr};
-    std::atomic<uint32_t> refs{2};
-};
-
-void ReleaseAsyncState(AsyncState* s) {
-    if (s && s->refs.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-        delete s;
+struct UserAddPayload {
+    XUserHandle user{nullptr};
+    ~UserAddPayload() {
+        if (user && user->refs.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+            delete user;
+        }
     }
-}
-
-void StoreAsyncState(XAsyncBlock* block, AsyncState* state) {
-    std::memset(block->internal, 0, sizeof(block->internal));
-    std::memcpy(block->internal, &state, sizeof(state));
-}
-
-AsyncState* LoadAsyncState(XAsyncBlock* block) {
-    AsyncState* state = nullptr;
-    std::memcpy(&state, block->internal, sizeof(state));
-    return state;
-}
+};
 
 } // namespace
 
@@ -77,7 +69,7 @@ HRESULT WINAPI XAsyncGetStatus(XAsyncBlock* asyncBlock, bool wait) {
     if (!asyncBlock) {
         return E_INVALIDARG;
     }
-    AsyncState* state = LoadAsyncState(asyncBlock);
+    auto* state = sc::runtime::LoadAsyncState(asyncBlock);
     if (!state) {
         return E_INVALIDARG;
     }
@@ -89,36 +81,16 @@ HRESULT WINAPI XAsyncGetStatus(XAsyncBlock* asyncBlock, bool wait) {
 }
 
 HRESULT WINAPI XUserAddAsync(XUserAddOptions /*options*/, XAsyncBlock* async) {
-    if (!async) {
-        return E_INVALIDARG;
-    }
-
-    auto* state = new AsyncState();
-    StoreAsyncState(async, state);
-    XTaskQueueHandle queue = async->queue;
-
     sc::log::Write(sc::log::Level::Info, "xgameruntime", __FUNCTION__,
                    "-> queued mock local profile sign-in");
 
-    return sc::runtime::SubmitTask(queue, XTaskQueuePort::Work, [async, state, queue]() {
+    return sc::runtime::LaunchAsync(async, [](std::shared_ptr<void>& outPayload) -> HRESULT {
         sc::log::Write(sc::log::Level::Info, "xgameruntime", "XUserAddAsync[Work]",
                        "-> creating offline XUser handle");
-
-        auto* user = new XUser();
-        {
-            std::lock_guard<std::mutex> lock(state->mtx);
-            state->payload = user;
-            state->status = S_OK;
-            state->completed = true;
-        }
-        state->cv.notify_all();
-
-        sc::runtime::SubmitTask(queue, XTaskQueuePort::Completion, [async, state]() {
-            if (async->callback) {
-                async->callback(async);
-            }
-            ReleaseAsyncState(state);
-        });
+        auto result = std::make_shared<UserAddPayload>();
+        result->user = new XUser();
+        outPayload = std::move(result);
+        return S_OK;
     });
 }
 
@@ -126,7 +98,7 @@ HRESULT WINAPI XUserAddResult(XAsyncBlock* async, XUserHandle* newUser) {
     if (!async || !newUser) {
         return E_INVALIDARG;
     }
-    AsyncState* state = LoadAsyncState(async);
+    auto* state = sc::runtime::LoadAsyncState(async);
     if (!state) {
         return E_INVALIDARG;
     }
@@ -138,14 +110,14 @@ HRESULT WINAPI XUserAddResult(XAsyncBlock* async, XUserHandle* newUser) {
             return E_PENDING;
         }
         hr = state->status;
-        if (SUCCEEDED(hr)) {
-            *newUser = static_cast<XUserHandle>(state->payload);
-            state->payload = nullptr;
+        if (SUCCEEDED(hr) && state->payload) {
+            auto payload = std::static_pointer_cast<UserAddPayload>(state->payload);
+            *newUser = payload->user;
+            payload->user = nullptr; // transfer ownership to caller
         }
     }
 
-    std::memset(async->internal, 0, sizeof(async->internal));
-    ReleaseAsyncState(state);
+    sc::runtime::DetachAsyncState(async, state);
     return hr;
 }
 

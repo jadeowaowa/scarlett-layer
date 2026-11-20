@@ -27,30 +27,147 @@ extern "C" {
     __declspec(dllimport) HRESULT WINAPI XUserGetGamertag(
         XUserHandle user, XUserGamertagComponent comp, size_t size, char* out, size_t* used);
     __declspec(dllimport) void    WINAPI XUserCloseHandle(XUserHandle user);
+
+    __declspec(dllimport) HRESULT WINAPI XGameSaveInitializeProviderAsync(
+        XUserHandle requestingUser, const char* configurationId, bool syncOnDemand, XAsyncBlock* async);
+    __declspec(dllimport) HRESULT WINAPI XGameSaveInitializeProviderResult(
+        XAsyncBlock* async, XGameSaveProviderHandle* provider);
+    __declspec(dllimport) void    WINAPI XGameSaveCloseProvider(XGameSaveProviderHandle provider);
+    __declspec(dllimport) HRESULT WINAPI XGameSaveCreateContainer(
+        XGameSaveProviderHandle provider, const char* name, XGameSaveContainerHandle* result);
+    __declspec(dllimport) void    WINAPI XGameSaveCloseContainer(XGameSaveContainerHandle context);
+    __declspec(dllimport) HRESULT WINAPI XGameSaveCreateUpdate(
+        XGameSaveContainerHandle container, const char* displayName, XGameSaveUpdateHandle* updateContext);
+    __declspec(dllimport) void    WINAPI XGameSaveCloseUpdate(XGameSaveUpdateHandle context);
+    __declspec(dllimport) HRESULT WINAPI XGameSaveSubmitBlobWrite(
+        XGameSaveUpdateHandle updateContext, const char* blobName, const uint8_t* data, size_t byteCount);
+    __declspec(dllimport) HRESULT WINAPI XGameSaveSubmitUpdateAsync(
+        XGameSaveUpdateHandle updateContext, XAsyncBlock* async);
+    __declspec(dllimport) HRESULT WINAPI XGameSaveSubmitUpdateResult(XAsyncBlock* async);
+    __declspec(dllimport) HRESULT WINAPI XGameSaveReadBlobDataAsync(
+        XGameSaveContainerHandle container, const char** blobNames, uint32_t countOfBlobs, XAsyncBlock* async);
+    __declspec(dllimport) HRESULT WINAPI XGameSaveReadBlobDataResult(
+        XAsyncBlock* async, size_t blobsSize, XGameSaveBlob* blobData, uint32_t* countOfBlobs);
 }
 
 namespace {
 
 constexpr UINT kWidth = 1280;
 constexpr UINT kHeight = 720;
+constexpr char kTitleScid[] = "00000000-0000-0000-0000-0000SCARLETT";
 
-struct SignInContext {
+struct StarSaveData {
+    uint32_t magic;
+    uint32_t version;
+    float    posX;
+    float    posY;
+    float    angle;
+    uint32_t saveCount;
+};
+constexpr uint32_t kSaveMagic = 0x53434152U; // 'SCAR'
+
+struct AsyncWaiter {
     std::atomic<bool> done{false};
-    XUserHandle user{nullptr};
 };
 
-void CALLBACK OnUserAdded(XAsyncBlock* async) {
-    auto* ctx = static_cast<SignInContext*>(async->context);
-    HRESULT hr = XUserAddResult(async, &ctx->user);
-    if (SUCCEEDED(hr) && ctx->user) {
-        char tag[64]{};
-        size_t used = 0;
-        if (SUCCEEDED(XUserGetGamertag(ctx->user, XUserGamertagComponent::Classic,
-                                       sizeof(tag), tag, &used))) {
-            std::printf("[TITLE][T:%05lu] Signed in as: %s\n", GetCurrentThreadId(), tag);
-        }
+void CALLBACK OnSimpleComplete(XAsyncBlock* async) {
+    auto* w = static_cast<AsyncWaiter*>(async->context);
+    w->done.store(true, std::memory_order_release);
+}
+
+void PumpUntilDone(XTaskQueueHandle queue, AsyncWaiter& waiter) {
+    while (!waiter.done.load(std::memory_order_acquire)) {
+        XTaskQueueDispatch(queue, XTaskQueuePort::Completion, 50);
     }
-    ctx->done.store(true, std::memory_order_release);
+}
+
+bool LoadStarState(
+    XTaskQueueHandle queue,
+    XGameSaveContainerHandle container,
+    StarSaveData& outData) {
+    AsyncWaiter waiter{};
+    XAsyncBlock async{};
+    async.queue = queue;
+    async.context = &waiter;
+    async.callback = OnSimpleComplete;
+
+    const char* blobNames[] = { "star_transform" };
+    if (FAILED(XGameSaveReadBlobDataAsync(container, blobNames, 1, &async))) {
+        return false;
+    }
+    PumpUntilDone(queue, waiter);
+
+    alignas(8) uint8_t buffer[512]{};
+    uint32_t blobCount = 0;
+    HRESULT hr = XGameSaveReadBlobDataResult(
+        &async, sizeof(buffer), reinterpret_cast<XGameSaveBlob*>(buffer), &blobCount);
+    if (FAILED(hr) || blobCount == 0) {
+        return false;
+    }
+
+    auto* blob = reinterpret_cast<XGameSaveBlob*>(buffer);
+    if (blob->info.size != sizeof(StarSaveData) || !blob->data) {
+        return false;
+    }
+
+    StarSaveData loaded{};
+    std::memcpy(&loaded, blob->data, sizeof(StarSaveData));
+    if (loaded.magic != kSaveMagic || loaded.version != 1) {
+        return false;
+    }
+
+    outData = loaded;
+    return true;
+}
+
+bool SaveStarState(
+    XTaskQueueHandle queue,
+    XGameSaveContainerHandle container,
+    float posX,
+    float posY,
+    float angle,
+    uint32_t& saveCount) {
+    XGameSaveUpdateHandle upd = nullptr;
+    if (FAILED(XGameSaveCreateUpdate(container, "Star Transform", &upd))) {
+        return false;
+    }
+
+    StarSaveData payload{};
+    payload.magic = kSaveMagic;
+    payload.version = 1;
+    payload.posX = posX;
+    payload.posY = posY;
+    payload.angle = angle;
+    payload.saveCount = saveCount + 1;
+
+    HRESULT hr = XGameSaveSubmitBlobWrite(
+        upd, "star_transform",
+        reinterpret_cast<const uint8_t*>(&payload), sizeof(payload));
+    if (FAILED(hr)) {
+        XGameSaveCloseUpdate(upd);
+        return false;
+    }
+
+    AsyncWaiter waiter{};
+    XAsyncBlock async{};
+    async.queue = queue;
+    async.context = &waiter;
+    async.callback = OnSimpleComplete;
+
+    hr = XGameSaveSubmitUpdateAsync(upd, &async);
+    if (SUCCEEDED(hr)) {
+        PumpUntilDone(queue, waiter);
+        hr = XGameSaveSubmitUpdateResult(&async);
+    }
+    XGameSaveCloseUpdate(upd);
+
+    if (SUCCEEDED(hr)) {
+        saveCount = payload.saveCount;
+        std::printf("[TITLE] Saved state #%u -> pos=(%.2f, %.2f), angle=%.2f rad\n",
+                    saveCount, posX, posY, angle);
+        return true;
+    }
+    return false;
 }
 
 struct Vertex {
@@ -114,9 +231,7 @@ float4 PSMain(PSIn input) : SV_TARGET {
 }
 )";
 
-// 8-triangle (24-vertex) 4-pointed Scarlett star crest with bright core & neon tips
 const Vertex kStarVertices[] = {
-    // North-East blade (2 triangles)
     {  0.00f,  0.00f,  0.92f, 1.00f, 0.95f },
     {  0.00f,  0.55f,  0.08f, 0.92f, 0.32f },
     {  0.14f,  0.14f,  0.04f, 0.55f, 0.25f },
@@ -125,7 +240,6 @@ const Vertex kStarVertices[] = {
     {  0.14f,  0.14f,  0.04f, 0.55f, 0.25f },
     {  0.55f,  0.00f,  0.06f, 0.85f, 0.72f },
 
-    // South-East blade
     {  0.00f,  0.00f,  0.92f, 1.00f, 0.95f },
     {  0.55f,  0.00f,  0.06f, 0.85f, 0.72f },
     {  0.14f, -0.14f,  0.04f, 0.45f, 0.48f },
@@ -134,7 +248,6 @@ const Vertex kStarVertices[] = {
     {  0.14f, -0.14f,  0.04f, 0.45f, 0.48f },
     {  0.00f, -0.55f,  0.15f, 0.95f, 0.38f },
 
-    // South-West blade
     {  0.00f,  0.00f,  0.92f, 1.00f, 0.95f },
     {  0.00f, -0.55f,  0.15f, 0.95f, 0.38f },
     { -0.14f, -0.14f,  0.04f, 0.55f, 0.25f },
@@ -143,7 +256,6 @@ const Vertex kStarVertices[] = {
     { -0.14f, -0.14f,  0.04f, 0.55f, 0.25f },
     { -0.55f,  0.00f,  0.06f, 0.85f, 0.72f },
 
-    // North-West blade
     {  0.00f,  0.00f,  0.92f, 1.00f, 0.95f },
     { -0.55f,  0.00f,  0.06f, 0.85f, 0.72f },
     { -0.14f,  0.14f,  0.04f, 0.45f, 0.48f },
@@ -182,40 +294,82 @@ int main() {
     auto deviceType = XSystemGetDeviceType();
     std::printf("[TITLE] Device type: 0x%02X\n", static_cast<uint32_t>(deviceType));
 
-    // 1. Async offline profile sign-in via xgameruntime.dll
     XTaskQueueHandle queue = nullptr;
     if (FAILED(XTaskQueueCreate(XTaskQueueDispatchMode::ThreadPool,
                                 XTaskQueueDispatchMode::Manual, &queue))) {
         return 1;
     }
 
-    SignInContext ctx{};
-    XAsyncBlock async{};
-    async.queue = queue;
-    async.context = &ctx;
-    async.callback = OnUserAdded;
-
-    if (SUCCEEDED(XUserAddAsync(XUserAddOptions::AddDefaultUserSilently, &async))) {
-        while (!ctx.done.load(std::memory_order_acquire)) {
-            XTaskQueueDispatch(queue, XTaskQueuePort::Completion, 50);
+    // 1. Async offline profile sign-in
+    XUserHandle user = nullptr;
+    {
+        AsyncWaiter waiter{};
+        XAsyncBlock async{};
+        async.queue = queue;
+        async.context = &waiter;
+        async.callback = OnSimpleComplete;
+        if (SUCCEEDED(XUserAddAsync(XUserAddOptions::AddDefaultUserSilently, &async))) {
+            PumpUntilDone(queue, waiter);
+            if (SUCCEEDED(XUserAddResult(&async, &user)) && user) {
+                char tag[64]{};
+                size_t used = 0;
+                if (SUCCEEDED(XUserGetGamertag(user, XUserGamertagComponent::Classic,
+                                               sizeof(tag), tag, &used))) {
+                    std::printf("[TITLE][T:%05lu] Signed in as: %s\n", GetCurrentThreadId(), tag);
+                }
+            }
         }
     }
 
-    // 2. Initialize GameInput via auto-redirected gameinput.dll
+    // 2. Async Connected Storage (XGameSave) mount & restore
+    XGameSaveProviderHandle saveProvider = nullptr;
+    XGameSaveContainerHandle saveContainer = nullptr;
+    float posX = 0.0f;
+    float posY = 0.0f;
+    float angle = 0.0f;
+    uint32_t saveCount = 0;
+
+    {
+        AsyncWaiter waiter{};
+        XAsyncBlock async{};
+        async.queue = queue;
+        async.context = &waiter;
+        async.callback = OnSimpleComplete;
+
+        if (SUCCEEDED(XGameSaveInitializeProviderAsync(user, kTitleScid, false, &async))) {
+            PumpUntilDone(queue, waiter);
+            if (SUCCEEDED(XGameSaveInitializeProviderResult(&async, &saveProvider)) && saveProvider) {
+                if (SUCCEEDED(XGameSaveCreateContainer(saveProvider, "player_state", &saveContainer))) {
+                    StarSaveData restored{};
+                    if (LoadStarState(queue, saveContainer, restored)) {
+                        posX = restored.posX;
+                        posY = restored.posY;
+                        angle = restored.angle;
+                        saveCount = restored.saveCount;
+                        std::printf("[TITLE] Restored save #%u -> pos=(%.2f, %.2f), angle=%.2f rad\n",
+                                    saveCount, posX, posY, angle);
+                    } else {
+                        std::printf("[TITLE] No existing save found; starting at origin.\n");
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Initialize GameInput
     ComPtr<IGameInput> gameInput;
     if (FAILED(GameInputCreate(&gameInput))) {
         std::printf("[TITLE] GameInputCreate failed!\n");
         return 1;
     }
 
-    // 3. Scarlett D3D12.x graphics bootstrap via d3d12_xs.dll
+    // 4. Scarlett D3D12.x graphics bootstrap
     D3D12XBOX_CREATE_DEVICE_PARAMETERS params{};
     params.Version = 1;
 
     ComPtr<ID3D12DeviceX> deviceX;
     if (FAILED(D3D12XboxCreateDevice(nullptr, &params, IID_ID3D12DeviceX,
                                      reinterpret_cast<void**>(deviceX.GetAddressOf())))) {
-        std::printf("[TITLE] D3D12XboxCreateDevice failed!\n");
         return 1;
     }
 
@@ -228,7 +382,6 @@ int main() {
         return 1;
     }
 
-    // Build Root Signature (single 32-byte inline root constants slot at b0)
     D3D12_ROOT_PARAMETER rootParam{};
     rootParam.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
     rootParam.Constants.ShaderRegister = 0;
@@ -253,7 +406,6 @@ int main() {
         return 1;
     }
 
-    // Compile HLSL shaders & create Graphics PSO through d3d12_xs.dll
     ComPtr<ID3DBlob> vsBlob;
     ComPtr<ID3DBlob> psBlob;
     if (!CompileShader("VSMain", "vs_5_0", vsBlob) || !CompileShader("PSMain", "ps_5_0", psBlob)) {
@@ -275,20 +427,16 @@ int main() {
     psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
     psoDesc.SampleDesc.Count = 1;
     psoDesc.SampleMask = UINT_MAX;
-
     psoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
     psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
     psoDesc.RasterizerState.DepthClipEnable = TRUE;
-
     psoDesc.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
 
     ComPtr<ID3D12PipelineState> pso;
     if (FAILED(deviceX->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pso)))) {
-        std::printf("[TITLE] CreateGraphicsPipelineState failed!\n");
         return 1;
     }
 
-    // Upload Vertex Buffer
     D3D12_HEAP_PROPERTIES uploadHeap{};
     uploadHeap.Type = D3D12_HEAP_TYPE_UPLOAD;
 
@@ -322,7 +470,6 @@ int main() {
     vbView.StrideInBytes = sizeof(Vertex);
     vbView.SizeInBytes = sizeof(kStarVertices);
 
-    // Console-owned render target texture
     D3D12_HEAP_PROPERTIES defaultHeap{};
     defaultHeap.Type = D3D12_HEAP_TYPE_DEFAULT;
 
@@ -370,12 +517,10 @@ int main() {
     D3D12_VIEWPORT viewport{ 0.0f, 0.0f, static_cast<float>(kWidth), static_cast<float>(kHeight), 0.0f, 1.0f };
     D3D12_RECT scissor{ 0, 0, static_cast<LONG>(kWidth), static_cast<LONG>(kHeight) };
 
-    std::printf("[TITLE] Controls: WASD / Arrows / Left Stick = Move | Space / A = Turbo Spin | R / B = Reset | ESC = Exit\n");
+    std::printf("[TITLE] Controls: WASD/Stick = Move | Space/A = Turbo | F5/Menu = Quick-Save | R/B = Reset | ESC = Auto-Save & Exit\n");
 
-    float posX = 0.0f;
-    float posY = 0.0f;
-    float angle = 0.0f;
     float elapsed = 0.0f;
+    bool prevSavePressed = false;
     uint64_t lastTs = gameInput->GetCurrentTimestamp();
     uint64_t frame = 0;
 
@@ -386,11 +531,11 @@ int main() {
         lastTs = nowTs;
         elapsed += dt;
 
-        // Poll GameInput (gamepad + keyboard)
         float moveX = 0.0f;
         float moveY = 0.0f;
         bool turbo = false;
         bool reset = false;
+        bool savePressed = false;
 
         ComPtr<IGameInputReading> gpReading;
         if (SUCCEEDED(gameInput->GetCurrentReading(GameInputKindGamepad, nullptr, &gpReading))) {
@@ -404,6 +549,7 @@ int main() {
                 if ((gp.buttons & GameInputGamepadDPadDown) != 0)  moveY -= 1.0f;
                 if ((gp.buttons & GameInputGamepadA) != 0 || gp.rightTrigger > 0.25f) turbo = true;
                 if ((gp.buttons & GameInputGamepadB) != 0) reset = true;
+                if ((gp.buttons & GameInputGamepadMenu) != 0) savePressed = true;
             }
         }
 
@@ -419,10 +565,16 @@ int main() {
                     case 'D': case VK_RIGHT: moveX += 1.0f; break;
                     case VK_SPACE: case VK_SHIFT: turbo = true; break;
                     case 'R': reset = true; break;
+                    case VK_F5: savePressed = true; break;
                     default: break;
                 }
             }
         }
+
+        if (savePressed && !prevSavePressed && saveContainer) {
+            SaveStarState(queue, saveContainer, posX, posY, angle, saveCount);
+        }
+        prevSavePressed = savePressed;
 
         if (reset) {
             posX = 0.0f;
@@ -449,7 +601,6 @@ int main() {
         toRT.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
         cmdList->ResourceBarrier(1, &toRT);
 
-        // Deep charcoal-emerald backdrop so the neon shader geometry pops
         const float bgColor[4] = { 0.04f, 0.07f, 0.09f, 1.0f };
         cmdList->ClearRenderTargetView(rtvHandle, bgColor, 0, nullptr);
 
@@ -507,6 +658,15 @@ int main() {
         ++frame;
     }
 
+    // Auto-save position on exit
+    if (saveContainer) {
+        SaveStarState(queue, saveContainer, posX, posY, angle, saveCount);
+        XGameSaveCloseContainer(saveContainer);
+    }
+    if (saveProvider) {
+        XGameSaveCloseProvider(saveProvider);
+    }
+
     std::printf("[TITLE] Rendered %llu frames via PresentX. Shutting down...\n",
                 static_cast<unsigned long long>(frame));
 
@@ -523,8 +683,8 @@ int main() {
     deviceX.Reset();
     gameInput.Reset();
 
-    if (ctx.user) {
-        XUserCloseHandle(ctx.user);
+    if (user) {
+        XUserCloseHandle(user);
     }
     XTaskQueueCloseHandle(queue);
     XGameRuntimeUninitialize();

@@ -217,7 +217,7 @@ public:
             resolvedKind |= GameInputKindKeyboard;
             if (IsCurrentProcessForeground()) {
                 static constexpr uint8_t kTrackedVks[] = {
-                    'W', 'A', 'S', 'D', 'R',
+                    'W', 'A', 'S', 'D', 'R', VK_F5,
                     VK_UP, VK_DOWN, VK_LEFT, VK_RIGHT,
                     VK_SPACE, VK_SHIFT
                 };

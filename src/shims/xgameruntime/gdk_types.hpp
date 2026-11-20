@@ -65,3 +65,27 @@ enum class XUserGamertagComponent : uint32_t {
     ModernSuffix = 2,
     UniqueModern = 3
 };
+
+// XGameSave (Connected Storage) ABI types & GDK HRESULTs
+struct XGameSaveProvider;
+using XGameSaveProviderHandle = XGameSaveProvider*;
+
+struct XGameSaveContainer;
+using XGameSaveContainerHandle = XGameSaveContainer*;
+
+struct XGameSaveUpdate;
+using XGameSaveUpdateHandle = XGameSaveUpdate*;
+
+struct XGameSaveBlobInfo {
+    const char* name;
+    uint32_t    size;
+};
+
+struct XGameSaveBlob {
+    XGameSaveBlobInfo info;
+    uint8_t*          data;
+};
+
+inline constexpr HRESULT E_GS_INVALID_CONTAINER_NAME   = static_cast<HRESULT>(0x80830002L);
+inline constexpr HRESULT E_GS_BLOB_NOT_FOUND           = static_cast<HRESULT>(0x80830008L);
+inline constexpr HRESULT E_GS_PROVIDED_BUFFER_TOO_SMALL = static_cast<HRESULT>(0x8083000CL);

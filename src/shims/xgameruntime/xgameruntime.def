@@ -11,3 +11,16 @@ EXPORTS
     XUserAddResult
     XUserGetGamertag
     XUserCloseHandle
+    XGameSaveInitializeProviderAsync
+    XGameSaveInitializeProviderResult
+    XGameSaveCloseProvider
+    XGameSaveCreateContainer
+    XGameSaveCloseContainer
+    XGameSaveCreateUpdate
+    XGameSaveCloseUpdate
+    XGameSaveSubmitBlobWrite
+    XGameSaveSubmitBlobDelete
+    XGameSaveSubmitUpdateAsync
+    XGameSaveSubmitUpdateResult
+    XGameSaveReadBlobDataAsync
+    XGameSaveReadBlobDataResult

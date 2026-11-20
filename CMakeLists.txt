@@ -36,6 +36,7 @@ target_compile_definitions(sc_common INTERFACE NOMINMAX WIN32_LEAN_AND_MEAN)
 add_library(xgameruntime SHARED
     src/shims/xgameruntime/xgameruntime.cpp
     src/shims/xgameruntime/task_queue.cpp
+    src/shims/xgameruntime/game_save.cpp
     src/shims/xgameruntime/xgameruntime.def
 )
 target_link_libraries(xgameruntime PRIVATE sc_common)
@@ -49,7 +50,7 @@ add_library(d3d12_xs SHARED
 target_link_libraries(d3d12_xs PRIVATE sc_common d3d12 dxgi user32)
 sc_set_runtime_dir(d3d12_xs "${SC_BIN_DIR}/shims")
 
-# Shim #3: gameinput.dll -> build/bin/shims/ (auto-discovered by loader.exe!)
+# Shim #3: gameinput.dll -> build/bin/shims/
 add_library(gameinput SHARED
     src/shims/gameinput/gameinput.cpp
     src/shims/gameinput/gameinput.def
