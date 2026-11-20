@@ -1,40 +1,38 @@
-# Scarlett Layer: Clean-Room Host-Based ABI Interposition, Graphics Pipeline Translation, and Asynchronous I/O Virtualization for Xbox Series X Binaries on Windows x64
+# Scarlett Layer: Clean-Room Host-Based ABI Interposition, Binary RDNA2 Shader Lifting, and Asynchronous GPU/I/O Virtualization for Xbox Series X Binaries on Windows x64
 
-**Project Version:** Sprint 16 Baseline (9 Shims, 15 Automated Verification Tests)  
+**Project Version:** Sprint 21 Baseline (9 Shims, 20 Automated Verification Tests)  
 **Target Host Architecture:** Windows 11 x64 (MSVC C++23, Direct3D 12, DXGI 1.6, XAudio2 2.9)  
-**Revision Cadence:** Formal monograph updated every 5 sprints (Next scheduled revision: Sprint 21)
+**Revision Cadence:** Formal monograph updated every 5 sprints (Previous: Sprint 16 | Next scheduled revision: Sprint 26)
 
 ---
 
 ## Abstract
 
-Console compatibility layers on general-purpose desktop operating systems sit at an architectural inflection point between full-system hardware virtualization and user-space binary translation. Because ninth-generation Xbox Series X (codename *Scarlett* / *Anaconda*) titles compile to standard x86-64 PE32+ executables built atop a specialized Game Core / Direct3D 12.x Windows NT derivative, CPU instruction-set emulation is unnecessary; the dominant engineering challenges shift to **loader-time and runtime ABI interposition**, **graphics state and shader container translation**, **unified memory and address-tiling emulation**, and **asynchronous storage/audio codec bridging**.
+Console compatibility layers on desktop operating systems occupy an architectural middle ground between full-system hardware virtualization and user-space binary translation. Because ninth-generation Xbox Series X (*Scarlett* / *Anaconda*) titles compile to standard x86-64 PE32+ executables targeting a specialized Game Core / Direct3D 12.x Windows NT derivative, CPU instruction-set emulation is unnecessary. Instead, compatibility hinges on four core systems challenges: **loader-time and runtime ABI interposition**, **graphics pipeline, async-queue, and RDNA2 ISA shader translation**, **unified memory and surface-tiling emulation**, and **asynchronous storage and compressed-audio bridging**.
 
-This paper documents the design, formal invariants, and empirical evaluation of **Scarlett Layer**, a clean-room host-based translation layer implemented across 16 incremental engineering sprints. Scarlett Layer intercepts unmodified x64 executables without mutating title directories or host `System32` binaries by combining suspended-process PE import-table rewriting with pre-entrypoint Asynchronous Procedure Call (APC) injection and recursive multi-module Import Address Table (IAT) hooking. Across nine isolated dynamic-link shims (`xgameruntime`, `d3d12_xs`, `gameinput`, `xg_xs`, `dstorage_xs`, `pixevt`, `xaudio2_9`, `xmem`, and `kernelx`), we demonstrate deterministic disk-backed Pipeline State Object (PSO) caching (achieving 35xâ€“47x warm-load speedups), a pluggable console shader container (`SCXS`) and Shader Model 6.x `DXIL`/LLVM bitcode inspection boundary, 8x8 Morton micro-tiled surface transfers, worker-threaded `SCLZ` DirectStorage decompression, and a real-time 4:1 IMA-ADPCM voice-decoding bridge. Verified via an automated headless CTest suite (15/15 passing checks in 1.21 s) and an interactive synthetic title running on an NVIDIA GeForce RTX 5070, the stack exhibits zero D3D12 validation faults, zero audio glitches, and zero leaked allocations across both virtual and heap memory domains.
+This monograph documents the design, formal invariants, and empirical evaluation of **Scarlett Layer**, a clean-room host-based translation layer developed across 21 incremental sprints. Scarlett Layer redirects unmodified x64 executables without mutating title directories or host `System32` binaries by pairing suspended-process PE import rewriting with pre-entrypoint Asynchronous Procedure Call (APC) injection and recursive multi-module Import Address Table (IAT) hooking. Across nine isolated dynamic-link shims (`xgameruntime`, `d3d12_xs`, `gameinput`, `xg_xs`, `dstorage_xs`, `pixevt`, `xaudio2_9`, `xmem`, and `kernelx`), we implement swapchain-less `PresentX` bridging, explicit `ID3D12Heap` placed resources, dedicated async `COMPUTE` queues with GPU-side cross-queue fence synchronization (`Signal`/`Wait`), persistent disk-backed Graphics and Compute PSO caching (`ID3D12PipelineLibrary`), a clean-room AMD RDNA2 (GFX10.3) binary decoder and HLSL/DXBC lifter covering **Vertex, Pixel, and Compute** stages (`SOPP`, `VOP1`, `VOP2`, `VOP3`, `SMEM`, `VINTRP`, `MUBUF`, and `EXP`), 8x8 Morton micro-tiled surface translation, worker-threaded `SCLZ` DirectStorage decompression, and a real-time 4:1 IMA-ADPCM voice-decoding bridge. Evaluated via a 20-check automated headless CTest suite (`2.59 s` wall time) and an interactive synthetic title executing on an NVIDIA GeForce RTX 5070, the stack exhibits zero D3D12 validation errors, zero audio glitches, and zero memory leaks across both virtual and heap domains.
 
 ---
 
 ## 1. Introduction and Scope of Compatibility
 
 ### 1.1 Architectural Taxonomy: Emulation vs. Host-Based Translation
-Traditional console emulators targeting non-x86 architectures (e.g., PowerPC, Cell, MIPS) must dynamically recompile CPU instructions into host machine code while simultaneously simulating bus timings and MMIO device registers. In contrast, Xbox Series X titles execute native x86-64 user-mode code against a Windows NT-derived kernel (`kernelx`) and a console-specialized Direct3D 12 API (`d3d12_xs`). Consequently, Scarlett Layer adopts a **user-space host-based translation architecture** (analogous in structural philosophy to Wine/Proton on Linux, but targeting console-to-desktop Windows NT divergence):
+Classic console emulators targeting non-x86 ISAs (PowerPC, Cell, MIPS) must dynamically recompile CPU machine code while modeling bus timings and MMIO peripherals. Xbox Series X titles execute native x86-64 instructions atop a Windows NT kernel derivative (`kernelx`) and a console-extended Direct3D 12 runtime (`d3d12_xs`). Scarlett Layer therefore implements a **user-space host-based translation architecture**:
 
-1. **Zero CPU ISA translation:** Host x86-64 threads execute title machine code natively at full clock rate.
-2. **Process-isolated DLL redirection:** Console-exclusive and colliding system DLLs (e.g., `xaudio2_9.dll`) are redirected strictly within the target process without installing system-wide hooks or copying DLLs into title folders.
-3. **Clean-room semantic bridging:** Console abstractionsâ€”swapchain-less frame pacing (`PresentX`), unified 13.5 GiB memory accounting, tiled texture address computation, Velocity streaming queues, and compressed audio voicesâ€”are mapped onto desktop Win32, Direct3D 12, DXGI, XInput, and `System32\xaudio2_9.dll`.
+1. **Native CPU Execution:** Title x86-64 threads run directly on host cores with zero binary CPU translation overhead.
+2. **Process-Isolated ABI Interposition:** Console-exclusive DLLs and colliding system libraries (e.g., `xaudio2_9.dll`) are redirected strictly inside the target process address space without global hooks or file-system pollution.
+3. **Clean-Room Semantic Bridging:** Console-specific subsystemsâ€”swapchain-less frame pacing (`PresentX`), 13.5 GiB unified memory accounting, tiled surface addressing, Velocity async I/O queues, compressed audio voices, and precompiled RDNA2 shader containersâ€”map onto desktop Win32, Direct3D 12, DXGI, XInput, and native `System32\xaudio2_9.dll`.
 
-### 1.2 Explicit Non-Goals and External Boundaries
-To maintain rigorous technical clarity, we distinguish architectural boundaries from unresolved external constraints:
-
-* **Container Decryption (XVD/XVC):** Retail Series X packages are encrypted at rest by hardware-backed hypervisor keys. Scarlett Layer operates strictly on decrypted, unpacked x64 PE32+ binaries and makes no attempt to bypass platform DRM.
-* **Clean-Room Interface Definitions:** Where console-specific headers are proprietary (`ID3D12DeviceX`, `IXGTextureAddressComputer`, `IDStorageFactoryX`, `SCXS`), Scarlett Layer defines clean-room COM interfaces and binary contracts to validate end-to-end architectural mechanics prior to exact binary-offset and vtable-ordinal alignment.
-* **Host Hardware Assumptions:** All empirical measurements assume a modern Direct3D 12 Feature Level 12_0+ discrete GPU and Windows 10/11 x64 user-mode APIs.
+### 1.2 Explicit Non-Goals and Boundaries
+* **Package Decryption (XVD/XVC):** Retail Series X images are encrypted at rest by hardware-backed hypervisor keys. Scarlett Layer operates solely on unpacked, decrypted x64 PE32+ binaries and implements no DRM circumvention.
+* **Clean-Room Contracts:** Proprietary console COM interfaces (`ID3D12DeviceX`, `IXGTextureAddressComputer`, `IDStorageFactoryX`) and binary shader containers (`SCXS`) are modeled as clean-room interfaces to verify full-stack architecture prior to exact binary vtable-slot and GUID conformance.
+* **Host Platform Requirements:** Empirical benchmarks target Windows 10/11 x64 with a Direct3D 12 Feature Level 12_0+ discrete GPU.
 
 ---
 
 ## 2. Process Bootstrap, Binary Rewriting, and Multi-Module Interposition
 
-Redirecting imports in a Windows x64 process is complicated by two realities: (i) static imports are resolved by `ntdll!LdrInitializeThunk` *before* the process entry point executes, and (ii) modern game engines dynamically load both Xbox libraries and third-party middleware DLLs at runtime via `LoadLibrary{A,W}` and `LoadLibraryEx{A,W}`. Scarlett Layer solves both paths through a two-stage bootstrap protocol.
+Windows x64 import resolution splits across two phases: static imports resolved by `ntdll!LdrInitializeThunk` prior to the entry point, and runtime dynamic loads via `LoadLibrary{A,W}` / `LoadLibraryEx{A,W}` across both the main executable and third-party middleware DLLs. Scarlett Layer intercepts both via a deterministic two-stage loader protocol:
 
     [loader.exe]
          |
@@ -54,154 +52,165 @@ Redirecting imports in a Windows x64 process is complicated by two realities: (i
            +-- Transfers control to title entry point (main/WinMain)
 
 ### 2.1 Near-4GB Remote Import Rewriting (`pe_patcher.cpp`)
-In PE32+ binaries, `IMAGE_IMPORT_DESCRIPTOR::Name` and `IMAGE_DELAYLOAD_DESCRIPTOR::DllNameRVA` are unsigned 32-bit Relative Virtual Addresses (`DWORD`) added to the 64-bit `ImageBase`. Consequently, redirected absolute shim paths written into the suspended target process **must** reside within the interval `[ImageBase, ImageBase + 0xFFFFFFFF]`.
-
-`loader.exe` determines the remote `ImageBase` by querying `NtQueryInformationProcess(ProcessBasicInformation)` and reading the 64-bit pointer at `PEB + 0x10`. It then scans free virtual address regions starting immediately above `ImageBase + SizeOfImage` via `VirtualQueryEx`, commits a single 64 KB-aligned string table inside the 4 GB window, writes null-terminated ANSI paths for every discovered shim in `build/bin/shims/`, and updates matching descriptor RVAs under transient `PAGE_READWRITE` protection. Any `IMAGE_DIRECTORY_ENTRY_BOUND_IMPORT` directory is explicitly zeroed to prevent `ntdll` from short-circuiting rewritten descriptors using stale bound timestamps. Finally, the string table is hardened to `PAGE_READONLY`.
+Because PE32+ `IMAGE_IMPORT_DESCRIPTOR::Name` and `IMAGE_DELAYLOAD_DESCRIPTOR::DllNameRVA` are 32-bit unsigned RVAs relative to `ImageBase`, redirected shim path strings injected into the suspended child process must lie within `[ImageBase, ImageBase + 0xFFFFFFFF]`. `loader.exe` extracts `ImageBase` from `PEB + 0x10` via `NtQueryInformationProcess`, locates free virtual memory immediately above `ImageBase + SizeOfImage` via `VirtualQueryEx`, commits a 64 KB-aligned string table, rewrites matching descriptor RVAs under transient `PAGE_READWRITE` protection, clears `IMAGE_DIRECTORY_ENTRY_BOUND_IMPORT`, and hardens the table to `PAGE_READONLY`.
 
 ### 2.2 Pre-Entrypoint APC Injection and Multi-Module Hooking (`scarlett_hook.cpp`)
-Static rewriting cannot intercept runtime `LoadLibrary` callsâ€”including SDK inline wrappers such as `<xaudio2.h>` invoking `LoadLibraryExA("xaudio2_9.dll", ...)` or middleware DLLs dynamically probing for `pixevt.dll` and `xmem.dll`.
+To capture dynamic `LoadLibrary*` callsâ€”including SDK inline shims (`<xaudio2.h>` invoking `LoadLibraryExA("xaudio2_9.dll", ...)`) and middleware plugins (`engine_plugin.dll`)â€”`loader.exe` queues `kernel32!LoadLibraryW` via `QueueUserAPC` onto the suspended main thread. `NtTestAlert` executes the APC inside `LdrInitializeThunk` before title code begins. Inside `DllMain`, `scarlett_hook.dll` uses loader-lock-safe Win32 `FindFirstFileW` to index all shims and patches `LoadLibrary{A,W,ExA,ExW}` IAT entries across the executable and all non-system, non-shim modules. Subsequent dynamic loads of non-shim DLLs recursively receive IAT patches before their `HMODULE` returns to the caller.
 
-Before resuming the child process, `loader.exe` allocates the wide path to `scarlett_hook.dll` in the target and queues `kernel32!LoadLibraryW` onto the primary suspended thread via `QueueUserAPC`. During `ntdll!LdrInitializeThunk`, Windows invokes `NtTestAlert` prior to jumping to the executable entry point, guaranteeing `scarlett_hook.dll` initializes before any title code runs.
-
-To remain loader-lock safe inside `DllMain`, shim discovery uses raw Win32 `FindFirstFileW` rather than C++ filesystem iterators. `scarlett_hook.dll` patches the IAT entries for `LoadLibraryA`, `LoadLibraryW`, `LoadLibraryExA`, and `LoadLibraryExW` across both the main executable and all non-system, non-shim modules enumerated via `K32EnumProcessModules`. When any hooked call loads a non-shim sub-module (e.g., `engine_plugin.dll`), the hook automatically patches the newly loaded module's IAT upon return before passing the `HMODULE` back to the caller.
-
-Two subtle correctness invariants are enforced:
-1. **Recursion & System-Boundary Exclusion:** Modules residing under `%SystemRoot%` or `SCARLETT_SHIM_DIR` are added to `g_seenModules` and skipped. This guarantees our own shimsâ€”most critically `xaudio2_9.dll` loading `C:\Windows\System32\xaudio2_9.dll`â€”never re-enter the redirector.
-2. **Search-Flag Sanitization:** When redirecting `LoadLibraryEx{A,W}` to an absolute path outside `System32`, restrictive flags (`LOAD_LIBRARY_SEARCH_SYSTEM32`, `LOAD_LIBRARY_SEARCH_APPLICATION_DIR`, `LOAD_LIBRARY_SEARCH_USER_DIRS`, `LOAD_LIBRARY_SEARCH_DEFAULT_DIRS`) are masked off so Win32 does not reject the absolute shim path with `ERROR_INVALID_PARAMETER`.
+Two invariants prevent re-entrancy and loader faults:
+1. **Boundary Exclusion:** Modules under `%SystemRoot%` and `SCARLETT_SHIM_DIR` are skipped, preventing `xaudio2_9.dll` from recursively intercepting its own load of `System32\xaudio2_9.dll`.
+2. **Search-Flag Masking:** Restrictive `LOAD_LIBRARY_SEARCH_*` flags are cleared when rewriting `LoadLibraryEx*` calls to absolute shim paths outside `System32`.
 
 ### 2.3 Virtual File System (VFS) Drive Mapping (`common/vfs.hpp`)
-Console titles address storage via fixed logical drive letters. `loader.exe` initializes isolated host roots via child environment variables:
-* **`G:\`** (Game package root) -> `SCARLETT_GAME_ROOT` (title executable directory)
+`loader.exe` establishes isolated logical console drives via environment variables translated by `sc::vfs::TranslatePath`:
+* **`G:\`** (Game package root) -> `SCARLETT_GAME_ROOT`
 * **`T:\`** (Title scratch storage) -> `SCARLETT_SCRATCH_DIR` (`build/bin/vfs/scratch/`)
-* **`S:\`** (Save/system temporary area) -> `SCARLETT_SAVE_TEMP_DIR` (`build/bin/vfs/save_temp/`)
-
-`sc::vfs::TranslatePath` performs case-insensitive prefix matching, slash normalization, and lexical path canonicalization while passing standard host paths (e.g., `C:\...`) through unmodified.
+* **`S:\`** (Save temporary workspace) -> `SCARLETT_SAVE_TEMP_DIR` (`build/bin/vfs/save_temp/`)
 
 ---
 
 ## 3. Runtime Services, Concurrency, and Unified Memory Semantics
 
-### 3.1 Dual-Port Asynchronous Execution (`xgameruntime.dll`)
-The Xbox Game Development Kit (GDK) decouples background execution from main-thread callback delivery through `XTaskQueue` and `XAsyncBlock`. Our implementation separates each queue into a **Work Port** (backed by worker threads) and a **Completion Port** (manually drained on the title's main thread via `XTaskQueueDispatch`), synchronized via mutexes and condition variables. Asynchronous operations share a reference-counted `AsyncState` record stored in `XAsyncBlock::internal` to prevent use-after-free races if a caller queries `XAsyncGetStatus` concurrently with completion or retries a result call after an undersized buffer error.
+### 3.1 Dual-Port Asynchronous Execution & Crash-Safe Storage (`xgameruntime.dll`)
+`XTaskQueue` separates background execution (**Work Port**, thread-pool workers) from deterministic main-thread callback dispatch (**Completion Port**, drained via `XTaskQueueDispatch`). Reference-counted `AsyncState` blocks stored inside `XAsyncBlock::internal` eliminate lifetime races during concurrent polling or buffer-size retries. `XGameSave` persists per-SCID containers to `build/bin/saves/` using temporary-file writes committed via `MoveFileExW(..., MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)` and preserves unread `AsyncState` handles on `E_GS_PROVIDED_BUFFER_TOO_SMALL`.
 
-### 3.2 Crash-Safe Local Connected Storage (`XGameSave`)
-`XGameSave` maps title Service Configuration IDs (SCIDs) and container names to local directories under `build/bin/saves/<UserId>/<Scid>/<Container>/`. Every blob write commits via a temporary staging file followed by `MoveFileExW(..., MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)` to provide atomic crash-safe updates. On `XGameSaveReadBlobDataResult`, if the caller's buffer is smaller than the packed `XGameSaveBlob` header array plus payload bytes, the shim returns `E_GS_PROVIDED_BUFFER_TOO_SMALL` *without* releasing the underlying `AsyncState`, allowing standard GDK retry-with-larger-buffer loops to succeed identically to console hardware.
-
-### 3.3 Dual-Tier Console Memory & Unified Kernel Accounting (`xmem.dll` & `kernelx.dll`)
-Xbox Series X exposes 13.5 GiB (`14,495,514,624 B`) of unified GDDR6 memory to titles across 7 Zen 2 cores (14 SMT threads). Scarlett Layer models this memory hierarchy across two complementary shims:
-
-* **`xmem.dll`:** Decodes packed `dwAllocAttributes` (`AllocatorId`, power-of-two `Alignment` from 4 B to 64 KB, `MemType`, and `ZeroInit`). Requests tagged `XALLOC_MEMTYPE_PHYSICAL` or requiring alignment of at least 64 KB route directly to `VirtualAlloc(..., MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE)`, guaranteeing strict 64 KB OS page alignment and zero-fill; smaller heap requests route through `_aligned_malloc`. A mutex-guarded registry tracks global and per-pool live/peak footprints, implements `XMemSize`, and emits a full leak audit on `DLL_PROCESS_DETACH`.
-* **`kernelx.dll`:** Exposes `TitleMemoryStatus` backed by the 13.5 GiB Series X budget, `VirtualAllocX` / `VirtualFreeX` (stripping console-only flags such as `SC_MEM_GRAPHICS = 0x10000000` prior to host `VirtualAlloc` while tracking 64 KB-granular graphics virtual memory usage), `GetConsoleProcessorInfo`, and `SetThreadAffinityMaskX`. To prevent affinity failures when a 14-thread console title runs on a host with fewer logical processors (e.g., our 12-thread test host, mask `0xFFF`), `SetThreadAffinityMaskX` intersects the requested mask with the host process affinity mask, falling back to the lowest set host bit (`procMask & (~procMask + 1)`) if the intersection is empty.
+### 3.2 Dual-Tier Console Memory & Kernel Topology (`xmem.dll`, `kernelx.dll`)
+Xbox Series X provides 13.5 GiB (`14,495,514,624 B`) of unified GDDR6 memory and 7 title cores (14 SMT threads).
+* **`xmem.dll`:** Decodes packed `dwAllocAttributes` (`AllocatorId`, power-of-two `Alignment` up to 64 KB, `MemType`, `ZeroInit`), backing `XALLOC_MEMTYPE_PHYSICAL` and 64 KB-aligned allocations with `VirtualAlloc` and smaller pools with `_aligned_malloc`. A lock-guarded ledger supports `XMemSize` and emits per-pool peak/leak diagnostics on unload.
+* **`kernelx.dll`:** Implements `TitleMemoryStatus` against the 13.5 GiB budget, `VirtualAllocX` / `VirtualFreeX` (stripping console flags such as `SC_MEM_GRAPHICS = 0x10000000` while accounting for 64 KB-granular graphics virtual pages), `GetConsoleProcessorInfo`, and `SetThreadAffinityMaskX`, clamping oversized console masks safely onto the host process affinity mask (e.g., `0xFFFFFFFFFFFFFFFF -> 0xFFF` on a 12-thread host).
 
 ---
 
-## 4. Graphics Translation, Address Tiling, and Shader Interposition
+## 4. Graphics Pipeline Translation, Async Compute, and RDNA2 Binary Lifting
 
-### 4.1 Swapchain-Less Presentation & Explicit Placed Heaps (`d3d12_xs.dll`)
-Console D3D12.x titles do not create a desktop `IDXGISwapChain`; instead, they allocate console-owned render targets, synchronize via `SetFrameIntervalX` / `WaitFrameEventX` pipeline tokens, and submit frames through `ID3D12CommandQueueX::PresentX`.
+### 4.1 Swapchain-Less Presentation, Placed Heaps, and Compute UAVs (`d3d12_xs.dll`)
+`ScarlettCommandQueueX::PresentX` lazily constructs a Win32 host window and a double-buffered `DXGI_SWAP_EFFECT_FLIP_DISCARD` swapchain matching the submitted console render target, executing per-frame resource-state transitions and `CopyResource` blits synchronized by per-back-buffer fences.
 
-`ScarlettCommandQueueX::PresentX` lazily initializes a Win32 host window and a double-buffered `DXGI_SWAP_EFFECT_FLIP_DISCARD` swapchain matching the first submitted plane's dimensions and pixel format. Each frame, it records a dedicated internal copy command list that transitions the title's render target (`PRESENT -> COPY_SOURCE`) and the current DXGI back buffer (`PRESENT -> COPY_DEST`), executes `CopyResource`, restores both resources to `PRESENT`, and presents with per-back-buffer fence synchronization.
+`ID3D12DeviceX` exposes explicit unified-memory heap management (`GetResourceAllocationInfo`, `CreateHeap`, `CreatePlacedResource`) alongside full graphics and compute descriptor/pipeline surfaces (`CreateRenderTargetView`, `CreateShaderResourceView`, `CreateUnorderedAccessView`, `CreateGraphicsPipelineState`, `CreateComputePipelineState`). In `dummy_title`, both the streamed `crestTexture` (`heap+0x0`) and the procedurally updated UAV `energyTexture` (`heap+0x40000`) reside inside a single 1 MiB explicit `ID3D12Heap`.
 
-To model console unified-memory resource placement, `ID3D12DeviceX` implements `GetResourceAllocationInfo`, `CreateHeap`, and `CreatePlacedResource`, enabling titles to allocate explicit `ID3D12Heap` arenas (`D3D12_HEAP_FLAG_ALLOW_ONLY_NON_RT_DS_TEXTURES`) and alias or pack textures at 64 KB-aligned offsets.
+### 4.2 Dedicated Async Compute Queues & Cross-Queue GPU Synchronization
+Console engines overlap compute workloads (post-processing, procedural synthesis, culling) with rasterization via dedicated `D3D12_COMMAND_LIST_TYPE_COMPUTE` queues. Sprint 19 extended `ID3D12CommandQueueX` with GPU-side `Wait(ID3D12Fence*, UINT64)` alongside `Signal` and queue-type telemetry (`DIRECT`, `COMPUTE`, `COPY`).
 
-### 4.2 8x8 Morton Micro-Tiled Surface Translation (`xg_xs.dll`)
-Console GPUs store 2D textures in space-filling tiled layouts to maximize 2D texture-cache locality. `xg_xs.dll` implements `XGComputeTexture2DLayout` and `IXGTextureAddressComputer` supporting both `XG_TILE_MODE_LINEAR` (256-byte row pitch, 512-byte subresource placement alignment) and `XG_TILE_MODE_2D_THIN` (64 KB base alignment, dimensions padded to multiples of 8 elements per mip level).
+In both `dummy_title` and `D3D12AsyncComputeCrossQueueSync`, compute dispatches execute on a dedicated `COMPUTE` queue, emit a UAV barrier plus `UNORDERED_ACCESS -> COMMON` transition, and signal `asyncComputeFence`. The `DIRECT` graphics queue immediately issues a GPU-side `cmdQueue->Wait(asyncComputeFence, val)` with zero intervening CPU wait, transitioning the resource `COMMON -> PIXEL_SHADER_RESOURCE` (or `COPY_SOURCE`) to satisfy strict D3D12 Debug Layer cross-queue decay/promotion rules.
 
-For pixel `(x, y)` within a mip level of padded tile width `tilesX = PaddedWidth / 8`, the linear byte offset into the tiled surface is computed by decomposing into macro-tile coordinates `(tx, ty) = (x >> 3, y >> 3)` and intra-tile coordinates `(lx, ly) = (x & 7, y & 7)`, interleaving the 3-bit local coordinates into a 6-bit Z-order Morton index:
+### 4.3 8x8 Morton Micro-Tiled Surface Translation (`xg_xs.dll`)
+`xg_xs.dll` implements `XGComputeTexture2DLayout` and `IXGTextureAddressComputer` for `XG_TILE_MODE_LINEAR` (256 B row pitch, 512 B subresource alignment) and `XG_TILE_MODE_2D_THIN` (64 KB base alignment, 8x8 padded macro-tiles). Intra-tile coordinates `(lx, ly) = (x & 7, y & 7)` map bijectively through a 6-bit Z-order Morton curve:
 
     Morton8x8(lx, ly) = spread3(lx) | (spread3(ly) << 1)
     where spread3(v)  = (v & 1) | ((v & 2) << 1) | ((v & 4) << 2)
-    pixelIndex        = (ty * tilesX + tx) * 64 + Morton8x8(lx, ly)
+    pixelIndex        = ((y >> 3) * (PaddedWidth / 8) + (x >> 3)) * 64 + Morton8x8(lx, ly)
 
-This bijective mapping supports arbitrary non-power-of-two (NPOT) textures and multi-mip chains with bit-exact swizzle/detile round-trips.
+This layout verifies bit-exact multi-mip and non-power-of-two (NPOT) swizzle/detile round-trips (e.g., `77x53`, 4 mips).
 
-### 4.3 Deep SM 6.x DXIL Inspection & Pluggable `SCXS` Shader Translation
-Real Xbox Series X titles ship precompiled AMD RDNA2 machine code rather than portable `DXBC`/`DXIL`. To establish a clean, testable translation boundary inside `CreateGraphicsPipelineState`, Sprint 15 introduced two decoupled components:
+### 4.4 SM 6.x DXIL Inspection & Pluggable `SCXS` Translator Architecture
+Every shader stage submitted to `CreateGraphicsPipelineState` or `CreateComputePipelineState` flows through a decoupled inspection and translation boundary:
 
-1. **Container & Bitcode Inspector (`shader_inspector.hpp`):** Parses 32-byte `DXBC` headers and chunk tables (`RDEF`, `ISGN`, `OSGN`, `SHDR`, `SHEX`, `STAT`, `SPDB`, `PSV0`, `DXIL`). When a `DXIL` chunk is present, the inspector decodes the 24-byte `DxilProgramHeader`, extracts the Shader Model 6.x profile (including Mesh `ms_6_x`, Amplification `as_6_x`, and Raytracing Library `lib_6_x` tokens), reads the DXIL version tuple, and validates the 4-byte LLVM bitcode wrapper magic (`0x42 0x43 0xC0 0xDE`) at `bodyOff + 8 + bitcodeOffset`.
-2. **Pluggable Translator Registry (`shader_translator.hpp`):** Every populated shader stage in `CreateGraphicsPipelineState` passes through `ShaderTranslatorRegistry`, backed by an in-memory FNV-1a-keyed translation cache (`std::shared_ptr<const TranslatedShader>`). Our clean-room `SCXS` 32-byte container format carries stage, target architecture, payload format (`EmbeddedDxbcOrDxil` vs. `Rdna2Isa`), Shader Model version, and an FNV-1a checksum. `ScxsContainerTranslator` validates integrity (`E_INVALIDARG` on corruption), unpacks embedded host bytecode for execution, and deterministically traps `Rdna2Isa` payloads with `E_NOTIMPL` at the exact plugin seam where an RDNA2-to-DXIL recompiler attaches.
+    [Incoming D3D12_SHADER_BYTECODE]
+         |
+         +--> Native DXBC / DXIL (SM 6.x) ---------> Fast-path passthrough
+         |
+         +--> SCXS Container (32 B hdr + FNV-1a) --> m_xlatCache (FNV-1a keyed)
+                |
+                +--> Payload = EmbeddedDxbcOrDxil -> ScxsContainerTranslator (unpack)
+                +--> Payload = Rdna2Isa (VS/PS/CS)-> Rdna2IsaTranslator (decode -> HLSL -> DXBC)
+         |
+         v
+    [Post-Translation FNV-1a PSO Hash] -> ID3D12PipelineLibrary (Disk-Backed Cache)
 
-### 4.4 Deterministic PSO Hashing and Persistent `ID3D12PipelineLibrary` Caching
-To eliminate shader-compilation stutter across launches, `ScarlettDeviceX` wraps D3D12's `ID3D12PipelineLibrary` and persists serialized libraries atomically to `build/bin/cache/pso_cache_<VendorId>_<DeviceId>.bin`.
+`shader_inspector.hpp` parses both `DXBC` chunks and SM 6.x `DXIL` containersâ€”decoding `DxilProgramHeader` (profile tokens including `ms_6_x`, `as_6_x`, `lib_6_x`), `DXIL` version tuples, `PSV0` chunks, and LLVM bitcode wrapper magic (`0x42 0x43 0xC0 0xDE`).
 
-Each graphics PSO is keyed by a 64-bit FNV-1a digest over **post-translation** shader bytecodes, input-element descriptions, rasterizer/blend/depth-stencil/RTV states, and the content hash of the serialized root-signature blob (avoiding nondeterministic COM pointer addresses). Because hashing occurs *after* `IShaderTranslator`, native DXBC shaders and `SCXS`-wrapped equivalents map to the exact same PSO library key.
+### 4.5 Clean-Room AMD RDNA2 (GFX10.3) Binary Decoder & VS/PS/CS Lifter (`rdna2_isa.hpp`)
+Sprints 18, 20, and 21 transformed the `Rdna2Isa` translator seam from an `E_NOTIMPL` stub into an operational binary shader translation pipeline spanning all three primary GPU stages:
 
-**Empirical Hazard Identified (Sprint 12):** Compiling HLSL with `D3DCOMPILE_DEBUG` embeds a `SPDB` (Shader PDB) chunk containing a freshly generated GUID on every invocation, mutating the DXBC digest across identical runs and causing a 100% cold-miss rate. Switching runtime test shaders to `D3DCOMPILE_OPTIMIZATION_LEVEL3` stripped the nondeterministic `SPDB` chunk (reducing VS/PS sizes from ~17.5 KB to ~1.5 KB) and restored 100% cross-launch cache determinism.
+| RDNA2 Format | Encoding Prefix | Decoded Instructions | Lifted Host Target |
+| :--- | :--- | :--- | :--- |
+| **`SOPP`** | `0x17F` (`[31:23]`) | `s_nop`, `s_endpgm`, `s_waitcnt` | Program termination & sync markers |
+| **`VOP1`** | `0x3F` (`[31:25]`) | `v_nop`, `v_mov_b32`, `v_rcp_f32`, `v_sqrt_f32` (+ 32-bit inline literals) | Unary float/uint ops (`asfloat(0x...u)`) |
+| **`VOP2`** | `bit 31 = 0` | `v_add_f32`, `v_sub_f32`, `v_subrev_f32`, `v_mul_f32`, `v_min_f32`, `v_max_f32`, `v_fmac_f32`, `v_add_nc_u32` | Binary float & unsigned 32-bit ALU |
+| **`VOP3`** | `0x35` (`[31:26]`) | `v_mad_f32`, `v_fma_f32`, `v_min3_f32`, `v_max3_f32`, `v_med3_f32`, `v_mul_lo_u32` (`ABS`/`NEG`/`CLAMP`) | 3-operand float/uint ALU + `saturate()` |
+| **`SMEM`** | `0x3D` (`[31:26]`) | `s_load_dword`, `s_load_dwordx2`, `s_load_dwordx4` | `cbuffer Cb0 : register(b0)` -> SGPRs `s0..s105` |
+| **`VINTRP`** | `0x32` (`[31:26]`) | `v_interp_mov_f32` (`attr0..31.xyzw`) | PS interpolant struct (`TEXCOORDn`) |
+| **`MUBUF`** | `0x38` (`[31:26]`) | `buffer_store_dword` (`offen=1`) | `RWStructuredBuffer<uint> : register(u0)` store |
+| **`EXP`** | `0x3E` (`[31:26]`) | `exp mrt0`, `exp pos0`, `exp param0..31` (`EN` masks) | `SV_TARGET`, `SV_POSITION`, `TEXCOORDn` |
+
+The translator validates `SCXS` FNV-1a checksums (`E_INVALIDARG` on corruption), enforces stage-specific output invariants (`EXP pos0` for VS, `EXP mrt0` for PS, `MUBUF` store for CS, trapping incomplete streams cleanly with `E_NOTIMPL`), compiles lifted HLSL with `D3DCOMPILE_OPTIMIZATION_LEVEL3` (stripping nondeterministic `SPDB` debug GUIDs), and feeds the resulting DXBC directly into both `m_xlatCache` and our disk-backed `ID3D12PipelineLibrary` (`GFX_<hash>` and `CMP_<hash>` keys in `pso_cache_<VendorId>_<DeviceId>.bin`).
 
 ---
 
 ## 5. Asynchronous Storage & Real-Time Audio Translation Pipelines
 
-### 5.1 Velocity Asset Streaming & `SCLZ` Worker Decompression (`dstorage_xs.dll`)
-`dstorage_xs.dll` implements `IDStorageFactoryX`, `IDStorageQueueX`, `IDStorageFileX`, and `IDStorageStatusArrayX`. Enqueued read requests, status updates, and `ID3D12Fence` signals accumulate in a staging vector until `Submit()` transfers the batch atomically to a dedicated background I/O worker thread.
-
-`OpenFile` transparently resolves `G:\`, `T:\`, and `S:\` VFS paths. For `DSTORAGE_COMPRESSION_FORMAT_SCARLETT_LZ`, the worker reads the compressed slice into a staging buffer and executes our single-pass 64 KB sliding-window LZ77 decoder (`sc::codec::DecompressLzBlock`) directly into the title's destination buffer (e.g., 64 KB-aligned `xmem` physical memory) before updating status slots and signaling `ID3D12Fence`. Header magic validation, bounds checking, output-length enforcement, and FNV-1a checksum verification guarantee corrupted streams fail cleanly with `E_FAIL` and populate `DSTORAGE_ERROR_RECORD` for `RetrieveErrorRecord`.
+### 5.1 Velocity Streaming & Worker-Threaded `SCLZ` Decompression (`dstorage_xs.dll`)
+`dstorage_xs.dll` batches queued file/memory reads, status-array updates, and `ID3D12Fence` signals onto a dedicated background worker thread. `OpenFile` transparently resolves `G:\`, `T:\`, and `S:\` VFS paths. For `DSTORAGE_COMPRESSION_FORMAT_SCARLETT_LZ`, the worker decodes our 64 KB sliding-window LZ77 stream (`sc::codec::DecompressLzBlock`) directly into title destination buffers (such as 64 KB-aligned `xmem` physical pages) with full bounds and FNV-1a verification, populating `DSTORAGE_ERROR_RECORD` (`E_FAIL`) on stream corruption before signaling the GPU fence.
 
 ### 5.2 Self-Recursion-Free Audio Proxying & Live IMA-ADPCM Bridge (`xaudio2_9.dll`)
-Because Windows 10/11 ships a system `xaudio2_9.dll` in `System32`, static linking would cause infinite self-recursion. Our shim resolves the host binary explicitly via `GetSystemDirectoryW` + `LoadLibraryW`, validates `mod != g_selfModule`, and wraps the native `IXAudio2` COM interface.
-
-Inside `CreateSourceVoice`:
-* **PCM / IEEE_FLOAT:** Passed directly to native XAudio2 with zero runtime overhead.
-* **`WAVE_FORMAT_XMA2` (`0x0166`):** Intercepted and logged as `E_NOTIMPL` at the console hardware-codec boundary.
-* **`WAVE_FORMAT_IMA_ADPCM` (`0x0011`):** Instantiates `ScarlettDecodingSourceVoice`, a full `IXAudio2SourceVoice` ABI wrapper backed by a native 16-bit PCM voice and an internal `IXAudio2VoiceCallback` proxy. On `SubmitSourceBuffer`, incoming 256-byte mono ADPCM blocks (505 samples/block, ~3.95x compression) are decoded into heap-owned `DecodedBlock` buffers keyed in a mutex-protected map; the proxy callback reclaims each decoded buffer upon `OnBufferEnd` and translates `pBufferContext` back to the caller's original `pContext` pointer across both callbacks and `GetState()`.
+`xaudio2_9.dll` dynamically binds to native `System32\xaudio2_9.dll` via `GetSystemDirectoryW` + `LoadLibraryW` (asserting `mod != g_selfModule`). Inside `CreateSourceVoice`:
+* **PCM / IEEE_FLOAT:** Forwarded natively with zero runtime overhead.
+* **`WAVE_FORMAT_XMA2` (`0x0166`):** Intercepted and rejected deterministically (`E_NOTIMPL`) at the hardware-codec boundary.
+* **`WAVE_FORMAT_IMA_ADPCM` (`0x0011`):** Wrapped in `ScarlettDecodingSourceVoice`, which decodes 256-byte mono ADPCM blocks (505 samples/block, ~3.95x reduction) into heap-owned 16-bit PCM buffers on `SubmitSourceBuffer`. An internal `IXAudio2VoiceCallback` proxy reclaims completed PCM blocks in `OnBufferEnd` and translates internal pointers back to the caller's original `pContext` across all callbacks and `GetState()`.
 
 ---
 
 ## 6. Empirical Evaluation and Verification
 
 ### 6.1 Testbed Configuration
-All benchmarks and verification runs were executed on the following host environment:
-* **Operating System:** Windows 11 x64
-* **Host CPU:** 12 logical threads (affinity mask `0xFFF`, emulating 7-core / 14-thread Series X topology)
-* **Host GPU:** NVIDIA GeForce RTX 5070 (`VendorId 0x10DE`, `DeviceId 0x2F04`)
+* **OS:** Windows 11 x64
+* **CPU:** 12 logical host threads (affinity mask `0xFFF`, emulating 7-core / 14-thread Series X topology)
+* **GPU:** NVIDIA GeForce RTX 5070 (`VendorId 0x10DE`, `DeviceId 0x2F04`)
 * **Toolchain:** MSVC x64 (C++23, `/W4 /permissive-`), CMake + Ninja, Debug build with D3D12 Debug Layer enabled
 
 ### 6.2 Automated Regression Suite (`scarlett_shim_suite`)
-Every build is validated via `ctest --test-dir build`, which launches `scarlett_tests.exe` *through* `loader.exe` so PE import rewriting, APC injection, multi-module hooking, and VFS mounting are exercised identically to real titles. All **15/15 tests pass in 1.21 seconds**:
+CTest executes `scarlett_tests.exe` *through* `loader.exe`, exercising PE rewriting, APC hooking, VFS mounting, and all 9 shims on every run. All **20/20 checks pass in 2.59 seconds**:
 
-| # | Test Case | Subsystem(s) Verified | Key Invariant Asserted |
+| # | Test Case | Subsystem(s) | Key Invariant Verified |
 | :--- | :--- | :--- | :--- |
-| 1 | `VfsPathTranslation` | `common/vfs.hpp` | `G:\`, `t:/`, `S:\` rewrite + host path passthrough |
+| 1 | `VfsPathTranslation` | `common/vfs.hpp` | `G:\`, `t:/`, `S:\` translation + host passthrough |
 | 2 | `RuntimeAndXUser` | `xgameruntime` | `XboxScarlettAnaconda (0x07)` + `ERROR_INSUFFICIENT_BUFFER` retry |
-| 3 | `XGameSaveEdgeCases` | `xgameruntime` | Missing blob, multi-blob atomic write, undersized-buffer retry, deletion |
-| 4 | `XgXsMultiMipAndNpotSwizzle` | `xg_xs`, `xmem` | `77x53` 4-mip `2D_THIN` 64 KB align + bit-exact round-trip across all mips |
-| 5 | `DStorageVfsAndErrorRecord` | `dstorage_xs`, `vfs` | `T:\` streaming + `E_NOTIMPL` ZLIB `RetrieveErrorRecord` |
+| 3 | `XGameSaveEdgeCases` | `xgameruntime` | Missing blob, multi-blob atomic write, undersized retry, delete |
+| 4 | `XgXsMultiMipAndNpotSwizzle` | `xg_xs`, `xmem` | `77x53` 4-mip `2D_THIN` 64 KB align + bit-exact round-trip |
+| 5 | `DStorageVfsAndErrorRecord` | `dstorage_xs`, `vfs` | `T:\` async read + ZLIB `E_NOTIMPL` `RetrieveErrorRecord` |
 | 6 | `XAudio2Xma2Rejection` | `xaudio2_9`, `scarlett_hook` | Dynamic `LoadLibraryExA` redirect + `WAVE_FORMAT_XMA2` trap |
-| 7 | `XMemAlignmentAndInvariants` | `xmem` | 64 KB `VirtualAlloc` + 4 KB/256 B/64 B heap alignment, zero-init, `XMemSize` |
-| 8 | `DynamicAndMultiModuleHooks` | `scarlett_hook`, `pixevt`, `xmem` | Unlinked `pixevt.dll` + sub-module `engine_plugin.dll` recursive IAT hooks |
-| 9 | `D3D12HeadlessDeviceAndPso` | `d3d12_xs` | Headless device, monotonic frame tokens, DXBC inspect, disk PSO hit |
-| 10 | `KernelXMemoryAndTopology` | `kernelx` | 13.5 GiB budget delta, `SC_MEM_GRAPHICS` 64 KB align, `0xFFF` affinity clamp |
-| 11 | `D3D12PlacedResourcesAndHeap` | `d3d12_xs` | Explicit `ID3D12Heap` + dual `CreatePlacedResource` textures (`+0x0`, `+0x10000`) |
+| 7 | `XMemAlignmentAndInvariants` | `xmem` | 64 KB `VirtualAlloc` + 4 KB/256 B/64 B heap alignment & `XMemSize` |
+| 8 | `DynamicAndMultiModuleHooks` | `scarlett_hook`, `pixevt`, `xmem` | Unlinked `pixevt.dll` + sub-module `engine_plugin.dll` IAT hooks |
+| 9 | `D3D12HeadlessDeviceAndPso` | `d3d12_xs` | Headless device, monotonic tokens, DXBC inspect, disk PSO hit |
+| 10 | `KernelXMemoryAndTopology` | `kernelx` | 13.5 GiB budget delta, `SC_MEM_GRAPHICS` 64 KB align, `0xFFF` clamp |
+| 11 | `D3D12PlacedResourcesAndHeap` | `d3d12_xs` | Explicit `ID3D12Heap` + dual placed textures (`+0x0`, `+0x10000`) |
 | 12 | `DxilSm6BitcodeInspector` | `d3d12_xs` | Synthetic `ms_6_6` / `DXIL 1.6` / LLVM `BC\xC0\xDE` + `PSV0` parsing |
-| 13 | `ScxsTranslatorAndPsoCache` | `d3d12_xs` | `SCXS` translation + cache hit, corrupted CRC `E_INVALIDARG`, RDNA2 `E_NOTIMPL` |
-| 14 | `DStorageLzDecompression` | `dstorage_xs`, `codecs` | `T:\` `SCLZ` decompression (20.73x) + corrupt stream `E_FAIL` error record |
-| 15 | `XAudio2ImaAdpcmDecodeBridge` | `xaudio2_9`, `codecs` | 4:1 IMA-ADPCM SNR > 30 dB + live decode voice `pContext` preservation |
+| 13 | `ScxsTranslatorAndPsoCache` | `d3d12_xs` | `SCXS` translation + cache hit, CRC `E_INVALIDARG`, empty VS trap |
+| 14 | `DStorageLzDecompression` | `dstorage_xs`, `codecs` | `T:\` `SCLZ` decompression (20.73x) + corrupt stream `E_FAIL` |
+| 15 | `XAudio2ImaAdpcmDecodeBridge` | `xaudio2_9`, `codecs` | 4:1 IMA-ADPCM SNR > 30 dB + live voice `pContext` preservation |
+| 16 | `D3D12ComputePsoAndUavExecution` | `d3d12_xs` | `SCXS` CS 5.0 PSO cache + 64-element UAV GPU dispatch & readback |
+| 17 | `Rdna2IsaDecoderAndGpuExecution` | `d3d12_xs` | 9-inst binary RDNA2 PS -> HLSL -> DXBC -> `(64,191,143,255)` GPU readback |
+| 18 | `D3D12AsyncComputeCrossQueueSync` | `d3d12_xs` | `COMPUTE` queue `Signal` -> `DIRECT` queue GPU `Wait` -> 64-uint readback |
+| 19 | `Rdna2ComputeIsaExecution` | `d3d12_xs` | 4-inst binary RDNA2 CS (`v_mul_lo_u32`/`v_add_nc_u32`/`MUBUF`) on `COMPUTE` queue |
+| 20 | `Rdna2VertexAndPixelPipelineWithCbv` | `d3d12_xs` | Full binary RDNA2 VS (9 insts) + PS (11 insts) + `SMEM` CBV + `VINTRP` -> `(102,128,51,255)` |
 
 ### 6.3 Measured Performance and Memory Telemetry
-The table below summarizes representative telemetry recorded across Sprints 12â€“16 on the RTX 5070 testbed:
+Representative metrics captured on the RTX 5070 testbed across Sprints 12â€“21:
 
-| Metric | Observed Result | Notes |
-| :--- | :--- | :--- |
-| **PSO Creation (Cold Compile vs. Disk Hit)** | `44.32 ms` -> `0.93â€“1.32 ms` | **35xâ€“47x speedup** via `ID3D12PipelineLibrary` (`14,746 B` library, 3 PSOs) |
-| **In-Process `SCXS` Translated PSO Hit** | `29.58 ms` -> `0.04â€“0.07 ms` | **>400x speedup** combining `m_xlatCache` + `ID3D12PipelineLibrary` |
-| **DirectStorage Raw Asset Throughput** | `774â€“1,269 MB/s` | `262,176 B` (`crest_2dthin.scx`) in `0.20â€“0.32 ms` on background worker |
-| **DirectStorage `SCLZ` Tiled Texture** | `1.60x` (`163,909 B` -> `262,144 B`) | `1.83 ms` (`136.3 MB/s` effective), bit-exact `crc=0xA8568DF7` |
-| **DirectStorage `SCLZ` Structured Tile Test** | `20.73x` (`3,162 B` -> `65,536 B`) | `0.31 ms` (`204.2 MB/s` effective) under Debug build |
-| **IMA-ADPCM Audio Compression & Footprint** | `3.85xâ€“3.92x` | `AudioPCM[20]` peak RAM reduced **41.8%** (`218,880 B` -> `127,488 B`) |
-| **Audio Fidelity & Runtime Stability** | `SNR > 30 dB`, `0 glitches` | 5 ADPCM buffers (`59,904 B -> 236,340 B PCM`) over 1,431 rendered frames |
-| **Memory Hygiene (`xmem` & `kernelx`)** | `0 leaks (0 B)` | Verified on unload in both `scarlett_tests` and `dummy_title` (exit code `0`) |
+| Metric | Cold / Baseline | Warm / Optimized | Speedup / Notes |
+| :--- | :--- | :--- | :--- |
+| **Graphics PSO (`dummy_title` `GFX_E604...`)** | `17.61 ms` | `1.09 ms` (disk) | **16.2x** via `ID3D12PipelineLibrary` |
+| **Compute PSO (`dummy_title` `CMP_A97A...`)** | `47.61 ms` | `0.61 ms` (disk) | **78.0x** via `ID3D12PipelineLibrary` |
+| **Binary RDNA2 PS (`GFX_F153...`, 9 insts)** | `43.94 ms` | `2.12â€“3.10 ms` (disk) / `0.04 ms` (in-proc) | **~1,098x** in-process (`m_xlatCache` + library) |
+| **Binary RDNA2 CS (`CMP_94A6...`, 4 insts)** | `38.28 ms` | `1.64 ms` (disk) / `0.03 ms` (in-proc) | **~1,276x** in-process on `COMPUTE` queue |
+| **Binary RDNA2 VS+PS+CBV (`GFX_B6BB...`, 20 insts)** | `47.78 ms` | `0.06 ms` (in-proc) | **~796x**; merged PSO library `40,372 B` |
+| **DirectStorage Raw Asset Throughput** | `774â€“1,269 MB/s` | â€” | `262,176 B` in `0.20â€“0.32 ms` on I/O worker |
+| **DirectStorage `SCLZ` Tiled Texture** | `262,144 B` raw | `163,909 B` (`1.60x`) | `1.83â€“2.46 ms` (`101â€“136 MB/s` eff), bit-exact CRC |
+| **DirectStorage `SCLZ` Structured Test** | `65,536 B` raw | `3,162 B` (`20.73x`) | `0.26â€“0.42 ms` (`148â€“240 MB/s` eff) in Debug |
+| **IMA-ADPCM Audio Footprint** | `218,880 B` peak | `127,488 B` peak | **-41.8% RAM** (`3.85xâ€“3.92x`), `0` glitches over 1,704 frames |
+| **Memory Hygiene (`xmem` & `kernelx`)** | `0 leaks (0 B)` | `0 leaks (0 B)` | Verified on unload in both CTest and `dummy_title` |
 
 ---
 
 ## 7. Open Challenges and Research Roadmap
 
-While Scarlett Layer validates the complete architectural skeleton of a host-based Series X translation layer, executing unmodified retail or devkit Series X titles requires addressing four major research and engineering fronts:
+While Scarlett Layer now demonstrates an end-to-end host translation stackâ€”including live binary RDNA2 execution across Vertex, Pixel, and Compute stages on async queuesâ€”executing unmodified retail or devkit Series X titles requires four major technical extensions:
 
-1. **RDNA2 ISA-to-DXIL Binary Recompilation:** The single largest technical barrier is lifting precompiled AMD RDNA2 shader machine code (SGPR/VGPR allocation, Wave32/Wave64 execution masks, structured control flow, and console descriptor table bindings) into valid host `DXIL` LLVM bitcode. Our `IShaderTranslator` registry and `SCXS` `Rdna2Isa` seam are designed to host this compiler backend incrementally.
-2. **Exact Binary ABI, COM IID, and VTable Slot Alignment:** Precompiled third-party binaries bind by exact COM GUIDs, struct offsets, calling conventions, and vtable slot indices rather than source-level headers. Expanding `tools/audit_imports.py` alongside systematic ABI conformance tests will bridge clean-room interfaces to real binary expectations.
-3. **Hardware-Exact Surface Tiling & Block Codecs:** Upgrading `xg_xs.dll` from 8x8 Morton `2D_THIN` to AMD RDNA2 `64KB_S` / `64KB_D` / `64KB_R` micro/macro swizzle equations (including BCn block-compressed formats), integrating hardware-equivalent BCPack decompression in `dstorage_xs.dll`, and implementing an XMA2 decoder behind `ScarlettDecodingSourceVoice`.
-4. **Compute, Mesh, and Async-Queue Graphics Coverage:** Extending `d3d12_xs.dll` with `CreateComputePipelineState`, `CreateUnorderedAccessView`, async compute queues, and Mesh/Amplification shader pipelines to match modern ninth-generation rendering workloads.
+1. **Full RDNA2 Control Flow, Texture Sampling & Direct DXIL Emission:** Expanding `rdna2_isa.hpp` beyond straight-line ALU/CBV/MUBUF shaders to reconstruct structured control flow (`s_cbranch_scc0/1`, `exec` mask divergence/reconvergence), `MIMG` texture sampling (`image_sample`), Wave32/Wave64 intrinsics, and direct LLVM bitcode (`DXIL`) emission to remove the intermediate HLSL/`D3DCompile` step.
+2. **Hardware-Exact `64KB_S` Swizzling & BCn Block-Compressed Surfaces:** Extending `xg_xs.dll` from `RGBA8` `2D_THIN` to AMD RDNA2 `64KB_S` / `64KB_D` / `64KB_R` micro/macro-tile equations over 4x4 block-compressed textures (`BC1`, `BC3`, `BC7`), paired with BCPack decompression in `dstorage_xs.dll` and XMA2 decoding behind `ScarlettDecodingSourceVoice`.
+3. **DirectStorage Direct-to-VRAM Streaming (`DSTORAGE_REQUEST_DESTINATION_BUFFER`):** Adding an internal upload staging ring and `COPY` command queue inside `dstorage_xs.dll` so compressed disk slices stream directly into `D3D12_HEAP_TYPE_DEFAULT` GPU buffers before signaling `ID3D12Fence`.
+4. **Exact Binary ABI, COM GUID & VTable Conformance:** Systematically auditing real GDK/Series X COM IIDs, vtable slot ordinals, and structure layouts via `tools/audit_imports.py` to bridge clean-room headers to unmodified third-party binaries.
 
 ---
 
-*Document generated at Sprint 16 baseline. Next scheduled monograph revision: Sprint 21.*
+*Document updated at Sprint 21 baseline. Next scheduled monograph revision: Sprint 26.*
