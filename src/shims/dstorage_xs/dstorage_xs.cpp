@@ -1,4 +1,5 @@
 #include "dstorage_xs.hpp"
+#include "common/codecs.hpp"
 #include "common/stub.hpp"
 #include "common/vfs.hpp"
 
@@ -231,6 +232,7 @@ struct QueuedOp {
     uint32_t srcSize{0};
     void* dstMemory{nullptr};
     uint32_t dstSize{0};
+    uint32_t uncompressedSize{0};
     std::string reqName;
 
     ComPtr<ScarlettStatusArrayX> statusArray;
@@ -300,6 +302,7 @@ public:
         op.options = request->Options;
         op.dstMemory = request->Destination.Memory.Buffer;
         op.dstSize = request->Destination.Memory.Size;
+        op.uncompressedSize = request->UncompressedSize;
         op.reqName = request->Name ? request->Name : "request";
 
         if (request->Options.SourceType == DSTORAGE_REQUEST_SOURCE_FILE) {
@@ -397,34 +400,68 @@ private:
         ++m_errorRecord.FailureCount;
     }
 
-    HRESULT ExecuteReadRequest(const QueuedOp& op, uint64_t& outBytes) {
-        outBytes = 0;
-        if (op.options.CompressionFormat != DSTORAGE_COMPRESSION_FORMAT_NONE) {
-            return E_NOTIMPL;
-        }
-        if (op.options.DestinationType != DSTORAGE_REQUEST_DESTINATION_MEMORY || !op.dstMemory) {
-            return E_INVALIDARG;
-        }
-        if (op.srcSize > op.dstSize) {
-            return HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
-        }
-
+    HRESULT ReadRawSource(const QueuedOp& op, void* dst, uint32_t size, uint32_t& outRead) {
+        outRead = 0;
         if (op.options.SourceType == DSTORAGE_REQUEST_SOURCE_FILE) {
             if (!op.file) {
                 return E_HANDLE;
             }
-            uint32_t bytesRead = 0;
-            HRESULT hr = op.file->ReadSlice(op.fileOffset, op.dstMemory, op.srcSize, bytesRead);
-            outBytes = bytesRead;
-            return hr;
+            return op.file->ReadSlice(op.fileOffset, dst, size, outRead);
         }
-
         if (!op.srcMemory) {
             return E_INVALIDARG;
         }
-        std::memcpy(op.dstMemory, op.srcMemory, op.srcSize);
-        outBytes = op.srcSize;
+        std::memcpy(dst, op.srcMemory, size);
+        outRead = size;
         return S_OK;
+    }
+
+    HRESULT ExecuteReadRequest(const QueuedOp& op, uint64_t& outReadBytes, uint64_t& outProducedBytes) {
+        outReadBytes = 0;
+        outProducedBytes = 0;
+
+        if (op.options.DestinationType != DSTORAGE_REQUEST_DESTINATION_MEMORY || !op.dstMemory) {
+            return E_INVALIDARG;
+        }
+
+        if (op.options.CompressionFormat == DSTORAGE_COMPRESSION_FORMAT_NONE) {
+            if (op.srcSize > op.dstSize) {
+                return HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
+            }
+            uint32_t bytesRead = 0;
+            HRESULT hr = ReadRawSource(op, op.dstMemory, op.srcSize, bytesRead);
+            outReadBytes = bytesRead;
+            outProducedBytes = bytesRead;
+            return hr;
+        }
+
+        if (op.options.CompressionFormat == DSTORAGE_COMPRESSION_FORMAT_SCARLETT_LZ) {
+            const uint32_t expectedOut = (op.uncompressedSize > 0) ? op.uncompressedSize : op.dstSize;
+            if (expectedOut > op.dstSize) {
+                return HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
+            }
+
+            std::vector<uint8_t> compressedStaging(op.srcSize);
+            uint32_t bytesRead = 0;
+            HRESULT hr = ReadRawSource(op, compressedStaging.data(), op.srcSize, bytesRead);
+            if (FAILED(hr)) {
+                return hr;
+            }
+            outReadBytes = bytesRead;
+
+            size_t decompressedBytes = 0;
+            if (!sc::codec::DecompressLzBlock(
+                    compressedStaging.data(), bytesRead,
+                    op.dstMemory, op.dstSize, decompressedBytes) ||
+                decompressedBytes != expectedOut) {
+                return E_FAIL;
+            }
+
+            outProducedBytes = decompressedBytes;
+            return S_OK;
+        }
+
+        return E_NOTIMPL;
     }
 
     void WorkerLoop() {
@@ -442,15 +479,18 @@ private:
 
             const auto startTime = std::chrono::steady_clock::now();
             HRESULT batchHr = S_OK;
-            uint64_t totalBytes = 0;
+            uint64_t totalRead = 0;
+            uint64_t totalProduced = 0;
             uint32_t readCount = 0;
 
             for (const auto& op : batch) {
                 switch (op.kind) {
                     case QueueOpKind::ReadRequest: {
-                        uint64_t bytes = 0;
-                        HRESULT hr = ExecuteReadRequest(op, bytes);
-                        totalBytes += bytes;
+                        uint64_t bytesRead = 0;
+                        uint64_t bytesProduced = 0;
+                        HRESULT hr = ExecuteReadRequest(op, bytesRead, bytesProduced);
+                        totalRead += bytesRead;
+                        totalProduced += bytesProduced;
                         ++readCount;
                         if (FAILED(hr)) {
                             if (SUCCEEDED(batchHr)) {
@@ -480,14 +520,24 @@ private:
                 const auto elapsedUs = std::chrono::duration_cast<std::chrono::microseconds>(
                     std::chrono::steady_clock::now() - startTime).count();
                 const double sec = std::max(static_cast<double>(elapsedUs) / 1000000.0, 0.000001);
-                const double mbps = (static_cast<double>(totalBytes) / (1024.0 * 1024.0)) / sec;
+                const double effMbps = (static_cast<double>(totalProduced) / (1024.0 * 1024.0)) / sec;
 
-                char buf[160];
-                std::snprintf(buf, sizeof(buf),
-                              "-> batch done on '%s': %u req(s), %llu B in %.2f ms (%.1f MB/s)",
-                              m_name.c_str(), readCount,
-                              static_cast<unsigned long long>(totalBytes),
-                              static_cast<double>(elapsedUs) / 1000.0, mbps);
+                char buf[224];
+                if (totalProduced > totalRead && totalRead > 0) {
+                    const double ratio = static_cast<double>(totalProduced) / static_cast<double>(totalRead);
+                    std::snprintf(buf, sizeof(buf),
+                                  "-> batch done on '%s': %u req(s), %llu B -> %llu B decompressed (%.2fx) in %.2f ms (%.1f MB/s eff)",
+                                  m_name.c_str(), readCount,
+                                  static_cast<unsigned long long>(totalRead),
+                                  static_cast<unsigned long long>(totalProduced),
+                                  ratio, static_cast<double>(elapsedUs) / 1000.0, effMbps);
+                } else {
+                    std::snprintf(buf, sizeof(buf),
+                                  "-> batch done on '%s': %u req(s), %llu B in %.2f ms (%.1f MB/s)",
+                                  m_name.c_str(), readCount,
+                                  static_cast<unsigned long long>(totalProduced),
+                                  static_cast<double>(elapsedUs) / 1000.0, effMbps);
+                }
                 sc::log::Write(sc::log::Level::Info, "dstorage_xs", "Worker[Submit]", buf);
             }
         }

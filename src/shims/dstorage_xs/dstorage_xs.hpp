@@ -30,9 +30,10 @@ enum DSTORAGE_REQUEST_DESTINATION_TYPE : uint8_t {
 };
 
 enum DSTORAGE_COMPRESSION_FORMAT : uint8_t {
-    DSTORAGE_COMPRESSION_FORMAT_NONE   = 0,
-    DSTORAGE_COMPRESSION_FORMAT_ZLIB   = 1,
-    DSTORAGE_COMPRESSION_FORMAT_BCPACK = 2
+    DSTORAGE_COMPRESSION_FORMAT_NONE        = 0,
+    DSTORAGE_COMPRESSION_FORMAT_ZLIB        = 1,
+    DSTORAGE_COMPRESSION_FORMAT_BCPACK      = 2,
+    DSTORAGE_COMPRESSION_FORMAT_SCARLETT_LZ = 3
 };
 
 struct DSTORAGE_CONFIGURATION {
@@ -99,7 +100,6 @@ struct DSTORAGE_ERROR_RECORD {
     char     RequestName[64];
 };
 
-// Clean-room GUIDs for our Scarlett DirectStorage wrapper interfaces
 inline constexpr GUID IID_IDStorageFactoryX =
     { 0x5c4a4101, 0x9b70, 0x4d1e, { 0xa1, 0x20, 0x00, 0x53, 0x43, 0x41, 0x52, 0x01 } };
 

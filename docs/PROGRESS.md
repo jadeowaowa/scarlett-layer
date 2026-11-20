@@ -19,16 +19,17 @@
 | Sprint 13 | Virtual console paths (`G:\`, `T:\`, `S:\`) and headless CTest verification suite (`scarlett_tests`) | Done |
 | Sprint 14 | `kernelx.dll` unified memory & CPU topology shim + `d3d12_xs.dll` `CreateHeap` / `CreatePlacedResource` | Done |
 | Sprint 15 | SM 6.x `DXIL` LLVM bitcode inspector & pluggable `IShaderTranslator` (`SCXS` container pipeline) | Done |
+| Sprint 16 | `dstorage_xs.dll` live `SCLZ` CPU decompression & `xaudio2_9.dll` live IMA-ADPCM decode voice bridge | Done |
 
 ## Shim & Export Coverage
 
-### `loader.exe` + `scarlett_hook.dll` + `common/vfs.hpp`
+### `loader.exe` + `scarlett_hook.dll` + `common/`
 - [x] In-memory static & delay-load PE import redirection across all 9 shims
 - [x] Pre-entrypoint APC injection of `scarlett_hook.dll`
 - [x] Multi-module runtime IAT hooks (`LoadLibraryA/W`, `LoadLibraryExA/W`) across main `.exe` and loaded sub-DLLs
 - [x] Virtual console drive mapping (`G:\` game root, `T:\` scratch, `S:\` save temp)
-- [x] `tools/audit_imports.py` coverage report + `--gen-stub` scaffolding
-- [x] Automated headless CTest suite (`scarlett_tests.exe`, 13 checks)
+- [x] Zero-dependency `SCLZ` LZ77 block codec + standard IMA-ADPCM (`0x0011`) audio codec
+- [x] Automated headless CTest suite (`scarlett_tests.exe`, 15 checks)
 
 ### `xgameruntime.dll`
 - [x] `XGameRuntimeInitialize`, `XGameRuntimeUninitialize`, `XSystemGetDeviceType`
@@ -53,13 +54,15 @@
 ### `dstorage_xs.dll`
 - [x] `DStorageGetFactory`, `DStorageSetConfiguration`, `IDStorageFactoryX`, `IDStorageQueueX`, `IDStorageFileX`, `IDStorageStatusArrayX`
 - [x] Virtual console drive translation inside `OpenFile` (`G:\`, `T:\`, `S:\`)
+- [x] Live background worker `SCLZ` CPU decompression with integrity verification & `RetrieveErrorRecord` reporting
 
 ### `pixevt.dll`
 - [x] `PIXBeginEvent`, `PIXEndEvent`, `PIXSetMarker` (loaded dynamically via `scarlett_hook.dll`)
 
 ### `xaudio2_9.dll`
 - [x] `XAudio2Create` proxying onto native `System32\xaudio2_9.dll`
-- [x] Full `IXAudio2` COM wrapper with `WAVE_FORMAT_XMA2` (`0x0166`) detection hook and performance telemetry
+- [x] Full `IXAudio2` COM wrapper + `ScarlettDecodingSourceVoice` live 4:1 `WAVE_FORMAT_IMA_ADPCM` (`0x0011`) -> PCM16 decode bridge
+- [x] `WAVE_FORMAT_XMA2` (`0x0166`) detection hook and performance telemetry
 
 ### `xmem.dll`
 - [x] `XMemAlloc`, `XMemFree`, `XMemSize`, `XMemAllocDefault`, `XMemFreeDefault`, `XMemSizeDefault`
@@ -71,6 +74,6 @@
 - [x] `GetConsoleProcessorInfo`, `SetThreadAffinityMaskX` (7-core/14-thread Series X topology + safe host mask clamping)
 
 ## Upcoming Subsystems
-- [ ] DirectStorage CPU decompression & compressed audio voice decode bridge
 - [ ] Compute pipelines (`CreateComputePipelineState`, `CreateUnorderedAccessView`) + GPU procedural compute pass
-- [ ] Real ABI vtable / GUID alignment audit & RDNA2 ISA decoding research
+- [ ] Proof-of-concept RDNA2 ISA decoder & translator plugin
+- [ ] Technical Architecture Whitepaper (`docs/ARCHITECTURE_PAPER.md`)

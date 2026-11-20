@@ -1,3 +1,4 @@
+#include "common/codecs.hpp"
 #include "common/vfs.hpp"
 #include "shims/xgameruntime/gdk_types.hpp"
 #include "shims/d3d12_xs/d3d12_xs.hpp"
@@ -18,6 +19,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
@@ -784,6 +786,177 @@ bool TestScxsTranslatorAndPsoCache() {
     return true;
 }
 
+// 14. dstorage_xs: Live SCLZ CPU decompression over VFS + corrupt stream error trapping
+bool TestDStorageLzDecompression() {
+    constexpr size_t kRawSize = 65536;
+    std::vector<uint8_t> raw(kRawSize);
+    for (size_t i = 0; i < kRawSize; ++i) {
+        // Structured repeating tile-like pattern that compresses well
+        raw[i] = static_cast<uint8_t>(((i & 0x3Fu) * 3u + ((i >> 8) & 0x0Fu)) & 0xFFu);
+    }
+
+    std::vector<uint8_t> comp = sc::codec::CompressLzBlock(raw.data(), raw.size());
+    SC_EXPECT(!comp.empty());
+    SC_EXPECT(comp.size() < raw.size() / 2u); // Expect > 2x compression
+
+    const std::filesystem::path hostPath = sc::vfs::TranslatePath(L"T:\\compressed_probe.sclz");
+    std::error_code ec;
+    std::filesystem::create_directories(hostPath.parent_path(), ec);
+    {
+        std::ofstream out(hostPath, std::ios::binary | std::ios::trunc);
+        SC_EXPECT(out.is_open());
+        out.write(reinterpret_cast<const char*>(comp.data()),
+                  static_cast<std::streamsize>(comp.size()));
+    }
+
+    ComPtr<IDStorageFactoryX> factory;
+    SC_EXPECT(SUCCEEDED(DStorageGetFactory(IID_IDStorageFactoryX,
+                                           reinterpret_cast<void**>(factory.GetAddressOf()))));
+
+    DSTORAGE_QUEUE_DESC qd{};
+    qd.SourceType = DSTORAGE_REQUEST_SOURCE_FILE;
+    qd.Capacity = 16;
+    qd.Priority = DSTORAGE_PRIORITY_HIGH;
+    qd.Name = "CTestLzQueue";
+
+    ComPtr<IDStorageQueueX> queue;
+    ComPtr<IDStorageFileX> file;
+    ComPtr<IDStorageStatusArrayX> status;
+    SC_EXPECT(SUCCEEDED(factory->CreateQueue(&qd, IID_IDStorageQueueX,
+                                             reinterpret_cast<void**>(queue.GetAddressOf()))));
+    SC_EXPECT(SUCCEEDED(factory->OpenFile(L"T:\\compressed_probe.sclz", IID_IDStorageFileX,
+                                          reinterpret_cast<void**>(file.GetAddressOf()))));
+    SC_EXPECT(SUCCEEDED(factory->CreateStatusArray(2, "CTestLzStatus", IID_IDStorageStatusArrayX,
+                                                   reinterpret_cast<void**>(status.GetAddressOf()))));
+
+    std::vector<uint8_t> decompressed(kRawSize, 0);
+    DSTORAGE_REQUEST req{};
+    req.Options.CompressionFormat = DSTORAGE_COMPRESSION_FORMAT_SCARLETT_LZ;
+    req.Options.SourceType = DSTORAGE_REQUEST_SOURCE_FILE;
+    req.Options.DestinationType = DSTORAGE_REQUEST_DESTINATION_MEMORY;
+    req.Source.File.Source = file.Get();
+    req.Source.File.Offset = 0;
+    req.Source.File.Size = static_cast<uint32_t>(comp.size());
+    req.Destination.Memory.Buffer = decompressed.data();
+    req.Destination.Memory.Size = static_cast<uint32_t>(decompressed.size());
+    req.UncompressedSize = static_cast<uint32_t>(kRawSize);
+    req.Name = "sclz_vfs_read";
+
+    queue->EnqueueRequest(&req);
+    queue->EnqueueStatus(status.Get(), 0);
+    queue->Submit();
+
+    while (!status->IsComplete(0)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    SC_EXPECT(SUCCEEDED(status->GetHResult(0)));
+    SC_EXPECT(std::memcmp(raw.data(), decompressed.data(), kRawSize) == 0);
+
+    // Corrupt compressed stream in memory -> must fail cleanly with E_FAIL and log error record
+    std::vector<uint8_t> corrupt = comp;
+    corrupt.back() ^= 0xFFu;
+    std::vector<uint8_t> discard(kRawSize, 0);
+
+    DSTORAGE_REQUEST badReq{};
+    badReq.Options.CompressionFormat = DSTORAGE_COMPRESSION_FORMAT_SCARLETT_LZ;
+    badReq.Options.SourceType = DSTORAGE_REQUEST_SOURCE_MEMORY;
+    badReq.Options.DestinationType = DSTORAGE_REQUEST_DESTINATION_MEMORY;
+    badReq.Source.Memory.Source = corrupt.data();
+    badReq.Source.Memory.Size = static_cast<uint32_t>(corrupt.size());
+    badReq.Destination.Memory.Buffer = discard.data();
+    badReq.Destination.Memory.Size = static_cast<uint32_t>(discard.size());
+    badReq.UncompressedSize = static_cast<uint32_t>(kRawSize);
+    badReq.Name = "corrupt_sclz_req";
+
+    queue->EnqueueRequest(&badReq);
+    queue->EnqueueStatus(status.Get(), 1);
+    queue->Submit();
+
+    while (!status->IsComplete(1)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    SC_EXPECT(status->GetHResult(1) == E_FAIL);
+
+    DSTORAGE_ERROR_RECORD errRec{};
+    queue->RetrieveErrorRecord(&errRec);
+    SC_EXPECT(errRec.FailureCount == 1u);
+    SC_EXPECT(errRec.FirstFailureHResult == E_FAIL);
+    SC_EXPECT(std::strcmp(errRec.RequestName, "corrupt_sclz_req") == 0);
+
+    file->Close();
+    file.Reset();
+    std::filesystem::remove(hostPath, ec);
+    return true;
+}
+
+// 15. xaudio2_9: Live 4:1 IMA-ADPCM codec accuracy + ScarlettDecodingSourceVoice bridge
+bool TestXAudio2ImaAdpcmDecodeBridge() {
+    constexpr size_t kSamples = 4800; // 100 ms @ 48 kHz
+    std::vector<int16_t> orig(kSamples);
+    for (size_t i = 0; i < kSamples; ++i) {
+        const double t = static_cast<double>(i) / 48000.0;
+        orig[i] = static_cast<int16_t>(std::sin(6.28318530718 * 440.0 * t) * 24000.0);
+    }
+
+    auto adpcm = sc::codec::EncodeImaAdpcmMono(orig.data(), orig.size());
+    SC_EXPECT(!adpcm.empty());
+    SC_EXPECT(adpcm.size() < (orig.size() * sizeof(int16_t)) / 3u); // ~3.95x reduction
+
+    std::vector<int16_t> decoded;
+    SC_EXPECT(sc::codec::DecodeImaAdpcmMono(adpcm.data(), adpcm.size(),
+                                            sc::codec::kImaAdpcmBlockAlign, decoded));
+    SC_EXPECT(decoded.size() >= orig.size());
+
+    double signalEnergy = 0.0;
+    double noiseEnergy = 0.0;
+    for (size_t i = 0; i < orig.size(); ++i) {
+        const double s = static_cast<double>(orig[i]);
+        const double e = static_cast<double>(orig[i]) - static_cast<double>(decoded[i]);
+        signalEnergy += s * s;
+        noiseEnergy += e * e;
+    }
+    const double snrDb = 10.0 * std::log10(signalEnergy / std::max(noiseEnergy, 1.0));
+    SC_EXPECT(snrDb > 30.0);
+
+    // Exercise live ScarlettDecodingSourceVoice through xaudio2_9.dll (silent, never started)
+    ComPtr<IXAudio2> engine;
+    SC_EXPECT(SUCCEEDED(XAudio2Create(&engine, 0, XAUDIO2_DEFAULT_PROCESSOR)));
+
+    IXAudio2MasteringVoice* master = nullptr;
+    if (SUCCEEDED(engine->CreateMasteringVoice(&master)) && master) {
+        WAVEFORMATEX adpcmFmt{};
+        adpcmFmt.wFormatTag      = sc::codec::kWaveFormatImaAdpcm;
+        adpcmFmt.nChannels       = 1;
+        adpcmFmt.nSamplesPerSec  = 48000;
+        adpcmFmt.wBitsPerSample  = 4;
+        adpcmFmt.nBlockAlign     = sc::codec::kImaAdpcmBlockAlign;
+        adpcmFmt.nAvgBytesPerSec = (48000 * sc::codec::kImaAdpcmBlockAlign) / sc::codec::kImaAdpcmSamplesPerBlock;
+
+        IXAudio2SourceVoice* voice = nullptr;
+        SC_EXPECT(SUCCEEDED(engine->CreateSourceVoice(&voice, &adpcmFmt)));
+        SC_EXPECT(voice != nullptr);
+
+        int userSentinel = 0x53434152;
+        XAUDIO2_BUFFER buf{};
+        buf.AudioBytes = static_cast<UINT32>(adpcm.size());
+        buf.pAudioData = adpcm.data();
+        buf.Flags = XAUDIO2_END_OF_STREAM;
+        buf.pContext = &userSentinel;
+
+        SC_EXPECT(SUCCEEDED(voice->SubmitSourceBuffer(&buf)));
+
+        XAUDIO2_VOICE_STATE st{};
+        voice->GetState(&st);
+        SC_EXPECT(st.BuffersQueued == 1u);
+        SC_EXPECT(st.pCurrentBufferContext == &userSentinel);
+
+        SC_EXPECT(SUCCEEDED(voice->FlushSourceBuffers()));
+        voice->DestroyVoice();
+        master->DestroyVoice();
+    }
+    return true;
+}
+
 } // namespace
 
 int main() {
@@ -802,6 +975,8 @@ int main() {
     RunTest("D3D12PlacedResourcesAndHeap", TestD3D12PlacedResourcesAndHeap);
     RunTest("DxilSm6BitcodeInspector",    TestDxilSm6BitcodeInspector);
     RunTest("ScxsTranslatorAndPsoCache",  TestScxsTranslatorAndPsoCache);
+    RunTest("DStorageLzDecompression",    TestDStorageLzDecompression);
+    RunTest("XAudio2ImaAdpcmDecodeBridge", TestXAudio2ImaAdpcmDecodeBridge);
 
     XGameRuntimeUninitialize();
 

@@ -1,3 +1,4 @@
+#include "common/codecs.hpp"
 #include "common/vfs.hpp"
 #include "shims/xgameruntime/gdk_types.hpp"
 #include "shims/d3d12_xs/d3d12_xs.hpp"
@@ -116,6 +117,8 @@ private:
     uint32_t m_attrs{0};
 };
 
+// Exercises BOTH native PCM passthrough (looping thruster hum) AND live 4:1 IMA-ADPCM
+// transparent decoding (boot chord + F5 quick-save chime) through xaudio2_9.dll.
 class TitleAudio {
 public:
     bool Init() {
@@ -129,22 +132,30 @@ public:
             return false;
         }
 
-        if (!BuildBootChordPcm() || !BuildThrusterHumPcm() || !BuildSaveChimePcm()) {
+        if (!BuildBootChordAdpcm() || !BuildThrusterHumPcm() || !BuildSaveChimeAdpcm()) {
             Shutdown();
             return false;
         }
 
-        WAVEFORMATEX wf{};
-        wf.wFormatTag = WAVE_FORMAT_PCM;
-        wf.nChannels = 1;
-        wf.nSamplesPerSec = kAudioRate;
-        wf.wBitsPerSample = 16;
-        wf.nBlockAlign = wf.nChannels * (wf.wBitsPerSample / 8);
-        wf.nAvgBytesPerSec = wf.nSamplesPerSec * wf.nBlockAlign;
+        WAVEFORMATEX pcmFmt{};
+        pcmFmt.wFormatTag      = WAVE_FORMAT_PCM;
+        pcmFmt.nChannels       = 1;
+        pcmFmt.nSamplesPerSec  = kAudioRate;
+        pcmFmt.wBitsPerSample  = 16;
+        pcmFmt.nBlockAlign     = pcmFmt.nChannels * (pcmFmt.wBitsPerSample / 8);
+        pcmFmt.nAvgBytesPerSec = pcmFmt.nSamplesPerSec * pcmFmt.nBlockAlign;
 
-        if (FAILED(m_engine->CreateSourceVoice(&m_bootVoice, &wf, 0, 2.0f)) ||
-            FAILED(m_engine->CreateSourceVoice(&m_humVoice, &wf, 0, 4.0f)) ||
-            FAILED(m_engine->CreateSourceVoice(&m_saveVoice, &wf, 0, 2.0f))) {
+        WAVEFORMATEX adpcmFmt{};
+        adpcmFmt.wFormatTag      = sc::codec::kWaveFormatImaAdpcm;
+        adpcmFmt.nChannels       = 1;
+        adpcmFmt.nSamplesPerSec  = kAudioRate;
+        adpcmFmt.wBitsPerSample  = 4;
+        adpcmFmt.nBlockAlign     = sc::codec::kImaAdpcmBlockAlign;
+        adpcmFmt.nAvgBytesPerSec = (kAudioRate * sc::codec::kImaAdpcmBlockAlign) / sc::codec::kImaAdpcmSamplesPerBlock;
+
+        if (FAILED(m_engine->CreateSourceVoice(&m_bootVoice, &adpcmFmt, 0, 2.0f)) ||
+            FAILED(m_engine->CreateSourceVoice(&m_humVoice,  &pcmFmt,   0, 4.0f)) ||
+            FAILED(m_engine->CreateSourceVoice(&m_saveVoice, &adpcmFmt, 0, 2.0f))) {
             Shutdown();
             return false;
         }
@@ -159,8 +170,8 @@ public:
         m_humVoice->Start(0);
 
         XAUDIO2_BUFFER bootBuf{};
-        bootBuf.AudioBytes = static_cast<UINT32>(m_bootPcm.ByteSize());
-        bootBuf.pAudioData = reinterpret_cast<const BYTE*>(m_bootPcm.Data());
+        bootBuf.AudioBytes = static_cast<UINT32>(m_bootAdpcm.ByteSize());
+        bootBuf.pAudioData = m_bootAdpcm.Data();
         bootBuf.Flags = XAUDIO2_END_OF_STREAM;
         m_bootVoice->SetVolume(0.28f);
         m_bootVoice->SubmitSourceBuffer(&bootBuf);
@@ -193,8 +204,8 @@ public:
         m_saveVoice->FlushSourceBuffers();
 
         XAUDIO2_BUFFER buf{};
-        buf.AudioBytes = static_cast<UINT32>(m_savePcm.ByteSize());
-        buf.pAudioData = reinterpret_cast<const BYTE*>(m_savePcm.Data());
+        buf.AudioBytes = static_cast<UINT32>(m_saveAdpcm.ByteSize());
+        buf.pAudioData = m_saveAdpcm.Data();
         buf.Flags = XAUDIO2_END_OF_STREAM;
         m_saveVoice->SetVolume(0.32f);
         m_saveVoice->SubmitSourceBuffer(&buf);
@@ -219,9 +230,9 @@ public:
             m_master = nullptr;
         }
         m_engine.Reset();
-        m_bootPcm.Reset();
+        m_bootAdpcm.Reset();
         m_humPcm.Reset();
-        m_savePcm.Reset();
+        m_saveAdpcm.Reset();
     }
 
     ~TitleAudio() {
@@ -237,11 +248,9 @@ private:
     static constexpr uint32_t kAudioPoolAttrs = MakeXAllocAttributes(
         XALLOC_ID_AUDIO_PCM, XALLOC_ALIGNMENT_64, XALLOC_MEMTYPE_HEAP, true);
 
-    bool BuildBootChordPcm() {
+    bool BuildBootChordAdpcm() {
         const uint32_t samples = static_cast<uint32_t>(kAudioRate * 0.90f);
-        if (!m_bootPcm.Allocate(samples, kAudioPoolAttrs)) {
-            return false;
-        }
+        std::vector<int16_t> pcm(samples);
         constexpr float freqs[4] = { 261.63f, 392.00f, 587.33f, 659.25f };
         constexpr float starts[4] = { 0.00f, 0.07f, 0.14f, 0.21f };
 
@@ -258,8 +267,17 @@ private:
                                  + 0.25f * std::sinf(kTwoPi * freqs[n] * 2.0f * nt);
                 mix += tone * env * 0.24f;
             }
-            m_bootPcm[i] = FloatToPcm16(mix);
+            pcm[i] = FloatToPcm16(mix);
         }
+
+        auto encoded = sc::codec::EncodeImaAdpcmMono(pcm.data(), pcm.size());
+        if (encoded.empty() || !m_bootAdpcm.Allocate(encoded.size(), kAudioPoolAttrs)) {
+            return false;
+        }
+        std::memcpy(m_bootAdpcm.Data(), encoded.data(), encoded.size());
+        std::printf("[TITLE] Encoded boot chord to IMA-ADPCM: %zu B -> %zu B (%.2fx)\n",
+                    pcm.size() * sizeof(int16_t), encoded.size(),
+                    static_cast<double>(pcm.size() * sizeof(int16_t)) / static_cast<double>(encoded.size()));
         return true;
     }
 
@@ -280,11 +298,9 @@ private:
         return true;
     }
 
-    bool BuildSaveChimePcm() {
+    bool BuildSaveChimeAdpcm() {
         const uint32_t samples = static_cast<uint32_t>(kAudioRate * 0.38f);
-        if (!m_savePcm.Allocate(samples, kAudioPoolAttrs)) {
-            return false;
-        }
+        std::vector<int16_t> pcm(samples);
         for (uint32_t i = 0; i < samples; ++i) {
             const float t = static_cast<float>(i) / static_cast<float>(kAudioRate);
             float mix = 0.0f;
@@ -298,14 +314,23 @@ private:
                 mix += (std::sinf(kTwoPi * 1318.51f * t2) + 0.20f * std::sinf(kTwoPi * 2637.02f * t2))
                      * env2 * 0.45f;
             }
-            m_savePcm[i] = FloatToPcm16(mix);
+            pcm[i] = FloatToPcm16(mix);
         }
+
+        auto encoded = sc::codec::EncodeImaAdpcmMono(pcm.data(), pcm.size());
+        if (encoded.empty() || !m_saveAdpcm.Allocate(encoded.size(), kAudioPoolAttrs)) {
+            return false;
+        }
+        std::memcpy(m_saveAdpcm.Data(), encoded.data(), encoded.size());
+        std::printf("[TITLE] Encoded save chime to IMA-ADPCM: %zu B -> %zu B (%.2fx)\n",
+                    pcm.size() * sizeof(int16_t), encoded.size(),
+                    static_cast<double>(pcm.size() * sizeof(int16_t)) / static_cast<double>(encoded.size()));
         return true;
     }
 
-    XMemBuffer<int16_t>     m_bootPcm;
+    XMemBuffer<uint8_t>     m_bootAdpcm;
     XMemBuffer<int16_t>     m_humPcm;
-    XMemBuffer<int16_t>     m_savePcm;
+    XMemBuffer<uint8_t>     m_saveAdpcm;
 
     ComPtr<IXAudio2>        m_engine;
     IXAudio2MasteringVoice* m_master{nullptr};
@@ -327,27 +352,20 @@ struct StarSaveData {
 };
 constexpr uint32_t kSaveMagic = 0x53434152U;
 
-struct ScarlettTexAssetHeader {
+struct ScarlettCompressedTexHeader {
     uint32_t magic;
     uint32_t width;
     uint32_t height;
     uint32_t dxgiFormat;
     uint32_t tileMode;
-    uint32_t dataOffset;
-    uint32_t dataSize;
-    uint32_t fnv1aChecksum;
+    uint32_t compressionFormat;
+    uint32_t compressedSize;
+    uint32_t uncompressedSize;
+    uint32_t uncompressedFnv1a;
+    uint32_t reserved;
 };
-static_assert(sizeof(ScarlettTexAssetHeader) == 32, "Asset header must be 32 bytes");
-constexpr uint32_t kAssetMagic = 0x58544353U;
-
-uint32_t ComputeFnv1a32(const uint8_t* data, size_t size) {
-    uint32_t hash = 2166136261u;
-    for (size_t i = 0; i < size; ++i) {
-        hash ^= data[i];
-        hash *= 16777619u;
-    }
-    return hash;
-}
+static_assert(sizeof(ScarlettCompressedTexHeader) == 40, "Compressed asset header must be 40 bytes");
+constexpr uint32_t kCompressedAssetMagic = 0x5A584353U; // 'SCXZ'
 
 struct AsyncWaiter {
     std::atomic<bool> done{false};
@@ -582,7 +600,7 @@ std::vector<uint8_t> BuildProceduralCrestTexture(uint32_t size) {
     return pixels;
 }
 
-bool EnsureBakedConsoleTextureAsset(
+bool EnsureBakedCompressedTextureAsset(
     const std::filesystem::path& assetPath,
     IXGTextureAddressComputer* tiledComputer,
     const XG_RESOURCE_LAYOUT& tiledLayout) {
@@ -606,30 +624,34 @@ bool EnsureBakedConsoleTextureAsset(
         return false;
     }
 
-    ScarlettTexAssetHeader hdr{};
-    hdr.magic = kAssetMagic;
-    hdr.width = kTexSize;
-    hdr.height = kTexSize;
-    hdr.dxgiFormat = static_cast<uint32_t>(DXGI_FORMAT_R8G8B8A8_UNORM);
-    hdr.tileMode = static_cast<uint32_t>(XG_TILE_MODE_2D_THIN);
-    hdr.dataOffset = sizeof(ScarlettTexAssetHeader);
-    hdr.dataSize = static_cast<uint32_t>(swizzled.ByteSize());
-    hdr.fnv1aChecksum = ComputeFnv1a32(swizzled.Data(), swizzled.ByteSize());
+    std::vector<uint8_t> compressed = sc::codec::CompressLzBlock(swizzled.Data(), swizzled.ByteSize());
+
+    ScarlettCompressedTexHeader hdr{};
+    hdr.magic             = kCompressedAssetMagic;
+    hdr.width             = kTexSize;
+    hdr.height            = kTexSize;
+    hdr.dxgiFormat        = static_cast<uint32_t>(DXGI_FORMAT_R8G8B8A8_UNORM);
+    hdr.tileMode          = static_cast<uint32_t>(XG_TILE_MODE_2D_THIN);
+    hdr.compressionFormat = static_cast<uint32_t>(DSTORAGE_COMPRESSION_FORMAT_SCARLETT_LZ);
+    hdr.compressedSize    = static_cast<uint32_t>(compressed.size());
+    hdr.uncompressedSize  = static_cast<uint32_t>(swizzled.ByteSize());
+    hdr.uncompressedFnv1a = sc::codec::ComputeFnv1a32(swizzled.Data(), swizzled.ByteSize());
 
     std::ofstream out(assetPath, std::ios::binary | std::ios::trunc);
     if (!out.is_open()) {
         return false;
     }
     out.write(reinterpret_cast<const char*>(&hdr), sizeof(hdr));
-    out.write(reinterpret_cast<const char*>(swizzled.Data()),
-              static_cast<std::streamsize>(swizzled.ByteSize()));
+    out.write(reinterpret_cast<const char*>(compressed.data()),
+              static_cast<std::streamsize>(compressed.size()));
     out.flush();
     if (!out.good()) {
         return false;
     }
 
-    std::printf("[TITLE] Baked pre-swizzled console texture asset: %s (%u B payload, crc=0x%08X)\n",
-                assetPath.string().c_str(), hdr.dataSize, hdr.fnv1aChecksum);
+    const double ratio = static_cast<double>(hdr.uncompressedSize) / static_cast<double>(hdr.compressedSize);
+    std::printf("[TITLE] Baked SCLZ-compressed tiled asset: %s (%u B -> %u B on disk, %.2fx, crc=0x%08X)\n",
+                assetPath.string().c_str(), hdr.uncompressedSize, hdr.compressedSize, ratio, hdr.uncompressedFnv1a);
     return true;
 }
 
@@ -687,7 +709,7 @@ int main() {
         }
     }
 
-    // 0c. Exercise multi-module hooking: load middleware DLL that dynamically loads Xbox shims!
+    // 0c. Exercise multi-module hooking
     HMODULE hPlugin = LoadLibraryW(L"engine_plugin.dll");
     if (hPlugin) {
         auto runDiag = reinterpret_cast<PluginRunDiagnosticsFn>(
@@ -767,7 +789,7 @@ int main() {
         }
     }
 
-    // 3. Initialize XAudio2 through our xaudio2_9.dll + xmem.dll shims
+    // 3. Initialize XAudio2 (PCM thruster + live IMA-ADPCM decode voices)
     TitleAudio audio;
     audio.Init();
 
@@ -802,7 +824,7 @@ int main() {
     }
     HANDLE ioFenceEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
 
-    // 6. Velocity asset streaming into 64 KB-aligned xmem.dll Physical memory -> xg_xs detile -> GPU
+    // 6. Velocity compressed asset streaming + live worker decompression -> 64KB xmem -> xg_xs detile
     XG_TEXTURE2D_DESC xgTiledDesc{};
     xgTiledDesc.Width = kTexSize;
     xgTiledDesc.Height = kTexSize;
@@ -825,9 +847,9 @@ int main() {
         return 1;
     }
 
-    const wchar_t* kVirtualAssetPath = L"G:\\assets\\crest_2dthin.scx";
+    const wchar_t* kVirtualAssetPath = L"G:\\assets\\crest_2dthin.scxz";
     const std::filesystem::path assetPath = sc::vfs::TranslatePath(kVirtualAssetPath);
-    if (!EnsureBakedConsoleTextureAsset(assetPath, tiledComputer.Get(), tiledLayout)) {
+    if (!EnsureBakedCompressedTextureAsset(assetPath, tiledComputer.Get(), tiledLayout)) {
         return 1;
     }
 
@@ -861,7 +883,14 @@ int main() {
         return 1;
     }
 
-    ScarlettTexAssetHeader streamedHdr{};
+    BY_HANDLE_FILE_INFORMATION fileInfo{};
+    if (FAILED(dsFile->GetFileInformation(&fileInfo)) ||
+        fileInfo.nFileSizeLow <= sizeof(ScarlettCompressedTexHeader)) {
+        return 1;
+    }
+    const uint32_t compressedPayloadBytes = fileInfo.nFileSizeLow - sizeof(ScarlettCompressedTexHeader);
+
+    ScarlettCompressedTexHeader streamedHdr{};
     XMemBuffer<uint8_t> streamedTiledMem;
     const uint32_t tiledPhysAttrs = MakeXAllocAttributes(
         XALLOC_ID_TEXTURE_TILED, XALLOC_ALIGNMENT_64K, XALLOC_MEMTYPE_PHYSICAL, true);
@@ -882,23 +911,23 @@ int main() {
     hdrReq.Options.DestinationType = DSTORAGE_REQUEST_DESTINATION_MEMORY;
     hdrReq.Source.File.Source = dsFile.Get();
     hdrReq.Source.File.Offset = 0;
-    hdrReq.Source.File.Size = sizeof(ScarlettTexAssetHeader);
+    hdrReq.Source.File.Size = sizeof(ScarlettCompressedTexHeader);
     hdrReq.Destination.Memory.Buffer = &streamedHdr;
-    hdrReq.Destination.Memory.Size = sizeof(ScarlettTexAssetHeader);
-    hdrReq.UncompressedSize = sizeof(ScarlettTexAssetHeader);
-    hdrReq.Name = "crest_header";
+    hdrReq.Destination.Memory.Size = sizeof(ScarlettCompressedTexHeader);
+    hdrReq.UncompressedSize = sizeof(ScarlettCompressedTexHeader);
+    hdrReq.Name = "crest_scxz_header";
 
     DSTORAGE_REQUEST bodyReq{};
-    bodyReq.Options.CompressionFormat = DSTORAGE_COMPRESSION_FORMAT_NONE;
+    bodyReq.Options.CompressionFormat = DSTORAGE_COMPRESSION_FORMAT_SCARLETT_LZ;
     bodyReq.Options.SourceType = DSTORAGE_REQUEST_SOURCE_FILE;
     bodyReq.Options.DestinationType = DSTORAGE_REQUEST_DESTINATION_MEMORY;
     bodyReq.Source.File.Source = dsFile.Get();
-    bodyReq.Source.File.Offset = sizeof(ScarlettTexAssetHeader);
-    bodyReq.Source.File.Size = static_cast<uint32_t>(streamedTiledMem.ByteSize());
+    bodyReq.Source.File.Offset = sizeof(ScarlettCompressedTexHeader);
+    bodyReq.Source.File.Size = compressedPayloadBytes;
     bodyReq.Destination.Memory.Buffer = streamedTiledMem.Data();
     bodyReq.Destination.Memory.Size = static_cast<uint32_t>(streamedTiledMem.ByteSize());
     bodyReq.UncompressedSize = static_cast<uint32_t>(streamedTiledMem.ByteSize());
-    bodyReq.Name = "crest_2dthin_payload";
+    bodyReq.Name = "crest_2dthin_sclz_payload";
 
     dsQueue->EnqueueRequest(&hdrReq);
     dsQueue->EnqueueRequest(&bodyReq);
@@ -912,15 +941,16 @@ int main() {
     }
 
     const bool statusOk = dsStatus->IsComplete(0) && SUCCEEDED(dsStatus->GetHResult(0));
-    const uint32_t actualCrc = ComputeFnv1a32(streamedTiledMem.Data(), streamedTiledMem.ByteSize());
-    if (!statusOk || streamedHdr.magic != kAssetMagic || actualCrc != streamedHdr.fnv1aChecksum) {
+    const uint32_t actualCrc = sc::codec::ComputeFnv1a32(streamedTiledMem.Data(), streamedTiledMem.ByteSize());
+    if (!statusOk || streamedHdr.magic != kCompressedAssetMagic || actualCrc != streamedHdr.uncompressedFnv1a) {
+        std::printf("[TITLE] Compressed DirectStorage verification FAILED!\n");
         return 1;
     }
 
-    std::printf("[TITLE] DirectStorage streamed & verified '%s' via ID3D12Fence (crc=0x%08X MATCH)\n",
-                assetPath.string().c_str(), actualCrc);
+    std::printf("[TITLE] DirectStorage streamed + SCLZ-decompressed '%s' (%u B -> %zu B, crc=0x%08X MATCH)\n",
+                assetPath.string().c_str(), compressedPayloadBytes, streamedTiledMem.ByteSize(), actualCrc);
     if (pixMark) {
-        pixMark(0xFF00CCFFULL, "DirectStorageAssetReady");
+        pixMark(0xFF00CCFFULL, "DirectStorageCompressedAssetReady");
     }
 
     XMemBuffer<uint8_t> detiledUploadMem;
@@ -946,7 +976,7 @@ int main() {
     CloseHandle(ioFenceEvent);
     ioFence.Reset();
 
-    // 7. Build Root Signature, PSO (cached by d3d12_xs!), Vertex Buffer, Placed Texture SRV & Render Target
+    // 7. Build Root Signature, SCXS-wrapped PSO, Vertex Buffer, Placed Texture SRV & Render Target
     D3D12_DESCRIPTOR_RANGE srvRange{};
     srvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
     srvRange.NumDescriptors = 1;
@@ -1005,12 +1035,6 @@ int main() {
         return 1;
     }
 
-    D3D12_INPUT_ELEMENT_DESC inputLayout[] = {
-        { "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT,    0, 0,  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-        { "COLOR",    0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 8,  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-        { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,    0, 20, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
-    };
-
     auto vsScxs = sc::d3d12::BuildScxsContainer(
         sc::d3d12::ScxsShaderStage::Vertex,
         sc::d3d12::ScxsTargetArch::Rdna2Scarlett,
@@ -1021,6 +1045,12 @@ int main() {
         sc::d3d12::ScxsTargetArch::Rdna2Scarlett,
         sc::d3d12::ScxsPayloadFormat::EmbeddedDxbcOrDxil,
         psBlob->GetBufferPointer(), psBlob->GetBufferSize(), 5, 0);
+
+    D3D12_INPUT_ELEMENT_DESC inputLayout[] = {
+        { "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT,    0, 0,  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+        { "COLOR",    0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 8,  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+        { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,    0, 20, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
+    };
 
     D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc{};
     psoDesc.pRootSignature = rootSig.Get();
@@ -1078,7 +1108,6 @@ int main() {
     vbView.StrideInBytes = sizeof(Vertex);
     vbView.SizeInBytes = sizeof(kStarVertices);
 
-    // Allocate an explicit 1 MiB unified GPU texture heap and place crestTexture inside it!
     D3D12_RESOURCE_DESC texDesc{};
     texDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
     texDesc.Width = kTexSize;
@@ -1224,7 +1253,7 @@ int main() {
     D3D12_VIEWPORT viewport{ 0.0f, 0.0f, static_cast<float>(kWidth), static_cast<float>(kHeight), 0.0f, 1.0f };
     D3D12_RECT scissor{ 0, 0, static_cast<LONG>(kWidth), static_cast<LONG>(kHeight) };
 
-    std::printf("[TITLE] Controls: WASD/Stick = Move | Space/A = Turbo Hum | F5/Menu = Save Chime | R/B = Reset | ESC = Auto-Save & Exit\n");
+    std::printf("[TITLE] Controls: WASD/Stick = Move | Space/A = Turbo Hum | F5/Menu = ADPCM Save Chime | R/B = Reset | ESC = Auto-Save & Exit\n");
 
     float elapsed = 0.0f;
     bool prevSavePressed = false;
