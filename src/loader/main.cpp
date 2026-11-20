@@ -1,37 +1,74 @@
 #include "common/stub.hpp"
+#include "pe_patcher.hpp"
+
+#include <cstdio>
+#include <filesystem>
 #include <string>
 
-static std::wstring GetSiblingPath(const wchar_t* filename) {
+namespace {
+
+std::filesystem::path GetExecutableDir() {
     wchar_t exePath[MAX_PATH]{};
     GetModuleFileNameW(nullptr, exePath, MAX_PATH);
-    std::wstring path(exePath);
-    size_t slash = path.find_last_of(L"\\/");
-    if (slash != std::wstring::npos) {
-        path.resize(slash + 1);
-    }
-    return path + filename;
+    return std::filesystem::path(exePath).parent_path();
 }
 
+void PrependShimDirToPath(const std::filesystem::path& shimDir) {
+    SetEnvironmentVariableW(L"SCARLETT_SHIM_DIR", shimDir.c_str());
+
+    DWORD len = GetEnvironmentVariableW(L"PATH", nullptr, 0);
+    std::wstring currentPath;
+    if (len > 1) {
+        currentPath.resize(len - 1);
+        GetEnvironmentVariableW(L"PATH", currentPath.data(), len);
+    }
+    std::wstring updatedPath = shimDir.wstring() + L";" + currentPath;
+    SetEnvironmentVariableW(L"PATH", updatedPath.c_str());
+}
+
+} // namespace
+
 int wmain(int argc, wchar_t* argv[]) {
-    std::wstring target = (argc > 1) ? argv[1] : GetSiblingPath(L"dummy_title.exe");
-    std::wstring cmdLine = L"\"" + target + L"\"";
+    const std::filesystem::path loaderDir = GetExecutableDir();
+    const std::filesystem::path shimDir = loaderDir / L"shims";
 
-    sc::log::Write(sc::log::Level::Info, "loader", "wmain", "Spawning target suspended...");
+    std::filesystem::path targetPath = (argc > 1)
+        ? std::filesystem::absolute(argv[1])
+        : (loaderDir / L"titles" / L"dummy_title" / L"dummy_title.exe");
 
+    if (!std::filesystem::exists(targetPath)) {
+        std::string err = "Target executable not found: " + targetPath.string();
+        sc::log::Write(sc::log::Level::Error, "loader", "wmain", err.c_str());
+        return 1;
+    }
+
+    std::wstring cmdLine = L"\"" + targetPath.wstring() + L"\"";
+    for (int i = 2; i < argc; ++i) {
+        cmdLine += L" \"";
+        cmdLine += argv[i];
+        cmdLine += L"\"";
+    }
+
+    // Inherit shims\ on PATH so transitive shim-to-shim dependencies resolve too
+    PrependShimDirToPath(shimDir);
+
+    std::string targetMsg = "Target: " + targetPath.string();
+    sc::log::Write(sc::log::Level::Info, "loader", "wmain", targetMsg.c_str());
+
+    std::wstring workingDir = targetPath.parent_path().wstring();
     STARTUPINFOW si{};
     si.cb = sizeof(si);
     PROCESS_INFORMATION pi{};
 
-    // Launch suspended so we have an injection hook point before the game's entry point runs
     BOOL ok = CreateProcessW(
-        target.c_str(),
+        targetPath.c_str(),
         cmdLine.data(),
         nullptr,
         nullptr,
-        TRUE, // inherit stdout/stderr
+        TRUE,
         CREATE_SUSPENDED,
         nullptr,
-        nullptr,
+        workingDir.c_str(),
         &si,
         &pi
     );
@@ -44,8 +81,16 @@ int wmain(int argc, wchar_t* argv[]) {
     }
 
     char pidBuf[64];
-    std::snprintf(pidBuf, sizeof(pidBuf), "PID=%lu (ready for Sprint 2 hooks)", pi.dwProcessId);
+    std::snprintf(pidBuf, sizeof(pidBuf), "PID=%lu (suspended; patching PE imports...)", pi.dwProcessId);
     sc::log::Write(sc::log::Level::Info, "loader", "wmain", pidBuf);
+
+    if (!sc::loader::RedirectImportsInSuspendedProcess(pi.hProcess, shimDir)) {
+        sc::log::Write(sc::log::Level::Error, "loader", "wmain", "Import redirection failed; terminating target");
+        TerminateProcess(pi.hProcess, 1);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        return 1;
+    }
 
     ResumeThread(pi.hThread);
     WaitForSingleObject(pi.hProcess, INFINITE);
@@ -57,7 +102,7 @@ int wmain(int argc, wchar_t* argv[]) {
     CloseHandle(pi.hProcess);
 
     char exitBuf[64];
-    std::snprintf(exitBuf, sizeof(exitBuf), "Target exited with code %lu", exitCode);
+    std::snprintf(exitBuf, sizeof(exitBuf), "Target exited with code %lu (0x%08lX)", exitCode, exitCode);
     sc::log::Write(sc::log::Level::Info, "loader", "wmain", exitBuf);
     return static_cast<int>(exitCode);
 }
