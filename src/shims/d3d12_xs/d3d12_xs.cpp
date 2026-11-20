@@ -1,5 +1,6 @@
 #include "d3d12_xs.hpp"
 #include "shader_inspector.hpp"
+#include "shader_translator.hpp"
 #include "common/stub.hpp"
 
 #include <wrl/client.h>
@@ -9,6 +10,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -327,7 +329,7 @@ private:
         m_hwnd = CreateWindowExW(
             0,
             kWindowClassName,
-            L"Scarlett Layer - Xbox Series X [PSO Cache + Multi-Module Hooks]",
+            L"Scarlett Layer - Xbox Series X [SCXS Translator + DXIL + PSO Cache]",
             WS_OVERLAPPEDWINDOW | WS_VISIBLE,
             CW_USEDEFAULT, CW_USEDEFAULT,
             rc.right - rc.left, rc.bottom - rc.top,
@@ -457,6 +459,7 @@ public:
         SavePipelineLibrary();
         m_pipelineLibrary.Reset();
         m_psoCacheBlob.clear();
+        m_xlatCache.clear();
         sc::log::Write(sc::log::Level::Info, "d3d12_xs", "~ScarlettDeviceX", "-> destroyed device");
     }
 
@@ -626,33 +629,51 @@ public:
         }
 
         const auto startTime = std::chrono::steady_clock::now();
-        std::string vsInfo = sc::d3d12::InspectShaderBytecode(pDesc->VS);
-        std::string psInfo = sc::d3d12::InspectShaderBytecode(pDesc->PS);
+
+        // 1. Run pluggable shader translator boundary on every populated shader stage
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC hostDesc = *pDesc;
+        std::shared_ptr<const sc::d3d12::TranslatedShader> vsXlat, psXlat, dsXlat, hsXlat, gsXlat;
+        std::string vsTag, psTag, xlatErr;
+
+        HRESULT xlatHr = TranslateStage(hostDesc.VS, vsXlat, vsTag, xlatErr);
+        if (SUCCEEDED(xlatHr)) xlatHr = TranslateStage(hostDesc.PS, psXlat, psTag, xlatErr);
+        if (SUCCEEDED(xlatHr)) { std::string ignored; xlatHr = TranslateStage(hostDesc.DS, dsXlat, ignored, xlatErr); }
+        if (SUCCEEDED(xlatHr)) { std::string ignored; xlatHr = TranslateStage(hostDesc.HS, hsXlat, ignored, xlatErr); }
+        if (SUCCEEDED(xlatHr)) { std::string ignored; xlatHr = TranslateStage(hostDesc.GS, gsXlat, ignored, xlatErr); }
+
+        if (FAILED(xlatHr)) {
+            std::string errMsg = "-> shader translation rejected: " + xlatErr;
+            sc::log::Write(sc::log::Level::Warn, "d3d12_xs", "CreateGraphicsPipelineState", errMsg.c_str());
+            return xlatHr;
+        }
+
+        std::string vsInfo = vsTag + sc::d3d12::InspectShaderBytecode(hostDesc.VS);
+        std::string psInfo = psTag + sc::d3d12::InspectShaderBytecode(hostDesc.PS);
 
         uint64_t rsHash = 0;
         {
             std::lock_guard<std::mutex> lock(m_psoMtx);
-            auto it = m_rootSigHashes.find(pDesc->pRootSignature);
+            auto it = m_rootSigHashes.find(hostDesc.pRootSignature);
             if (it != m_rootSigHashes.end()) {
                 rsHash = it->second;
             }
         }
 
-        const uint64_t psoHash = HashGraphicsPsoDesc(*pDesc, rsHash);
+        const uint64_t psoHash = HashGraphicsPsoDesc(hostDesc, rsHash);
         wchar_t keyW[32];
         std::swprintf(keyW, _countof(keyW), L"GFX_%016llX", static_cast<unsigned long long>(psoHash));
         char keyA[32];
         std::snprintf(keyA, sizeof(keyA), "GFX_%016llX", static_cast<unsigned long long>(psoHash));
 
-        // 1. Try disk-backed ID3D12PipelineLibrary cache first
+        // 2. Try disk-backed ID3D12PipelineLibrary cache first
         if (m_pipelineLibrary) {
             std::lock_guard<std::mutex> lock(m_psoMtx);
-            HRESULT cacheHr = m_pipelineLibrary->LoadGraphicsPipeline(keyW, pDesc, riid, ppPipelineState);
+            HRESULT cacheHr = m_pipelineLibrary->LoadGraphicsPipeline(keyW, &hostDesc, riid, ppPipelineState);
             if (SUCCEEDED(cacheHr)) {
                 ++m_psoCacheHits;
                 const auto elapsedUs = std::chrono::duration_cast<std::chrono::microseconds>(
                     std::chrono::steady_clock::now() - startTime).count();
-                char msg[256];
+                char msg[320];
                 std::snprintf(msg, sizeof(msg),
                               "-> PSO CACHE HIT [%s] in %.2f ms | VS=%s | PS=%s",
                               keyA, static_cast<double>(elapsedUs) / 1000.0,
@@ -662,8 +683,8 @@ public:
             }
         }
 
-        // 2. Cache miss -> compile natively & store into pipeline library for future launches
-        HRESULT hr = m_device->CreateGraphicsPipelineState(pDesc, riid, ppPipelineState);
+        // 3. Cache miss -> compile natively & store into pipeline library for future launches
+        HRESULT hr = m_device->CreateGraphicsPipelineState(&hostDesc, riid, ppPipelineState);
         if (SUCCEEDED(hr)) {
             const auto elapsedUs = std::chrono::duration_cast<std::chrono::microseconds>(
                 std::chrono::steady_clock::now() - startTime).count();
@@ -680,7 +701,7 @@ public:
                 }
             }
             ++m_psoCacheMisses;
-            char msg[256];
+            char msg[320];
             std::snprintf(msg, sizeof(msg),
                           "-> PSO CACHE MISS [%s] compiled in %.2f ms%s | VS=%s | PS=%s",
                           keyA, static_cast<double>(elapsedUs) / 1000.0,
@@ -721,6 +742,62 @@ public:
     }
 
 private:
+    HRESULT TranslateStage(
+        D3D12_SHADER_BYTECODE& stageBc,
+        std::shared_ptr<const sc::d3d12::TranslatedShader>& outHold,
+        std::string& outTag,
+        std::string& outError) {
+        outHold.reset();
+        outTag.clear();
+        if (!stageBc.pShaderBytecode || stageBc.BytecodeLength == 0) {
+            return S_OK;
+        }
+
+        // Fast-path passthrough for native DXBC/DXIL without hashing/caching overhead
+        if (stageBc.BytecodeLength >= 4 && std::memcmp(stageBc.pShaderBytecode, "DXBC", 4) == 0) {
+            return S_OK;
+        }
+
+        Fnv1a64 keyHash;
+        keyHash.Update(stageBc.pShaderBytecode, stageBc.BytecodeLength);
+        const uint64_t key = keyHash.Digest();
+
+        {
+            std::lock_guard<std::mutex> lock(m_psoMtx);
+            auto it = m_xlatCache.find(key);
+            if (it != m_xlatCache.end()) {
+                ++m_xlatHits;
+                outHold = it->second;
+                if (outHold->wasTranslated) {
+                    stageBc.pShaderBytecode = outHold->bytecode.data();
+                    stageBc.BytecodeLength = outHold->bytecode.size();
+                    outTag = outHold->sourceTag;
+                }
+                return S_OK;
+            }
+        }
+
+        auto result = std::make_shared<sc::d3d12::TranslatedShader>();
+        HRESULT hr = m_translators.Translate(stageBc, *result, outError);
+        if (FAILED(hr)) {
+            return hr;
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(m_psoMtx);
+            ++m_xlatMisses;
+            m_xlatCache[key] = result;
+        }
+
+        outHold = result;
+        if (result->wasTranslated) {
+            stageBc.pShaderBytecode = result->bytecode.data();
+            stageBc.BytecodeLength = result->bytecode.size();
+            outTag = result->sourceTag;
+        }
+        return S_OK;
+    }
+
     void InitPipelineLibrary() {
         ComPtr<ID3D12Device1> device1;
         if (FAILED(m_device.As(&device1))) {
@@ -773,11 +850,13 @@ private:
         }
 
         if (!m_psoCacheDirty) {
-            char buf[128];
+            char buf[160];
             std::snprintf(buf, sizeof(buf),
-                          "-> PSO cache stats: hits=%llu, misses=%llu (up to date)",
+                          "-> PSO cache stats: hits=%llu, misses=%llu (up to date) | xlat: hits=%llu, misses=%llu",
                           static_cast<unsigned long long>(m_psoCacheHits),
-                          static_cast<unsigned long long>(m_psoCacheMisses));
+                          static_cast<unsigned long long>(m_psoCacheMisses),
+                          static_cast<unsigned long long>(m_xlatHits),
+                          static_cast<unsigned long long>(m_xlatMisses));
             sc::log::Write(sc::log::Level::Info, "d3d12_xs", "SavePipelineLibrary", buf);
             return;
         }
@@ -814,12 +893,14 @@ private:
 
         if (MoveFileExW(tmpPath.c_str(), m_psoCachePath.c_str(),
                         MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-            char buf[256];
+            char buf[288];
             std::snprintf(buf, sizeof(buf),
-                          "-> saved PSO cache (%zu B, hits=%llu, misses=%llu) -> %s",
+                          "-> saved PSO cache (%zu B, hits=%llu, misses=%llu | xlat: hits=%llu, misses=%llu) -> %s",
                           outBlob.size(),
                           static_cast<unsigned long long>(m_psoCacheHits),
                           static_cast<unsigned long long>(m_psoCacheMisses),
+                          static_cast<unsigned long long>(m_xlatHits),
+                          static_cast<unsigned long long>(m_xlatMisses),
                           m_psoCachePath.string().c_str());
             sc::log::Write(sc::log::Level::Info, "d3d12_xs", "SavePipelineLibrary", buf);
         }
@@ -830,15 +911,18 @@ private:
     ComPtr<ID3D12Device> m_device;
     std::filesystem::path m_psoCachePath;
 
-    // Backing blob MUST outlive m_pipelineLibrary per D3D12 spec
     std::vector<uint8_t> m_psoCacheBlob;
     ComPtr<ID3D12PipelineLibrary> m_pipelineLibrary;
 
+    sc::d3d12::ShaderTranslatorRegistry m_translators;
     std::mutex m_psoMtx;
     std::unordered_map<const void*, uint64_t> m_rootSigHashes;
+    std::unordered_map<uint64_t, std::shared_ptr<const sc::d3d12::TranslatedShader>> m_xlatCache;
     bool m_psoCacheDirty{false};
     uint64_t m_psoCacheHits{0};
     uint64_t m_psoCacheMisses{0};
+    uint64_t m_xlatHits{0};
+    uint64_t m_xlatMisses{0};
 
     uint32_t m_framePeriodUs{16667};
     std::atomic<D3D12XBOX_FRAME_PIPELINE_TOKEN> m_nextToken{1};

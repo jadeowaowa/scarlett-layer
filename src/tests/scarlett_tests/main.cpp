@@ -1,6 +1,8 @@
 #include "common/vfs.hpp"
 #include "shims/xgameruntime/gdk_types.hpp"
 #include "shims/d3d12_xs/d3d12_xs.hpp"
+#include "shims/d3d12_xs/shader_inspector.hpp"
+#include "shims/d3d12_xs/shader_translator.hpp"
 #include "shims/gameinput/gameinput.hpp"
 #include "shims/xg_xs/xg_xs.hpp"
 #include "shims/dstorage_xs/dstorage_xs.hpp"
@@ -546,7 +548,6 @@ bool TestD3D12HeadlessDeviceAndPso() {
     return true;
 }
 
-// 10. kernelx: 13.5 GiB TitleMemoryStatus, MEM_GRAPHICS VirtualAllocX, CPU topology & affinity clamping
 bool TestKernelXMemoryAndTopology() {
     TITLEMEMORYSTATUS before{};
     before.dwLength = sizeof(before);
@@ -578,14 +579,12 @@ bool TestKernelXMemoryAndTopology() {
     SC_EXPECT(cpu.HostLogicalThreadCount >= 1u);
     SC_EXPECT(cpu.HostProcessAffinityMask != 0);
 
-    // Deliberately request an oversized 64-core mask and verify clamping succeeds cleanly
     DWORD_PTR prevMask = SetThreadAffinityMaskX(GetCurrentThread(), static_cast<DWORD_PTR>(~0ULL));
     SC_EXPECT(prevMask != 0);
     SC_EXPECT(SetThreadAffinityMaskX(GetCurrentThread(), prevMask) != 0);
     return true;
 }
 
-// 11. d3d12_xs: Explicit ID3D12Heap + two CreatePlacedResource textures at distinct 64KB offsets
 bool TestD3D12PlacedResourcesAndHeap() {
     D3D12XBOX_CREATE_DEVICE_PARAMETERS params{};
     params.Version = 1;
@@ -641,6 +640,150 @@ bool TestD3D12PlacedResourcesAndHeap() {
     return true;
 }
 
+// 12. Deep SM 6.x DXIL container & LLVM bitcode header parsing
+bool TestDxilSm6BitcodeInspector() {
+    // Synthesize a valid DXBC container with PSV0 + DXIL (ms_6_6, DXIL 1.6, LLVM BC\xC0\xDE)
+    const uint8_t fakeLlvmBc[16] = {
+        0x42u, 0x43u, 0xC0u, 0xDEu, 0x21u, 0x0Cu, 0x00u, 0x00u,
+        0x01u, 0x02u, 0x03u, 0x04u, 0x05u, 0x06u, 0x07u, 0x08u
+    };
+
+    sc::d3d12::DxilProgramHeader dxilHdr{};
+    dxilHdr.programVersion = (13u << 16) | (6u << 4) | 6u; // ms_6_6 (Mesh Shader SM 6.6)
+    dxilHdr.sizeInUint32   = static_cast<uint32_t>((sizeof(dxilHdr) + sizeof(fakeLlvmBc)) / 4u);
+    dxilHdr.dxilMagic      = sc::d3d12::kDxilMagicFourCc;
+    dxilHdr.dxilVersion    = (1u << 8) | 6u;               // DXIL 1.6
+    dxilHdr.bitcodeOffset  = 16u;                          // +8 + 16 = 24 (immediately after header)
+    dxilHdr.bitcodeSize    = sizeof(fakeLlvmBc);
+
+    const uint32_t psvPayload = 0x00000002u;
+
+    const uint32_t partCount = 2;
+    const uint32_t psvOff = sizeof(sc::d3d12::DxbcHeader) + partCount * sizeof(uint32_t);
+    const uint32_t dxilOff = psvOff + sizeof(sc::d3d12::DxbcPartHeader) + sizeof(psvPayload);
+    const uint32_t totalSize = dxilOff + sizeof(sc::d3d12::DxbcPartHeader)
+                             + sizeof(dxilHdr) + sizeof(fakeLlvmBc);
+
+    std::vector<uint8_t> container(totalSize, 0);
+
+    sc::d3d12::DxbcHeader hdr{};
+    std::memcpy(hdr.magic, "DXBC", 4);
+    hdr.majorVersion = 1;
+    hdr.minorVersion = 0;
+    hdr.fileSize = totalSize;
+    hdr.partCount = partCount;
+    std::memcpy(container.data(), &hdr, sizeof(hdr));
+    std::memcpy(container.data() + sizeof(hdr), &psvOff, sizeof(uint32_t));
+    std::memcpy(container.data() + sizeof(hdr) + sizeof(uint32_t), &dxilOff, sizeof(uint32_t));
+
+    sc::d3d12::DxbcPartHeader psvPart{ {'P','S','V','0'}, sizeof(psvPayload) };
+    std::memcpy(container.data() + psvOff, &psvPart, sizeof(psvPart));
+    std::memcpy(container.data() + psvOff + sizeof(psvPart), &psvPayload, sizeof(psvPayload));
+
+    sc::d3d12::DxbcPartHeader dxilPart{ {'D','X','I','L'}, sizeof(dxilHdr) + sizeof(fakeLlvmBc) };
+    std::memcpy(container.data() + dxilOff, &dxilPart, sizeof(dxilPart));
+    std::memcpy(container.data() + dxilOff + sizeof(dxilPart), &dxilHdr, sizeof(dxilHdr));
+    std::memcpy(container.data() + dxilOff + sizeof(dxilPart) + sizeof(dxilHdr),
+                fakeLlvmBc, sizeof(fakeLlvmBc));
+
+    D3D12_SHADER_BYTECODE bc{ container.data(), container.size() };
+    auto info = sc::d3d12::InspectShaderBytecodeDetailed(bc);
+    SC_EXPECT(info.kind == sc::d3d12::ShaderContainerKind::Dxil);
+    SC_EXPECT(info.profile == "ms_6_6");
+    SC_EXPECT(info.dxilMajor == 1u);
+    SC_EXPECT(info.dxilMinor == 6u);
+    SC_EXPECT(info.hasLlvmBitcode);
+    SC_EXPECT(info.bitcodeSize == sizeof(fakeLlvmBc));
+    SC_EXPECT(info.hasPsv0);
+    SC_EXPECT(info.summary.find("ms_6_6/DXIL 1.6 (LLVM BC)") != std::string::npos);
+    return true;
+}
+
+// 13. Pluggable SCXS console shader container translator + translation/PSO cache + RDNA2/CRC traps
+bool TestScxsTranslatorAndPsoCache() {
+    D3D12XBOX_CREATE_DEVICE_PARAMETERS params{};
+    params.Version = 1;
+    ComPtr<ID3D12DeviceX> deviceX;
+    SC_EXPECT(SUCCEEDED(D3D12XboxCreateDevice(
+        nullptr, &params, IID_ID3D12DeviceX,
+        reinterpret_cast<void**>(deviceX.GetAddressOf()))));
+
+    const char* hlsl =
+        "float4 VSMain(uint id : SV_VertexID) : SV_POSITION { return float4(0, 0, 0, 1); }\n"
+        "float4 PSMain() : SV_TARGET { return float4(0.2, 0.8, 0.9, 1.0); }\n";
+
+    ComPtr<ID3DBlob> vsBlob, psBlob, errBlob;
+    SC_EXPECT(SUCCEEDED(D3DCompile(hlsl, std::strlen(hlsl), "scxs_test.hlsl", nullptr, nullptr,
+                                   "VSMain", "vs_5_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &vsBlob, &errBlob)));
+    SC_EXPECT(SUCCEEDED(D3DCompile(hlsl, std::strlen(hlsl), "scxs_test.hlsl", nullptr, nullptr,
+                                   "PSMain", "ps_5_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &psBlob, &errBlob)));
+
+    auto vsScxs = sc::d3d12::BuildScxsContainer(
+        sc::d3d12::ScxsShaderStage::Vertex,
+        sc::d3d12::ScxsTargetArch::Rdna2Scarlett,
+        sc::d3d12::ScxsPayloadFormat::EmbeddedDxbcOrDxil,
+        vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), 5, 0);
+    auto psScxs = sc::d3d12::BuildScxsContainer(
+        sc::d3d12::ScxsShaderStage::Pixel,
+        sc::d3d12::ScxsTargetArch::Rdna2Scarlett,
+        sc::d3d12::ScxsPayloadFormat::EmbeddedDxbcOrDxil,
+        psBlob->GetBufferPointer(), psBlob->GetBufferSize(), 5, 0);
+
+    D3D12_ROOT_SIGNATURE_DESC rsDesc{};
+    ComPtr<ID3DBlob> rsBlob;
+    SC_EXPECT(SUCCEEDED(D3D12SerializeRootSignature(&rsDesc, D3D_ROOT_SIGNATURE_VERSION_1, &rsBlob, &errBlob)));
+
+    ComPtr<ID3D12RootSignature> rootSig;
+    SC_EXPECT(SUCCEEDED(deviceX->CreateRootSignature(
+        0, rsBlob->GetBufferPointer(), rsBlob->GetBufferSize(), IID_PPV_ARGS(&rootSig))));
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc{};
+    psoDesc.pRootSignature = rootSig.Get();
+    psoDesc.VS = { vsScxs.data(), vsScxs.size() };
+    psoDesc.PS = { psScxs.data(), psScxs.size() };
+    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    psoDesc.NumRenderTargets = 1;
+    psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+    psoDesc.SampleDesc.Count = 1;
+    psoDesc.SampleMask = UINT_MAX;
+    psoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
+    psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+    psoDesc.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+
+    // Pass 1: Translate SCXS & create/load PSO
+    ComPtr<ID3D12PipelineState> pso1;
+    SC_EXPECT(SUCCEEDED(deviceX->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pso1))));
+    SC_EXPECT(pso1 != nullptr);
+
+    // Pass 2: Same SCXS containers -> exercises in-memory translation cache + PSO library HIT
+    ComPtr<ID3D12PipelineState> pso2;
+    SC_EXPECT(SUCCEEDED(deviceX->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pso2))));
+    SC_EXPECT(pso2 != nullptr);
+
+    // Pass 3: Corrupted SCXS payload -> must fail checksum validation with E_INVALIDARG
+    auto badCrcVs = vsScxs;
+    badCrcVs.back() ^= 0xFFu;
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC badCrcDesc = psoDesc;
+    badCrcDesc.VS = { badCrcVs.data(), badCrcVs.size() };
+    ComPtr<ID3D12PipelineState> psoBadCrc;
+    SC_EXPECT(deviceX->CreateGraphicsPipelineState(&badCrcDesc, IID_PPV_ARGS(&psoBadCrc)) == E_INVALIDARG);
+    SC_EXPECT(psoBadCrc == nullptr);
+
+    // Pass 4: Raw RDNA2 ISA SCXS container -> must cleanly trap with E_NOTIMPL at translator seam
+    const uint32_t fakeRdna2Words[4] = { 0xBF810000u, 0xBF800000u, 0xBF800000u, 0xBF810000u };
+    auto rdna2Vs = sc::d3d12::BuildScxsContainer(
+        sc::d3d12::ScxsShaderStage::Vertex,
+        sc::d3d12::ScxsTargetArch::Rdna2Scarlett,
+        sc::d3d12::ScxsPayloadFormat::Rdna2Isa,
+        fakeRdna2Words, sizeof(fakeRdna2Words), 6, 6);
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC rdna2Desc = psoDesc;
+    rdna2Desc.VS = { rdna2Vs.data(), rdna2Vs.size() };
+    ComPtr<ID3D12PipelineState> psoRdna2;
+    SC_EXPECT(deviceX->CreateGraphicsPipelineState(&rdna2Desc, IID_PPV_ARGS(&psoRdna2)) == E_NOTIMPL);
+    SC_EXPECT(psoRdna2 == nullptr);
+    return true;
+}
+
 } // namespace
 
 int main() {
@@ -657,6 +800,8 @@ int main() {
     RunTest("D3D12HeadlessDeviceAndPso",  TestD3D12HeadlessDeviceAndPso);
     RunTest("KernelXMemoryAndTopology",   TestKernelXMemoryAndTopology);
     RunTest("D3D12PlacedResourcesAndHeap", TestD3D12PlacedResourcesAndHeap);
+    RunTest("DxilSm6BitcodeInspector",    TestDxilSm6BitcodeInspector);
+    RunTest("ScxsTranslatorAndPsoCache",  TestScxsTranslatorAndPsoCache);
 
     XGameRuntimeUninitialize();
 

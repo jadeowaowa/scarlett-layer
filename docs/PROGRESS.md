@@ -18,6 +18,7 @@
 | Sprint 12 | Disk-backed `ID3D12PipelineLibrary` PSO cache, multi-module IAT hooking, `engine_plugin.dll` | Done |
 | Sprint 13 | Virtual console paths (`G:\`, `T:\`, `S:\`) and headless CTest verification suite (`scarlett_tests`) | Done |
 | Sprint 14 | `kernelx.dll` unified memory & CPU topology shim + `d3d12_xs.dll` `CreateHeap` / `CreatePlacedResource` | Done |
+| Sprint 15 | SM 6.x `DXIL` LLVM bitcode inspector & pluggable `IShaderTranslator` (`SCXS` container pipeline) | Done |
 
 ## Shim & Export Coverage
 
@@ -27,7 +28,7 @@
 - [x] Multi-module runtime IAT hooks (`LoadLibraryA/W`, `LoadLibraryExA/W`) across main `.exe` and loaded sub-DLLs
 - [x] Virtual console drive mapping (`G:\` game root, `T:\` scratch, `S:\` save temp)
 - [x] `tools/audit_imports.py` coverage report + `--gen-stub` scaffolding
-- [x] Automated headless CTest suite (`scarlett_tests.exe`, 11 checks)
+- [x] Automated headless CTest suite (`scarlett_tests.exe`, 13 checks)
 
 ### `xgameruntime.dll`
 - [x] `XGameRuntimeInitialize`, `XGameRuntimeUninitialize`, `XSystemGetDeviceType`
@@ -39,7 +40,8 @@
 - [x] `D3D12XboxCreateDevice`, `D3D12SerializeRootSignature`
 - [x] `ID3D12DeviceX`: `CreateCommandQueueX`, `CreateCommittedResource`, `GetResourceAllocationInfo`, `CreateHeap`, `CreatePlacedResource`, `CreateRenderTargetView`, `CreateShaderResourceView`, `CreateRootSignature`, `CreateGraphicsPipelineState`, frame pacing
 - [x] `ID3D12CommandQueueX` (`PresentX` -> DXGI Flip-Discard swapchain)
-- [x] `DXBC`/`DXIL` container header & chunk table inspector
+- [x] Deep `DXBC` + SM 6.x `DXIL` (`DxilProgramHeader`, LLVM `BC\xC0\xDE`, `PSV0`) container inspector
+- [x] Pluggable `IShaderTranslator` registry & `SCXS` console shader container translator + in-memory translation cache
 - [x] Persistent disk-backed `ID3D12PipelineLibrary` PSO cache (`build/bin/cache/`)
 
 ### `gameinput.dll`
@@ -69,6 +71,6 @@
 - [x] `GetConsoleProcessorInfo`, `SetThreadAffinityMaskX` (7-core/14-thread Series X topology + safe host mask clamping)
 
 ## Upcoming Subsystems
-- [ ] Shader Model 6.x (`DXIL`) container parsing & pluggable console shader translator boundary
 - [ ] DirectStorage CPU decompression & compressed audio voice decode bridge
-- [ ] Real ABI vtable / GUID alignment audit
+- [ ] Compute pipelines (`CreateComputePipelineState`, `CreateUnorderedAccessView`) + GPU procedural compute pass
+- [ ] Real ABI vtable / GUID alignment audit & RDNA2 ISA decoding research

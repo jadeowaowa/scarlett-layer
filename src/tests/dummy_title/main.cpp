@@ -1,6 +1,7 @@
 #include "common/vfs.hpp"
 #include "shims/xgameruntime/gdk_types.hpp"
 #include "shims/d3d12_xs/d3d12_xs.hpp"
+#include "shims/d3d12_xs/shader_translator.hpp"
 #include "shims/gameinput/gameinput.hpp"
 #include "shims/xg_xs/xg_xs.hpp"
 #include "shims/dstorage_xs/dstorage_xs.hpp"
@@ -1010,10 +1011,21 @@ int main() {
         { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,    0, 20, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
     };
 
+    auto vsScxs = sc::d3d12::BuildScxsContainer(
+        sc::d3d12::ScxsShaderStage::Vertex,
+        sc::d3d12::ScxsTargetArch::Rdna2Scarlett,
+        sc::d3d12::ScxsPayloadFormat::EmbeddedDxbcOrDxil,
+        vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), 5, 0);
+    auto psScxs = sc::d3d12::BuildScxsContainer(
+        sc::d3d12::ScxsShaderStage::Pixel,
+        sc::d3d12::ScxsTargetArch::Rdna2Scarlett,
+        sc::d3d12::ScxsPayloadFormat::EmbeddedDxbcOrDxil,
+        psBlob->GetBufferPointer(), psBlob->GetBufferSize(), 5, 0);
+
     D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc{};
     psoDesc.pRootSignature = rootSig.Get();
-    psoDesc.VS = { vsBlob->GetBufferPointer(), vsBlob->GetBufferSize() };
-    psoDesc.PS = { psBlob->GetBufferPointer(), psBlob->GetBufferSize() };
+    psoDesc.VS = { vsScxs.data(), vsScxs.size() };
+    psoDesc.PS = { psScxs.data(), psScxs.size() };
     psoDesc.InputLayout = { inputLayout, static_cast<UINT>(_countof(inputLayout)) };
     psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     psoDesc.NumRenderTargets = 1;
