@@ -12,7 +12,8 @@ Clean-room host-based Xbox Series X (Scarlett / Game Core) translation layer for
 - **`dstorage_xs.dll` (`src/shims/dstorage_xs/`)**: Clean-room Velocity / DirectStorage shim streaming binary assets asynchronously on background I/O workers with status-array and `ID3D12Fence` signaling.
 - **`pixevt.dll` (`src/shims/pixevt/`)**: Clean-room PIX event/marker capture shim tested via runtime `LoadLibraryW` redirection.
 - **`xaudio2_9.dll` (`src/shims/xaudio2_9/`)**: Real-ABI `IXAudio2` proxy shim bridging console XAudio2 calls onto `System32\xaudio2_9.dll` with `WAVE_FORMAT_XMA2` format inspection and engine performance telemetry.
-- **`dummy_title.exe` (`src/tests/dummy_title/`)**: Isolated synthetic Series X title exercising graphics, input, saves, tiling, DirectStorage, PIX, and live procedural audio end-to-end.
+- **`xmem.dll` (`src/shims/xmem/`)**: Clean-room console memory manager (`XMemAlloc` / `XMemFree` / `XMemSize`) supporting 64 KB `VirtualAlloc` physical/graphics pages, aligned heap pools, allocator ID tagging, and shutdown peak/leak telemetry.
+- **`dummy_title.exe` (`src/tests/dummy_title/`)**: Isolated synthetic Series X title exercising graphics, input, saves, tiling, DirectStorage, PIX, audio, and console memory pools end-to-end.
 - **`tools/audit_imports.py`**: Zero-dependency PE32+ static/delay import auditor, shim coverage checker, and C++ stub generator (`--gen-stub`).
 
 ## Build & Run (Windows x64 MSVC + Ninja)

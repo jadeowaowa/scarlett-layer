@@ -82,13 +82,21 @@ add_library(pixevt SHARED
 target_link_libraries(pixevt PRIVATE sc_common)
 sc_set_runtime_dir(pixevt "${SC_BIN_DIR}/shims")
 
-# Shim #7: xaudio2_9.dll -> build/bin/shims/ (auto-discovered by loader.exe!)
+# Shim #7: xaudio2_9.dll -> build/bin/shims/
 add_library(xaudio2_9 SHARED
     src/shims/xaudio2_9/xaudio2_9.cpp
     src/shims/xaudio2_9/xaudio2_9.def
 )
 target_link_libraries(xaudio2_9 PRIVATE sc_common ole32)
 sc_set_runtime_dir(xaudio2_9 "${SC_BIN_DIR}/shims")
+
+# Shim #8: xmem.dll -> build/bin/shims/ (auto-discovered by loader.exe!)
+add_library(xmem SHARED
+    src/shims/xmem/xmem.cpp
+    src/shims/xmem/xmem.def
+)
+target_link_libraries(xmem PRIVATE sc_common)
+sc_set_runtime_dir(xmem "${SC_BIN_DIR}/shims")
 
 # Runtime LoadLibrary IAT hook DLL -> build/bin/
 add_library(scarlett_hook SHARED
@@ -101,7 +109,7 @@ sc_set_runtime_dir(scarlett_hook "${SC_BIN_DIR}")
 add_executable(dummy_title
     src/tests/dummy_title/main.cpp
 )
-target_link_libraries(dummy_title PRIVATE sc_common xgameruntime d3d12_xs gameinput xg_xs dstorage_xs xaudio2_9 d3dcompiler)
+target_link_libraries(dummy_title PRIVATE sc_common xgameruntime d3d12_xs gameinput xg_xs dstorage_xs xaudio2_9 xmem d3dcompiler)
 add_dependencies(dummy_title pixevt)
 sc_set_runtime_dir(dummy_title "${SC_BIN_DIR}/titles/dummy_title")
 

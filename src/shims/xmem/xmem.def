@@ -1,0 +1,8 @@
+LIBRARY xmem
+EXPORTS
+    XMemAlloc
+    XMemFree
+    XMemSize
+    XMemAllocDefault
+    XMemFreeDefault
+    XMemSizeDefault

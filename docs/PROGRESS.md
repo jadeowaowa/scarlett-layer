@@ -14,6 +14,7 @@
 | Sprint 8 | `dstorage_xs.dll` Velocity async asset streaming + pre-swizzled `.scx` texture pipeline | Done |
 | Sprint 9 | `scarlett_hook.dll` runtime `LoadLibrary` IAT hooks, `pixevt.dll`, and `--gen-stub` generator | Done |
 | Sprint 10 | `xaudio2_9.dll` real-ABI `IXAudio2` proxy shim, XMA2 inspector, and live procedural audio | Done |
+| Sprint 11 | `xmem.dll` aligned console memory pools, allocator tagging, and peak/leak telemetry | Done |
 
 ## Shim & Export Coverage
 
@@ -50,8 +51,13 @@
 - [x] `XAudio2Create` proxying onto native `System32\xaudio2_9.dll`
 - [x] Full `IXAudio2` COM wrapper with `WAVE_FORMAT_XMA2` (`0x0166`) detection hook and performance telemetry
 
+### `xmem.dll`
+- [x] `XMemAlloc`, `XMemFree`, `XMemSize`
+- [x] `XMemAllocDefault`, `XMemFreeDefault`, `XMemSizeDefault`
+- [x] 64 KB `VirtualAlloc` physical/graphics backing, aligned heap pools, per-allocator peak & leak report
+
 ## Upcoming Subsystems
-- [ ] `xmem.dll` (aligned console memory pools + budget telemetry)
 - [ ] Disk-backed PSO pipeline library + multi-module `scarlett_hook` IAT patching
+- [ ] Automated CTest shim verification suite + virtual console drive mapping (`G:\`, `T:\`, `S:\`)
 - [ ] Real ABI vtable / GUID alignment audit
 - [ ] Console RDNA2 shader container & translation research
