@@ -1,0 +1,3 @@
+LIBRARY engine_plugin
+EXPORTS
+    PluginRunDiagnostics

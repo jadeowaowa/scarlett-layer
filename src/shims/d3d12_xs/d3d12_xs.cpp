@@ -4,8 +4,15 @@
 
 #include <wrl/client.h>
 #include <atomic>
+#include <chrono>
 #include <cstdio>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <mutex>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 using Microsoft::WRL::ComPtr;
 
@@ -25,6 +32,99 @@ std::string WideToUtf8(const wchar_t* wstr) {
     std::string out(static_cast<size_t>(len - 1), '\0');
     WideCharToMultiByte(CP_UTF8, 0, wstr, -1, out.data(), len, nullptr, nullptr);
     return out;
+}
+
+class Fnv1a64 {
+public:
+    void Update(const void* data, size_t len) {
+        if (!data || len == 0) {
+            return;
+        }
+        const auto* bytes = static_cast<const uint8_t*>(data);
+        for (size_t i = 0; i < len; ++i) {
+            m_hash ^= bytes[i];
+            m_hash *= 1099511628211ULL;
+        }
+    }
+
+    template <typename T>
+    void UpdatePod(const T& val) {
+        Update(&val, sizeof(T));
+    }
+
+    void UpdateStr(const char* str) {
+        if (str) {
+            Update(str, std::strlen(str) + 1);
+        } else {
+            uint8_t zero = 0;
+            Update(&zero, 1);
+        }
+    }
+
+    uint64_t Digest() const { return m_hash; }
+
+private:
+    uint64_t m_hash{14695981039346656037ULL};
+};
+
+std::filesystem::path ResolvePsoCachePath(UINT vendorId, UINT deviceId) {
+    std::filesystem::path baseDir;
+    wchar_t shimDirBuf[MAX_PATH]{};
+    DWORD len = GetEnvironmentVariableW(L"SCARLETT_SHIM_DIR", shimDirBuf, MAX_PATH);
+    if (len > 0 && len < MAX_PATH) {
+        baseDir = std::filesystem::path(shimDirBuf).parent_path() / L"cache";
+    } else {
+        baseDir = std::filesystem::current_path() / L"cache";
+    }
+
+    wchar_t fileName[64];
+    std::swprintf(fileName, _countof(fileName), L"pso_cache_%04X_%04X.bin", vendorId, deviceId);
+    return baseDir / fileName;
+}
+
+uint64_t HashGraphicsPsoDesc(
+    const D3D12_GRAPHICS_PIPELINE_STATE_DESC& desc,
+    uint64_t rootSigHash) {
+    Fnv1a64 h;
+    h.UpdatePod(rootSigHash);
+
+    auto hashShader = [&h](const D3D12_SHADER_BYTECODE& bc) {
+        h.UpdatePod(bc.BytecodeLength);
+        h.Update(bc.pShaderBytecode, bc.BytecodeLength);
+    };
+    hashShader(desc.VS);
+    hashShader(desc.PS);
+    hashShader(desc.DS);
+    hashShader(desc.HS);
+    hashShader(desc.GS);
+
+    h.UpdatePod(desc.InputLayout.NumElements);
+    if (desc.InputLayout.pInputElementDescs) {
+        for (UINT i = 0; i < desc.InputLayout.NumElements; ++i) {
+            const auto& el = desc.InputLayout.pInputElementDescs[i];
+            h.UpdateStr(el.SemanticName);
+            h.UpdatePod(el.SemanticIndex);
+            h.UpdatePod(el.Format);
+            h.UpdatePod(el.InputSlot);
+            h.UpdatePod(el.AlignedByteOffset);
+            h.UpdatePod(el.InputSlotClass);
+            h.UpdatePod(el.InstanceDataStepRate);
+        }
+    }
+
+    h.UpdatePod(desc.BlendState);
+    h.UpdatePod(desc.SampleMask);
+    h.UpdatePod(desc.RasterizerState);
+    h.UpdatePod(desc.DepthStencilState);
+    h.UpdatePod(desc.IBStripCutValue);
+    h.UpdatePod(desc.PrimitiveTopologyType);
+    h.UpdatePod(desc.NumRenderTargets);
+    h.Update(desc.RTVFormats, sizeof(desc.RTVFormats));
+    h.UpdatePod(desc.DSVFormat);
+    h.UpdatePod(desc.SampleDesc);
+    h.UpdatePod(desc.NodeMask);
+    h.UpdatePod(desc.Flags);
+    return h.Digest();
 }
 
 LRESULT CALLBACK ScarlettWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -227,7 +327,7 @@ private:
         m_hwnd = CreateWindowExW(
             0,
             kWindowClassName,
-            L"Scarlett Layer - Xbox Series X [d3d12_xs + xg_xs + gameinput]",
+            L"Scarlett Layer - Xbox Series X [PSO Cache + Multi-Module Hooks]",
             WS_OVERLAPPEDWINDOW | WS_VISIBLE,
             CW_USEDEFAULT, CW_USEDEFAULT,
             rc.right - rc.left, rc.bottom - rc.top,
@@ -342,11 +442,21 @@ private:
 
 class ScarlettDeviceX final : public ID3D12DeviceX {
 public:
-    ScarlettDeviceX(ComPtr<IDXGIFactory6> factory, ComPtr<ID3D12Device> device)
+    ScarlettDeviceX(
+        ComPtr<IDXGIFactory6> factory,
+        ComPtr<ID3D12Device> device,
+        UINT vendorId,
+        UINT deviceId)
         : m_factory(std::move(factory))
-        , m_device(std::move(device)) {}
+        , m_device(std::move(device))
+        , m_psoCachePath(ResolvePsoCachePath(vendorId, deviceId)) {
+        InitPipelineLibrary();
+    }
 
     ~ScarlettDeviceX() {
+        SavePipelineLibrary();
+        m_pipelineLibrary.Reset();
+        m_psoCacheBlob.clear();
         sc::log::Write(sc::log::Level::Info, "d3d12_xs", "~ScarlettDeviceX", "-> destroyed device");
     }
 
@@ -448,22 +558,90 @@ public:
         char buf[96];
         std::snprintf(buf, sizeof(buf), "-> creating root signature (%zu bytes)", blobLengthInBytes);
         sc::log::Write(sc::log::Level::Info, "d3d12_xs", "CreateRootSignature", buf);
-        return m_device->CreateRootSignature(
+
+        HRESULT hr = m_device->CreateRootSignature(
             nodeMask, pBlobWithRootSignature, blobLengthInBytes, riid, ppvRootSignature);
+        if (SUCCEEDED(hr) && ppvRootSignature && *ppvRootSignature) {
+            Fnv1a64 rsHash;
+            rsHash.Update(pBlobWithRootSignature, blobLengthInBytes);
+            std::lock_guard<std::mutex> lock(m_psoMtx);
+            m_rootSigHashes[*ppvRootSignature] = rsHash.Digest();
+        }
+        return hr;
     }
 
     HRESULT STDMETHODCALLTYPE CreateGraphicsPipelineState(
         const D3D12_GRAPHICS_PIPELINE_STATE_DESC* pDesc,
         REFIID riid,
         void** ppPipelineState) override {
-        if (!pDesc) {
+        if (!pDesc || !ppPipelineState) {
             return E_INVALIDARG;
         }
+
+        const auto startTime = std::chrono::steady_clock::now();
         std::string vsInfo = sc::d3d12::InspectShaderBytecode(pDesc->VS);
         std::string psInfo = sc::d3d12::InspectShaderBytecode(pDesc->PS);
-        std::string msg = "-> PSO VS=" + vsInfo + " | PS=" + psInfo;
-        sc::log::Write(sc::log::Level::Info, "d3d12_xs", "CreateGraphicsPipelineState", msg.c_str());
-        return m_device->CreateGraphicsPipelineState(pDesc, riid, ppPipelineState);
+
+        uint64_t rsHash = 0;
+        {
+            std::lock_guard<std::mutex> lock(m_psoMtx);
+            auto it = m_rootSigHashes.find(pDesc->pRootSignature);
+            if (it != m_rootSigHashes.end()) {
+                rsHash = it->second;
+            }
+        }
+
+        const uint64_t psoHash = HashGraphicsPsoDesc(*pDesc, rsHash);
+        wchar_t keyW[32];
+        std::swprintf(keyW, _countof(keyW), L"GFX_%016llX", static_cast<unsigned long long>(psoHash));
+        char keyA[32];
+        std::snprintf(keyA, sizeof(keyA), "GFX_%016llX", static_cast<unsigned long long>(psoHash));
+
+        // 1. Try disk-backed ID3D12PipelineLibrary cache first
+        if (m_pipelineLibrary) {
+            std::lock_guard<std::mutex> lock(m_psoMtx);
+            HRESULT cacheHr = m_pipelineLibrary->LoadGraphicsPipeline(keyW, pDesc, riid, ppPipelineState);
+            if (SUCCEEDED(cacheHr)) {
+                ++m_psoCacheHits;
+                const auto elapsedUs = std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::steady_clock::now() - startTime).count();
+                char msg[256];
+                std::snprintf(msg, sizeof(msg),
+                              "-> PSO CACHE HIT [%s] in %.2f ms | VS=%s | PS=%s",
+                              keyA, static_cast<double>(elapsedUs) / 1000.0,
+                              vsInfo.c_str(), psInfo.c_str());
+                sc::log::Write(sc::log::Level::Info, "d3d12_xs", "CreateGraphicsPipelineState", msg);
+                return S_OK;
+            }
+        }
+
+        // 2. Cache miss -> compile natively & store into pipeline library for future launches
+        HRESULT hr = m_device->CreateGraphicsPipelineState(pDesc, riid, ppPipelineState);
+        if (SUCCEEDED(hr)) {
+            const auto elapsedUs = std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now() - startTime).count();
+            bool stored = false;
+            if (m_pipelineLibrary && *ppPipelineState) {
+                ComPtr<ID3D12PipelineState> psoObj;
+                if (SUCCEEDED(reinterpret_cast<IUnknown*>(*ppPipelineState)->QueryInterface(
+                        IID_PPV_ARGS(&psoObj)))) {
+                    std::lock_guard<std::mutex> lock(m_psoMtx);
+                    if (SUCCEEDED(m_pipelineLibrary->StorePipeline(keyW, psoObj.Get()))) {
+                        m_psoCacheDirty = true;
+                        stored = true;
+                    }
+                }
+            }
+            ++m_psoCacheMisses;
+            char msg[256];
+            std::snprintf(msg, sizeof(msg),
+                          "-> PSO CACHE MISS [%s] compiled in %.2f ms%s | VS=%s | PS=%s",
+                          keyA, static_cast<double>(elapsedUs) / 1000.0,
+                          stored ? " (stored in library)" : "",
+                          vsInfo.c_str(), psInfo.c_str());
+            sc::log::Write(sc::log::Level::Info, "d3d12_xs", "CreateGraphicsPipelineState", msg);
+        }
+        return hr;
     }
 
     HRESULT STDMETHODCALLTYPE SetFrameIntervalX(
@@ -496,9 +674,125 @@ public:
     }
 
 private:
+    void InitPipelineLibrary() {
+        ComPtr<ID3D12Device1> device1;
+        if (FAILED(m_device.As(&device1))) {
+            sc::log::Write(sc::log::Level::Warn, "d3d12_xs", "InitPipelineLibrary",
+                           "-> ID3D12Device1 unavailable; PSO cache disabled");
+            return;
+        }
+
+        std::error_code ec;
+        if (std::filesystem::exists(m_psoCachePath, ec)) {
+            std::ifstream in(m_psoCachePath, std::ios::binary | std::ios::ate);
+            if (in.is_open()) {
+                std::streamsize sz = in.tellg();
+                if (sz > 0) {
+                    in.seekg(0, std::ios::beg);
+                    m_psoCacheBlob.resize(static_cast<size_t>(sz));
+                    if (in.read(reinterpret_cast<char*>(m_psoCacheBlob.data()), sz)) {
+                        HRESULT hr = device1->CreatePipelineLibrary(
+                            m_psoCacheBlob.data(), m_psoCacheBlob.size(),
+                            IID_PPV_ARGS(&m_pipelineLibrary));
+                        if (SUCCEEDED(hr)) {
+                            char buf[256];
+                            std::snprintf(buf, sizeof(buf),
+                                          "-> loaded disk PSO cache (%zu B) from %s",
+                                          m_psoCacheBlob.size(), m_psoCachePath.string().c_str());
+                            sc::log::Write(sc::log::Level::Info, "d3d12_xs", "InitPipelineLibrary", buf);
+                            return;
+                        }
+                        char warnBuf[160];
+                        std::snprintf(warnBuf, sizeof(warnBuf),
+                                      "-> disk PSO cache invalidated (hr=0x%08lX); rebuilding fresh library",
+                                      static_cast<unsigned long>(hr));
+                        sc::log::Write(sc::log::Level::Warn, "d3d12_xs", "InitPipelineLibrary", warnBuf);
+                    }
+                }
+            }
+            m_psoCacheBlob.clear();
+        }
+
+        if (SUCCEEDED(device1->CreatePipelineLibrary(nullptr, 0, IID_PPV_ARGS(&m_pipelineLibrary)))) {
+            std::string msg = "-> initialized fresh PSO cache library -> " + m_psoCachePath.string();
+            sc::log::Write(sc::log::Level::Info, "d3d12_xs", "InitPipelineLibrary", msg.c_str());
+        }
+    }
+
+    void SavePipelineLibrary() {
+        std::lock_guard<std::mutex> lock(m_psoMtx);
+        if (!m_pipelineLibrary) {
+            return;
+        }
+
+        if (!m_psoCacheDirty) {
+            char buf[128];
+            std::snprintf(buf, sizeof(buf),
+                          "-> PSO cache stats: hits=%llu, misses=%llu (up to date)",
+                          static_cast<unsigned long long>(m_psoCacheHits),
+                          static_cast<unsigned long long>(m_psoCacheMisses));
+            sc::log::Write(sc::log::Level::Info, "d3d12_xs", "SavePipelineLibrary", buf);
+            return;
+        }
+
+        const SIZE_T serializedSize = m_pipelineLibrary->GetSerializedSize();
+        if (serializedSize == 0) {
+            return;
+        }
+
+        std::vector<uint8_t> outBlob(serializedSize);
+        if (FAILED(m_pipelineLibrary->Serialize(outBlob.data(), outBlob.size()))) {
+            sc::log::Write(sc::log::Level::Warn, "d3d12_xs", "SavePipelineLibrary",
+                           "-> ID3D12PipelineLibrary::Serialize failed");
+            return;
+        }
+
+        std::error_code ec;
+        std::filesystem::create_directories(m_psoCachePath.parent_path(), ec);
+        std::filesystem::path tmpPath = m_psoCachePath;
+        tmpPath += L".tmp";
+
+        {
+            std::ofstream out(tmpPath, std::ios::binary | std::ios::trunc);
+            if (!out.is_open()) {
+                return;
+            }
+            out.write(reinterpret_cast<const char*>(outBlob.data()),
+                      static_cast<std::streamsize>(outBlob.size()));
+            out.flush();
+            if (!out.good()) {
+                return;
+            }
+        }
+
+        if (MoveFileExW(tmpPath.c_str(), m_psoCachePath.c_str(),
+                        MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+            char buf[256];
+            std::snprintf(buf, sizeof(buf),
+                          "-> saved PSO cache (%zu B, hits=%llu, misses=%llu) -> %s",
+                          outBlob.size(),
+                          static_cast<unsigned long long>(m_psoCacheHits),
+                          static_cast<unsigned long long>(m_psoCacheMisses),
+                          m_psoCachePath.string().c_str());
+            sc::log::Write(sc::log::Level::Info, "d3d12_xs", "SavePipelineLibrary", buf);
+        }
+    }
+
     std::atomic<ULONG> m_refs{1};
     ComPtr<IDXGIFactory6> m_factory;
     ComPtr<ID3D12Device> m_device;
+    std::filesystem::path m_psoCachePath;
+
+    // Backing blob MUST outlive m_pipelineLibrary per D3D12 spec
+    std::vector<uint8_t> m_psoCacheBlob;
+    ComPtr<ID3D12PipelineLibrary> m_pipelineLibrary;
+
+    std::mutex m_psoMtx;
+    std::unordered_map<const void*, uint64_t> m_rootSigHashes;
+    bool m_psoCacheDirty{false};
+    uint64_t m_psoCacheHits{0};
+    uint64_t m_psoCacheMisses{0};
+
     uint32_t m_framePeriodUs{16667};
     std::atomic<D3D12XBOX_FRAME_PIPELINE_TOKEN> m_nextToken{1};
 };
@@ -568,7 +862,8 @@ HRESULT WINAPI D3D12XboxCreateDevice(
         return hr;
     }
 
-    auto* wrapper = new ScarlettDeviceX(std::move(factory), std::move(nativeDevice));
+    auto* wrapper = new ScarlettDeviceX(
+        std::move(factory), std::move(nativeDevice), desc.VendorId, desc.DeviceId);
     hr = wrapper->QueryInterface(riid, ppDevice);
     wrapper->Release();
     return hr;

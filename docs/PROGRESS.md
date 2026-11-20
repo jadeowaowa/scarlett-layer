@@ -15,13 +15,14 @@
 | Sprint 9 | `scarlett_hook.dll` runtime `LoadLibrary` IAT hooks, `pixevt.dll`, and `--gen-stub` generator | Done |
 | Sprint 10 | `xaudio2_9.dll` real-ABI `IXAudio2` proxy shim, XMA2 inspector, and live procedural audio | Done |
 | Sprint 11 | `xmem.dll` aligned console memory pools, allocator tagging, and peak/leak telemetry | Done |
+| Sprint 12 | Disk-backed `ID3D12PipelineLibrary` PSO cache, multi-module IAT hooking, `engine_plugin.dll` | Done |
 
 ## Shim & Export Coverage
 
 ### `loader.exe` + `scarlett_hook.dll`
 - [x] In-memory static & delay-load PE import redirection
 - [x] Pre-entrypoint APC injection of `scarlett_hook.dll`
-- [x] Runtime IAT hooks for `LoadLibraryA`, `LoadLibraryW`, `LoadLibraryExA`, `LoadLibraryExW`
+- [x] Multi-module runtime IAT hooks (`LoadLibraryA/W`, `LoadLibraryExA/W`) across main `.exe` and loaded sub-DLLs
 - [x] `tools/audit_imports.py` coverage report + `--gen-stub` scaffolding
 
 ### `xgameruntime.dll`
@@ -34,6 +35,7 @@
 - [x] `D3D12XboxCreateDevice`, `D3D12SerializeRootSignature`
 - [x] `ID3D12DeviceX` & `ID3D12CommandQueueX` (`PresentX` -> DXGI Flip-Discard swapchain)
 - [x] `DXBC`/`DXIL` container header & chunk table inspector
+- [x] Persistent disk-backed `ID3D12PipelineLibrary` PSO cache (`build/bin/cache/`)
 
 ### `gameinput.dll`
 - [x] `GameInputCreate`, `IGameInput`, `IGameInputReading` (XInput + Win32 keyboard)
@@ -52,12 +54,11 @@
 - [x] Full `IXAudio2` COM wrapper with `WAVE_FORMAT_XMA2` (`0x0166`) detection hook and performance telemetry
 
 ### `xmem.dll`
-- [x] `XMemAlloc`, `XMemFree`, `XMemSize`
-- [x] `XMemAllocDefault`, `XMemFreeDefault`, `XMemSizeDefault`
+- [x] `XMemAlloc`, `XMemFree`, `XMemSize`, `XMemAllocDefault`, `XMemFreeDefault`, `XMemSizeDefault`
 - [x] 64 KB `VirtualAlloc` physical/graphics backing, aligned heap pools, per-allocator peak & leak report
 
 ## Upcoming Subsystems
-- [ ] Disk-backed PSO pipeline library + multi-module `scarlett_hook` IAT patching
 - [ ] Automated CTest shim verification suite + virtual console drive mapping (`G:\`, `T:\`, `S:\`)
+- [ ] Shader Model 6.x (`DXIL`) container parsing & console shader lab
 - [ ] Real ABI vtable / GUID alignment audit
-- [ ] Console RDNA2 shader container & translation research
+- [ ] Console RDNA2 shader translation research

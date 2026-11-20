@@ -69,7 +69,8 @@ constexpr uint32_t kAudioRate = 48000;
 constexpr float kTwoPi = 6.28318530718f;
 constexpr char kTitleScid[] = "00000000-0000-0000-0000-0000SCARLETT";
 
-// RAII wrapper backed by xmem.dll (XMemAlloc / XMemFree / XMemSize)
+using PluginRunDiagnosticsFn = bool(WINAPI*)();
+
 template <typename T>
 class XMemBuffer {
 public:
@@ -112,7 +113,6 @@ private:
     uint32_t m_attrs{0};
 };
 
-// Procedural XAudio2 synthesizer backed by xaudio2_9.dll + xmem.dll AudioPCM pool
 class TitleAudio {
 public:
     bool Init() {
@@ -635,7 +635,7 @@ bool CompileShader(const char* entry, const char* target, ComPtr<ID3DBlob>& outB
     HRESULT hr = D3DCompile(
         kShaderSource, std::strlen(kShaderSource),
         "scarlett_star_textured.hlsl", nullptr, nullptr,
-        entry, target, D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION,
+        entry, target, D3DCOMPILE_OPTIMIZATION_LEVEL3,
         0, &outBlob, &errors);
     if (FAILED(hr)) {
         if (errors) {
@@ -652,7 +652,7 @@ bool CompileShader(const char* entry, const char* target, ComPtr<ID3DBlob>& outB
 int main() {
     std::printf("[TITLE][T:%05lu] Booting synthetic Series X title...\n", GetCurrentThreadId());
 
-    // 0. Exercise runtime LoadLibraryA/W IAT hooks (pixevt.dll is NOT statically linked!)
+    // 0a. Exercise direct runtime LoadLibraryA/W IAT hooks
     HMODULE hPix = LoadLibraryW(L"pixevt.dll");
     PIXBeginEventFn pixBegin = nullptr;
     PIXEndEventFn   pixEnd   = nullptr;
@@ -666,12 +666,15 @@ int main() {
         }
     }
 
-    HMODULE hRuntimeDyn = LoadLibraryA("xgameruntime");
-    if (hRuntimeDyn) {
-        char dynPath[MAX_PATH]{};
-        GetModuleFileNameA(hRuntimeDyn, dynPath, MAX_PATH);
-        std::printf("[TITLE] Dynamic LoadLibraryA(\"xgameruntime\") -> %s\n", dynPath);
-        FreeLibrary(hRuntimeDyn);
+    // 0b. Exercise multi-module hooking: load middleware DLL that dynamically loads Xbox shims!
+    HMODULE hPlugin = LoadLibraryW(L"engine_plugin.dll");
+    if (hPlugin) {
+        auto runDiag = reinterpret_cast<PluginRunDiagnosticsFn>(
+            GetProcAddress(hPlugin, "PluginRunDiagnostics"));
+        if (runDiag) {
+            runDiag();
+        }
+        FreeLibrary(hPlugin);
     }
 
     if (FAILED(XGameRuntimeInitialize())) {
@@ -911,7 +914,6 @@ int main() {
         return 1;
     }
 
-    // Free the 64 KB-aligned tiled staging buffer immediately after detiling
     streamedTiledMem.Reset();
 
     dsFile->Close();
@@ -922,7 +924,7 @@ int main() {
     CloseHandle(ioFenceEvent);
     ioFence.Reset();
 
-    // 7. Build Root Signature, PSO, Vertex Buffer, Texture SRV, and Render Target
+    // 7. Build Root Signature, PSO (cached by d3d12_xs!), Vertex Buffer, Texture SRV, and Render Target
     D3D12_DESCRIPTOR_RANGE srvRange{};
     srvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
     srvRange.NumDescriptors = 1;

@@ -74,7 +74,7 @@ add_library(dstorage_xs SHARED
 target_link_libraries(dstorage_xs PRIVATE sc_common)
 sc_set_runtime_dir(dstorage_xs "${SC_BIN_DIR}/shims")
 
-# Shim #6: pixevt.dll -> build/bin/shims/ (loaded dynamically by dummy_title)
+# Shim #6: pixevt.dll -> build/bin/shims/ (loaded dynamically by dummy_title & engine_plugin)
 add_library(pixevt SHARED
     src/shims/pixevt/pixevt.cpp
     src/shims/pixevt/pixevt.def
@@ -90,7 +90,7 @@ add_library(xaudio2_9 SHARED
 target_link_libraries(xaudio2_9 PRIVATE sc_common ole32)
 sc_set_runtime_dir(xaudio2_9 "${SC_BIN_DIR}/shims")
 
-# Shim #8: xmem.dll -> build/bin/shims/ (auto-discovered by loader.exe!)
+# Shim #8: xmem.dll -> build/bin/shims/
 add_library(xmem SHARED
     src/shims/xmem/xmem.cpp
     src/shims/xmem/xmem.def
@@ -98,19 +98,27 @@ add_library(xmem SHARED
 target_link_libraries(xmem PRIVATE sc_common)
 sc_set_runtime_dir(xmem "${SC_BIN_DIR}/shims")
 
-# Runtime LoadLibrary IAT hook DLL -> build/bin/
+# Runtime multi-module LoadLibrary IAT hook DLL -> build/bin/
 add_library(scarlett_hook SHARED
     src/loader/scarlett_hook.cpp
 )
 target_link_libraries(scarlett_hook PRIVATE sc_common)
 sc_set_runtime_dir(scarlett_hook "${SC_BIN_DIR}")
 
+# Synthetic middleware plugin -> build/bin/titles/dummy_title/ (tests multi-module hooking!)
+add_library(engine_plugin SHARED
+    src/tests/engine_plugin/engine_plugin.cpp
+    src/tests/engine_plugin/engine_plugin.def
+)
+target_link_libraries(engine_plugin PRIVATE sc_common)
+sc_set_runtime_dir(engine_plugin "${SC_BIN_DIR}/titles/dummy_title")
+
 # Isolated synthetic title -> build/bin/titles/dummy_title/
 add_executable(dummy_title
     src/tests/dummy_title/main.cpp
 )
 target_link_libraries(dummy_title PRIVATE sc_common xgameruntime d3d12_xs gameinput xg_xs dstorage_xs xaudio2_9 xmem d3dcompiler)
-add_dependencies(dummy_title pixevt)
+add_dependencies(dummy_title pixevt engine_plugin)
 sc_set_runtime_dir(dummy_title "${SC_BIN_DIR}/titles/dummy_title")
 
 # Host loader -> build/bin/
