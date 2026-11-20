@@ -13,8 +13,23 @@ std::filesystem::path GetExecutableDir() {
     return std::filesystem::path(exePath).parent_path();
 }
 
-void PrependShimDirToPath(const std::filesystem::path& shimDir) {
+void ConfigureChildEnvironment(
+    const std::filesystem::path& loaderDir,
+    const std::filesystem::path& shimDir,
+    const std::filesystem::path& targetPath) {
     SetEnvironmentVariableW(L"SCARLETT_SHIM_DIR", shimDir.c_str());
+
+    const std::filesystem::path gameRoot = targetPath.parent_path();
+    const std::filesystem::path scratchDir = loaderDir / L"vfs" / L"scratch";
+    const std::filesystem::path saveTempDir = loaderDir / L"vfs" / L"save_temp";
+
+    std::error_code ec;
+    std::filesystem::create_directories(scratchDir, ec);
+    std::filesystem::create_directories(saveTempDir, ec);
+
+    SetEnvironmentVariableW(L"SCARLETT_GAME_ROOT", gameRoot.c_str());
+    SetEnvironmentVariableW(L"SCARLETT_SCRATCH_DIR", scratchDir.c_str());
+    SetEnvironmentVariableW(L"SCARLETT_SAVE_TEMP_DIR", saveTempDir.c_str());
 
     DWORD len = GetEnvironmentVariableW(L"PATH", nullptr, 0);
     std::wstring currentPath;
@@ -24,6 +39,10 @@ void PrependShimDirToPath(const std::filesystem::path& shimDir) {
     }
     std::wstring updatedPath = shimDir.wstring() + L";" + currentPath;
     SetEnvironmentVariableW(L"PATH", updatedPath.c_str());
+
+    std::string vfsMsg = "VFS mounted: G:\\ -> " + gameRoot.string()
+                       + " | T:\\ -> " + scratchDir.string();
+    sc::log::Write(sc::log::Level::Info, "loader", "MountVfs", vfsMsg.c_str());
 }
 
 } // namespace
@@ -50,7 +69,7 @@ int wmain(int argc, wchar_t* argv[]) {
         cmdLine += L"\"";
     }
 
-    PrependShimDirToPath(shimDir);
+    ConfigureChildEnvironment(loaderDir, shimDir, targetPath);
 
     std::string targetMsg = "Target: " + targetPath.string();
     sc::log::Write(sc::log::Level::Info, "loader", "wmain", targetMsg.c_str());

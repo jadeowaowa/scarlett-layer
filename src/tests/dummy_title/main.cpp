@@ -1,3 +1,4 @@
+#include "common/vfs.hpp"
 #include "shims/xgameruntime/gdk_types.hpp"
 #include "shims/d3d12_xs/d3d12_xs.hpp"
 #include "shims/gameinput/gameinput.hpp"
@@ -804,7 +805,8 @@ int main() {
         return 1;
     }
 
-    const std::filesystem::path assetPath = std::filesystem::path(L"assets") / L"crest_2dthin.scx";
+    const wchar_t* kVirtualAssetPath = L"G:\\assets\\crest_2dthin.scx";
+    const std::filesystem::path assetPath = sc::vfs::TranslatePath(kVirtualAssetPath);
     if (!EnsureBakedConsoleTextureAsset(assetPath, tiledComputer.Get(), tiledLayout)) {
         return 1;
     }
@@ -832,7 +834,7 @@ int main() {
     ComPtr<IDStorageStatusArrayX> dsStatus;
     if (FAILED(dsFactory->CreateQueue(&dsQueueDesc, IID_IDStorageQueueX,
                                       reinterpret_cast<void**>(dsQueue.GetAddressOf()))) ||
-        FAILED(dsFactory->OpenFile(assetPath.c_str(), IID_IDStorageFileX,
+        FAILED(dsFactory->OpenFile(kVirtualAssetPath, IID_IDStorageFileX,
                                    reinterpret_cast<void**>(dsFile.GetAddressOf()))) ||
         FAILED(dsFactory->CreateStatusArray(2, "AssetStatus", IID_IDStorageStatusArrayX,
                                             reinterpret_cast<void**>(dsStatus.GetAddressOf())))) {

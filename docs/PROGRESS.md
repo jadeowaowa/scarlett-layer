@@ -16,20 +16,23 @@
 | Sprint 10 | `xaudio2_9.dll` real-ABI `IXAudio2` proxy shim, XMA2 inspector, and live procedural audio | Done |
 | Sprint 11 | `xmem.dll` aligned console memory pools, allocator tagging, and peak/leak telemetry | Done |
 | Sprint 12 | Disk-backed `ID3D12PipelineLibrary` PSO cache, multi-module IAT hooking, `engine_plugin.dll` | Done |
+| Sprint 13 | Virtual console paths (`G:\`, `T:\`, `S:\`) and headless CTest verification suite (`scarlett_tests`) | Done |
 
 ## Shim & Export Coverage
 
-### `loader.exe` + `scarlett_hook.dll`
+### `loader.exe` + `scarlett_hook.dll` + `common/vfs.hpp`
 - [x] In-memory static & delay-load PE import redirection
 - [x] Pre-entrypoint APC injection of `scarlett_hook.dll`
 - [x] Multi-module runtime IAT hooks (`LoadLibraryA/W`, `LoadLibraryExA/W`) across main `.exe` and loaded sub-DLLs
+- [x] Virtual console drive mapping (`G:\` game root, `T:\` scratch, `S:\` save temp)
 - [x] `tools/audit_imports.py` coverage report + `--gen-stub` scaffolding
+- [x] Automated headless CTest suite (`scarlett_tests.exe` executed via `loader.exe`)
 
 ### `xgameruntime.dll`
 - [x] `XGameRuntimeInitialize`, `XGameRuntimeUninitialize`, `XSystemGetDeviceType`
 - [x] `XTaskQueueCreate`, `XTaskQueueDispatch`, `XTaskQueueCloseHandle`, `XAsyncGetStatus`
 - [x] `XUserAddAsync`, `XUserAddResult`, `XUserGetGamertag`, `XUserCloseHandle`
-- [x] `XGameSave*` provider, container, atomic update, and blob read/write APIs
+- [x] `XGameSave*` provider, container, atomic update, blob delete, and undersized-buffer retry
 
 ### `d3d12_xs.dll`
 - [x] `D3D12XboxCreateDevice`, `D3D12SerializeRootSignature`
@@ -41,10 +44,11 @@
 - [x] `GameInputCreate`, `IGameInput`, `IGameInputReading` (XInput + Win32 keyboard)
 
 ### `xg_xs.dll`
-- [x] `XGCreateTexture2DComputer`, `XGComputeTexture2DLayout`, `IXGTextureAddressComputer`
+- [x] `XGCreateTexture2DComputer`, `XGComputeTexture2DLayout`, `IXGTextureAddressComputer` (verified multi-mip & NPOT)
 
 ### `dstorage_xs.dll`
 - [x] `DStorageGetFactory`, `DStorageSetConfiguration`, `IDStorageFactoryX`, `IDStorageQueueX`, `IDStorageFileX`, `IDStorageStatusArrayX`
+- [x] Virtual console drive translation inside `OpenFile` (`G:\`, `T:\`, `S:\`)
 
 ### `pixevt.dll`
 - [x] `PIXBeginEvent`, `PIXEndEvent`, `PIXSetMarker` (loaded dynamically via `scarlett_hook.dll`)
@@ -58,7 +62,6 @@
 - [x] 64 KB `VirtualAlloc` physical/graphics backing, aligned heap pools, per-allocator peak & leak report
 
 ## Upcoming Subsystems
-- [ ] Automated CTest shim verification suite + virtual console drive mapping (`G:\`, `T:\`, `S:\`)
 - [ ] Shader Model 6.x (`DXIL`) container parsing & console shader lab
+- [ ] Unified memory & `kernelx.dll` + `CreatePlacedResource` heap support
 - [ ] Real ABI vtable / GUID alignment audit
-- [ ] Console RDNA2 shader translation research

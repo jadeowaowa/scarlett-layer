@@ -5,6 +5,8 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+enable_testing()
+
 set(SC_BIN_DIR "${CMAKE_BINARY_DIR}/bin")
 set(SC_LIB_DIR "${CMAKE_BINARY_DIR}/lib")
 
@@ -74,7 +76,7 @@ add_library(dstorage_xs SHARED
 target_link_libraries(dstorage_xs PRIVATE sc_common)
 sc_set_runtime_dir(dstorage_xs "${SC_BIN_DIR}/shims")
 
-# Shim #6: pixevt.dll -> build/bin/shims/ (loaded dynamically by dummy_title & engine_plugin)
+# Shim #6: pixevt.dll -> build/bin/shims/
 add_library(pixevt SHARED
     src/shims/pixevt/pixevt.cpp
     src/shims/pixevt/pixevt.def
@@ -105,7 +107,7 @@ add_library(scarlett_hook SHARED
 target_link_libraries(scarlett_hook PRIVATE sc_common)
 sc_set_runtime_dir(scarlett_hook "${SC_BIN_DIR}")
 
-# Synthetic middleware plugin -> build/bin/titles/dummy_title/ (tests multi-module hooking!)
+# Synthetic middleware plugin -> build/bin/titles/dummy_title/
 add_library(engine_plugin SHARED
     src/tests/engine_plugin/engine_plugin.cpp
     src/tests/engine_plugin/engine_plugin.def
@@ -121,6 +123,14 @@ target_link_libraries(dummy_title PRIVATE sc_common xgameruntime d3d12_xs gamein
 add_dependencies(dummy_title pixevt engine_plugin)
 sc_set_runtime_dir(dummy_title "${SC_BIN_DIR}/titles/dummy_title")
 
+# Headless automated verification suite -> build/bin/titles/scarlett_tests/
+add_executable(scarlett_tests
+    src/tests/scarlett_tests/main.cpp
+)
+target_link_libraries(scarlett_tests PRIVATE sc_common xgameruntime d3d12_xs gameinput xg_xs dstorage_xs xaudio2_9 xmem d3dcompiler)
+add_dependencies(scarlett_tests pixevt engine_plugin)
+sc_set_runtime_dir(scarlett_tests "${SC_BIN_DIR}/titles/scarlett_tests")
+
 # Host loader -> build/bin/
 add_executable(loader
     src/loader/main.cpp
@@ -129,3 +139,9 @@ add_executable(loader
 target_link_libraries(loader PRIVATE sc_common)
 add_dependencies(loader scarlett_hook)
 sc_set_runtime_dir(loader "${SC_BIN_DIR}")
+
+# Register headless verification suite via loader.exe in CTest
+add_test(
+    NAME scarlett_shim_suite
+    COMMAND $<TARGET_FILE:loader> $<TARGET_FILE:scarlett_tests>
+)

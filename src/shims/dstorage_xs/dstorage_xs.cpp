@@ -1,5 +1,6 @@
 #include "dstorage_xs.hpp"
 #include "common/stub.hpp"
+#include "common/vfs.hpp"
 
 #include <wrl/client.h>
 #include <algorithm>
@@ -9,6 +10,7 @@
 #include <cstdio>
 #include <cstring>
 #include <deque>
+#include <filesystem>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -18,7 +20,6 @@ using Microsoft::WRL::ComPtr;
 
 namespace {
 
-// Private internal GUIDs so queue workers can access concrete file/status internals safely
 constexpr GUID IID_ScarlettFileInternal =
     { 0x5c4a41F1, 0x9b70, 0x4d1e, { 0xa1, 0x20, 0x00, 0x53, 0x43, 0x41, 0x52, 0xF1 } };
 
@@ -223,7 +224,6 @@ enum class QueueOpKind {
 struct QueuedOp {
     QueueOpKind kind{QueueOpKind::ReadRequest};
 
-    // ReadRequest fields
     DSTORAGE_REQUEST_OPTIONS options{};
     ComPtr<ScarlettStorageFileX> file;
     uint64_t fileOffset{0};
@@ -233,11 +233,9 @@ struct QueuedOp {
     uint32_t dstSize{0};
     std::string reqName;
 
-    // StatusUpdate fields
     ComPtr<ScarlettStatusArrayX> statusArray;
     uint32_t statusIndex{0};
 
-    // FenceSignal fields
     ComPtr<ID3D12Fence> fence;
     uint64_t fenceValue{0};
 };
@@ -566,18 +564,23 @@ public:
         }
         *ppv = nullptr;
 
+        bool wasVirtual = false;
+        const std::filesystem::path hostPath = sc::vfs::TranslatePath(path, &wasVirtual);
+
         HANDLE hFile = CreateFileW(
-            path, GENERIC_READ, FILE_SHARE_READ, nullptr,
+            hostPath.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
             OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
         if (hFile == INVALID_HANDLE_VALUE) {
             return HRESULT_FROM_WIN32(GetLastError());
         }
 
-        std::string utf8Path = WideToUtf8(path);
-        std::string msg = "-> opened asset: " + utf8Path;
+        std::string utf8Host = WideToUtf8(hostPath.c_str());
+        std::string msg = wasVirtual
+            ? ("-> opened asset [VFS]: " + WideToUtf8(path) + " -> " + utf8Host)
+            : ("-> opened asset: " + utf8Host);
         sc::log::Write(sc::log::Level::Info, "dstorage_xs", "OpenFile", msg.c_str());
 
-        auto* fileObj = new ScarlettStorageFileX(hFile, std::move(utf8Path));
+        auto* fileObj = new ScarlettStorageFileX(hFile, std::move(utf8Host));
         HRESULT hr = fileObj->QueryInterface(riid, ppv);
         fileObj->Release();
         return hr;
