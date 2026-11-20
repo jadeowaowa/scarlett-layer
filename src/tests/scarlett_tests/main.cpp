@@ -1526,6 +1526,138 @@ bool TestD3D12AsyncComputeCrossQueueSync() {
     return true;
 }
 
+// 19. d3d12_xs: Real binary RDNA2 ISA compute shader -> Decode -> Lift -> cs_5_0 -> RTX 5070 UAV readback
+bool TestRdna2ComputeIsaExecution() {
+    using namespace sc::d3d12::rdna2;
+
+    // Binary RDNA2 compute kernel: gOut[dtid.x] = dtid.x * 17u + 0x52440000u
+    std::vector<uint32_t> csWords;
+    AppendVop3(csWords, kVop3MulLoU32, 1, VgprSrc(0), 128u + 17u, 128u); // v1 = v0 * 17
+    AppendVop2LiteralU32(csWords, kVop2AddNcU32, 1, 0x52440000u, 1);     // v1 = v1 + 0x52440000
+    AppendMubufStoreDword(csWords, 1, 0, 0);                             // gOut[v0] = v1
+    AppendSopp(csWords, kSoppEndpgm);
+
+    DecodedProgram decoded{};
+    std::string err;
+    SC_EXPECT(DecodeProgram(csWords.data(), csWords.size() * sizeof(uint32_t), decoded, err));
+    SC_EXPECT(decoded.insts.size() == 4u);
+    const std::string asmText = Disassemble(decoded);
+    SC_EXPECT(asmText.find("v_mul_lo_u32") != std::string::npos);
+    SC_EXPECT(asmText.find("v_add_nc_u32") != std::string::npos);
+    SC_EXPECT(asmText.find("buffer_store_dword") != std::string::npos);
+
+    auto csRdna2Scxs = sc::d3d12::BuildScxsContainer(
+        sc::d3d12::ScxsShaderStage::Compute,
+        sc::d3d12::ScxsTargetArch::Rdna2Scarlett,
+        sc::d3d12::ScxsPayloadFormat::Rdna2Isa,
+        csWords.data(), csWords.size() * sizeof(uint32_t), 6, 6);
+
+    D3D12XBOX_CREATE_DEVICE_PARAMETERS params{};
+    params.Version = 1;
+    ComPtr<ID3D12DeviceX> deviceX;
+    SC_EXPECT(SUCCEEDED(D3D12XboxCreateDevice(
+        nullptr, &params, IID_ID3D12DeviceX, reinterpret_cast<void**>(deviceX.GetAddressOf()))));
+
+    D3D12_COMMAND_QUEUE_DESC qDesc{ D3D12_COMMAND_LIST_TYPE_COMPUTE };
+    ComPtr<ID3D12CommandQueueX> compQueue;
+    SC_EXPECT(SUCCEEDED(deviceX->CreateCommandQueueX(&qDesc, &compQueue)));
+
+    D3D12_DESCRIPTOR_RANGE uavRange{ D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0, 0, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND };
+    D3D12_ROOT_PARAMETER rp{};
+    rp.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    rp.DescriptorTable = { 1, &uavRange };
+    rp.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+    D3D12_ROOT_SIGNATURE_DESC rsDesc{ 1, &rp, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_NONE };
+
+    ComPtr<ID3DBlob> rsBlob, errBlob;
+    SC_EXPECT(SUCCEEDED(D3D12SerializeRootSignature(&rsDesc, D3D_ROOT_SIGNATURE_VERSION_1, &rsBlob, &errBlob)));
+    ComPtr<ID3D12RootSignature> rootSig;
+    SC_EXPECT(SUCCEEDED(deviceX->CreateRootSignature(0, rsBlob->GetBufferPointer(), rsBlob->GetBufferSize(), IID_PPV_ARGS(&rootSig))));
+
+    D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc{};
+    psoDesc.pRootSignature = rootSig.Get();
+    psoDesc.CS = { csRdna2Scxs.data(), csRdna2Scxs.size() };
+
+    ComPtr<ID3D12PipelineState> pso1, pso2;
+    SC_EXPECT(SUCCEEDED(deviceX->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&pso1))));
+    SC_EXPECT(SUCCEEDED(deviceX->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&pso2))));
+
+    constexpr UINT kElems = 64;
+    constexpr UINT kBytes = kElems * sizeof(uint32_t);
+    D3D12_HEAP_PROPERTIES defHeap{ D3D12_HEAP_TYPE_DEFAULT };
+    D3D12_HEAP_PROPERTIES rbHeap{ D3D12_HEAP_TYPE_READBACK };
+
+    D3D12_RESOURCE_DESC bufDesc{};
+    bufDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    bufDesc.Width = kBytes;
+    bufDesc.Height = 1;
+    bufDesc.DepthOrArraySize = 1;
+    bufDesc.MipLevels = 1;
+    bufDesc.SampleDesc.Count = 1;
+    bufDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    bufDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+
+    ComPtr<ID3D12Resource> uavBuf, rbBuf;
+    SC_EXPECT(SUCCEEDED(deviceX->CreateCommittedResource(&defHeap, D3D12_HEAP_FLAG_NONE, &bufDesc,
+        D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&uavBuf))));
+    bufDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+    SC_EXPECT(SUCCEEDED(deviceX->CreateCommittedResource(&rbHeap, D3D12_HEAP_FLAG_NONE, &bufDesc,
+        D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&rbBuf))));
+
+    D3D12_DESCRIPTOR_HEAP_DESC hd{ D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 1, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, 0 };
+    ComPtr<ID3D12DescriptorHeap> uavHeap;
+    SC_EXPECT(SUCCEEDED(deviceX->CreateDescriptorHeap(&hd, IID_PPV_ARGS(&uavHeap))));
+    D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc{};
+    uavDesc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+    uavDesc.Buffer = { 0, kElems, sizeof(uint32_t), 0, D3D12_BUFFER_UAV_FLAG_NONE };
+    deviceX->CreateUnorderedAccessView(uavBuf.Get(), nullptr, &uavDesc, uavHeap->GetCPUDescriptorHandleForHeapStart());
+
+    ComPtr<ID3D12CommandAllocator> alloc;
+    ComPtr<ID3D12GraphicsCommandList> cmdList;
+    ComPtr<ID3D12Fence> fence;
+    SC_EXPECT(SUCCEEDED(deviceX->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&alloc))));
+    SC_EXPECT(SUCCEEDED(deviceX->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_COMPUTE, alloc.Get(), pso1.Get(), IID_PPV_ARGS(&cmdList))));
+    SC_EXPECT(SUCCEEDED(deviceX->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence))));
+
+    ID3D12DescriptorHeap* heaps[] = { uavHeap.Get() };
+    cmdList->SetDescriptorHeaps(1, heaps);
+    cmdList->SetComputeRootSignature(rootSig.Get());
+    cmdList->SetComputeRootDescriptorTable(0, uavHeap->GetGPUDescriptorHandleForHeapStart());
+    cmdList->Dispatch(1, 1, 1);
+
+    D3D12_RESOURCE_BARRIER uavBar{};
+    uavBar.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+    uavBar.UAV.pResource = uavBuf.Get();
+    D3D12_RESOURCE_BARRIER cb[2]{}; cb[0]=uavBar; cb[1].Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION; cb[1].Transition={uavBuf.Get(),D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,D3D12_RESOURCE_STATE_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_COPY_SOURCE}; cmdList->ResourceBarrier(2, cb);
+    cmdList->CopyResource(rbBuf.Get(), uavBuf.Get());
+    SC_EXPECT(SUCCEEDED(cmdList->Close()));
+
+    ID3D12CommandList* lists[] = { cmdList.Get() };
+    compQueue->ExecuteCommandLists(1, lists);
+    SC_EXPECT(SUCCEEDED(compQueue->Signal(fence.Get(), 1)));
+
+    HANDLE evt = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    SC_EXPECT(evt != nullptr);
+    if (fence->GetCompletedValue() < 1) {
+        fence->SetEventOnCompletion(1, evt);
+        WaitForSingleObject(evt, INFINITE);
+    }
+    CloseHandle(evt);
+
+    void* mapped = nullptr;
+    D3D12_RANGE rr{ 0, kBytes };
+    SC_EXPECT(SUCCEEDED(rbBuf->Map(0, &rr, &mapped)));
+    const auto* out = static_cast<const uint32_t*>(mapped);
+    bool exact = true;
+    for (UINT i = 0; i < kElems; ++i) {
+        if (out[i] != (i * 17u + 0x52440000u)) { exact = false; break; }
+    }
+    D3D12_RANGE ew{ 0, 0 };
+    rbBuf->Unmap(0, &ew);
+    SC_EXPECT(exact);
+    return true;
+}
+
 } // namespace
 
 int main() {
@@ -1549,6 +1681,7 @@ int main() {
     RunTest("D3D12ComputePsoAndUavExecution", TestD3D12ComputePsoAndUavExecution);
     RunTest("Rdna2IsaDecoderAndGpuExecution", TestRdna2IsaDecoderAndGpuExecution);
     RunTest("D3D12AsyncComputeCrossQueueSync", TestD3D12AsyncComputeCrossQueueSync);
+    RunTest("Rdna2ComputeIsaExecution", TestRdna2ComputeIsaExecution);
 
     XGameRuntimeUninitialize();
 

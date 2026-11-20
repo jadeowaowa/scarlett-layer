@@ -49,6 +49,7 @@ enum Vop2Op : uint8_t {
     kVop2MulF32    = 0x08u,
     kVop2MinF32    = 0x0Fu,
     kVop2MaxF32    = 0x10u,
+    kVop2AddNcU32  = 0x25u,
     kVop2FmacF32   = 0x2Bu
 };
 
@@ -57,7 +58,12 @@ enum Vop3Op : uint16_t {
     kVop3FmaF32  = 0x14Bu,
     kVop3Min3F32 = 0x150u,
     kVop3Max3F32 = 0x151u,
-    kVop3Med3F32 = 0x152u
+    kVop3Med3F32 = 0x152u,
+    kVop3MulLoU32 = 0x169u
+};
+
+enum MubufOp : uint8_t {
+    kMubufStoreDword = 0x1Cu
 };
 
 enum class InstFormat : uint8_t {
@@ -65,7 +71,8 @@ enum class InstFormat : uint8_t {
     Vop1,
     Vop2,
     Vop3,
-    Exp
+    Exp,
+    Mubuf
 };
 
 struct DecodedInst {
@@ -89,6 +96,12 @@ struct DecodedInst {
     bool       expDone{false};
     bool       expVm{false};
     bool       expCompr{false};
+
+    // MUBUF fields
+    uint8_t    mubufVaddr{0};
+    uint8_t    mubufVdata{0};
+    uint8_t    mubufSrsrc{0};
+    uint16_t   mubufOffset{0};
 };
 
 struct DecodedProgram {
@@ -171,6 +184,25 @@ inline void AppendExpMrt0(
     words.push_back(w1);
 }
 
+inline void AppendVop2LiteralU32(
+    std::vector<uint32_t>& words, Vop2Op op, uint8_t vdst, uint32_t imm0, uint8_t vsrc1) {
+    AppendVop2(words, op, vdst, kSrcLiteral32, vsrc1);
+    words.push_back(imm0);
+}
+
+inline void AppendMubufStoreDword(
+    std::vector<uint32_t>& words, uint8_t vdata, uint8_t vaddr, uint8_t srsrc = 0, uint16_t offset = 0) {
+    const uint32_t w0 = (0x38u << 26)
+                      | (static_cast<uint32_t>(kMubufStoreDword) << 18)
+                      | (1u << 12) // offen=1
+                      | (static_cast<uint32_t>(offset) & 0xFFFu);
+    const uint32_t w1 = ((static_cast<uint32_t>(srsrc) & 0x1Fu) << 16)
+                      | (static_cast<uint32_t>(vdata) << 8)
+                      | static_cast<uint32_t>(vaddr);
+    words.push_back(w0);
+    words.push_back(w1);
+}
+
 // ============================================================================
 // Binary RDNA2 Decoder
 // ============================================================================
@@ -249,7 +281,7 @@ inline bool DecodeProgram(
             if (inst.opcode != kVop2AddF32 && inst.opcode != kVop2SubF32 &&
                 inst.opcode != kVop2SubRevF32 && inst.opcode != kVop2MulF32 &&
                 inst.opcode != kVop2MinF32 && inst.opcode != kVop2MaxF32 &&
-                inst.opcode != kVop2FmacF32) {
+                inst.opcode != kVop2AddNcU32 && inst.opcode != kVop2FmacF32) {
                 char buf[64];
                 std::snprintf(buf, sizeof(buf), "unsupported VOP2 opcode 0x%02X", inst.opcode);
                 outError = buf;
@@ -276,7 +308,7 @@ inline bool DecodeProgram(
             inst.src0    = static_cast<uint16_t>(w1 & 0x1FFu);
             if (inst.opcode != kVop3MadF32 && inst.opcode != kVop3FmaF32 &&
                 inst.opcode != kVop3Min3F32 && inst.opcode != kVop3Max3F32 &&
-                inst.opcode != kVop3Med3F32) {
+                inst.opcode != kVop3Med3F32 && inst.opcode != kVop3MulLoU32) {
                 char buf[64];
                 std::snprintf(buf, sizeof(buf), "unsupported VOP3 opcode 0x%03X", inst.opcode);
                 outError = buf;
@@ -304,6 +336,28 @@ inline bool DecodeProgram(
             inst.expVsrc[3] = static_cast<uint8_t>((w1 >> 24) & 0xFFu);
             if (inst.expCompr) {
                 outError = "compressed FP16 EXP not yet supported";
+                return false;
+            }
+            outProg.insts.push_back(inst);
+            continue;
+        }
+
+        if ((w0 >> 26) == 0x38u) {
+            if (pc >= wordCount) {
+                outError = "truncated 64-bit MUBUF instruction";
+                return false;
+            }
+            const uint32_t w1 = words[pc++];
+            inst.format      = InstFormat::Mubuf;
+            inst.opcode      = static_cast<uint16_t>((w0 >> 18) & 0x7Fu);
+            inst.mubufOffset = static_cast<uint16_t>(w0 & 0xFFFu);
+            inst.mubufSrsrc  = static_cast<uint8_t>((w1 >> 16) & 0x1Fu);
+            inst.mubufVdata  = static_cast<uint8_t>((w1 >> 8) & 0xFFu);
+            inst.mubufVaddr  = static_cast<uint8_t>(w1 & 0xFFu);
+            if (inst.opcode != kMubufStoreDword) {
+                char buf[64];
+                std::snprintf(buf, sizeof(buf), "unsupported MUBUF opcode 0x%02X", inst.opcode);
+                outError = buf;
                 return false;
             }
             outProg.insts.push_back(inst);
@@ -381,6 +435,7 @@ inline std::string Disassemble(const DecodedProgram& prog) {
                     case kVop2MulF32:    mn = "v_mul_f32"; break;
                     case kVop2MinF32:    mn = "v_min_f32"; break;
                     case kVop2MaxF32:    mn = "v_max_f32"; break;
+                    case kVop2AddNcU32:  mn = "v_add_nc_u32"; break;
                     case kVop2FmacF32:   mn = "v_fmac_f32"; break;
                     default: break;
                 }
@@ -396,7 +451,8 @@ inline std::string Disassemble(const DecodedProgram& prog) {
                     case kVop3FmaF32:  mn = "v_fma_f32"; break;
                     case kVop3Min3F32: mn = "v_min3_f32"; break;
                     case kVop3Max3F32: mn = "v_max3_f32"; break;
-                    case kVop3Med3F32: mn = "v_med3_f32"; break;
+                    case kVop3Med3F32:  mn = "v_med3_f32"; break;
+                    case kVop3MulLoU32: mn = "v_mul_lo_u32"; break;
                     default: break;
                 }
                 out += std::string(mn) + " v" + std::to_string(i.vdst) + ", "
@@ -411,6 +467,11 @@ inline std::string Disassemble(const DecodedProgram& prog) {
                      + std::to_string(i.expVsrc[0]) + ", v" + std::to_string(i.expVsrc[1])
                      + ", v" + std::to_string(i.expVsrc[2]) + ", v" + std::to_string(i.expVsrc[3])
                      + (i.expDone ? " done" : "") + (i.expVm ? " vm\n" : "\n");
+                break;
+            case InstFormat::Mubuf:
+                out += "buffer_store_dword v" + std::to_string(i.mubufVdata)
+                     + ", v" + std::to_string(i.mubufVaddr)
+                     + ", s[" + std::to_string(i.mubufSrsrc) + "]\n";
                 break;
         }
     }
@@ -592,6 +653,93 @@ inline bool LiftPixelShaderToHlsl(
     outHlsl += "    float4 mrt0 = float4(0.0f, 0.0f, 0.0f, 1.0f);\n";
     outHlsl += body;
     outHlsl += "    return mrt0;\n}\n";
+    return true;
+}
+
+inline bool FormatOperandUintHlsl(
+    uint16_t src, bool hasLit, uint32_t lit, std::string& outExpr, std::string& outError) {
+    if (src >= kSrcVgprBase && src < kSrcVgprBase + 256u) {
+        outExpr = "u" + std::to_string(src - kSrcVgprBase);
+        return true;
+    }
+    if (src == kSrcLiteral32 && hasLit) {
+        char buf[24];
+        std::snprintf(buf, sizeof(buf), "0x%08Xu", lit);
+        outExpr = buf;
+        return true;
+    }
+    if (src >= 128u && src <= 192u) {
+        outExpr = std::to_string(src - 128u) + "u";
+        return true;
+    }
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "unsupported RDNA2 uint operand %u", src);
+    outError = buf;
+    return false;
+}
+
+inline bool LiftComputeShaderToHlsl(
+    const DecodedProgram& prog, std::string& outHlsl, std::string& outError) {
+    std::set<uint8_t> usedVgprs{ 0u }; // v0 = SV_DispatchThreadID.x
+    auto markSrc = [&](uint16_t s) {
+        if (s >= kSrcVgprBase && s < kSrcVgprBase + 256u) {
+            usedVgprs.insert(static_cast<uint8_t>(s - kSrcVgprBase));
+        }
+    };
+
+    for (const auto& i : prog.insts) {
+        switch (i.format) {
+            case InstFormat::Vop1:  usedVgprs.insert(i.vdst); markSrc(i.src0); break;
+            case InstFormat::Vop2:  usedVgprs.insert(i.vdst); markSrc(i.src0); markSrc(i.src1); break;
+            case InstFormat::Vop3:  usedVgprs.insert(i.vdst); markSrc(i.src0); markSrc(i.src1); markSrc(i.src2); break;
+            case InstFormat::Mubuf: usedVgprs.insert(i.mubufVaddr); usedVgprs.insert(i.mubufVdata); break;
+            default: break;
+        }
+    }
+
+    std::string body;
+    bool hasBufferStore = false;
+
+    for (const auto& i : prog.insts) {
+        if (i.format == InstFormat::Sopp) {
+            if (i.opcode == kSoppEndpgm) break;
+            continue;
+        }
+        if (i.format == InstFormat::Vop1 && i.opcode == kVop1MovB32) {
+            std::string s0;
+            if (!FormatOperandUintHlsl(i.src0, i.hasLiteral, i.literal32, s0, outError)) return false;
+            body += "    u" + std::to_string(i.vdst) + " = " + s0 + ";\n";
+        } else if (i.format == InstFormat::Vop2 && i.opcode == kVop2AddNcU32) {
+            std::string s0, s1;
+            if (!FormatOperandUintHlsl(i.src0, i.hasLiteral, i.literal32, s0, outError) ||
+                !FormatOperandUintHlsl(i.src1, false, 0, s1, outError)) return false;
+            body += "    u" + std::to_string(i.vdst) + " = (" + s0 + " + " + s1 + ");\n";
+        } else if (i.format == InstFormat::Vop3 && i.opcode == kVop3MulLoU32) {
+            std::string s0, s1;
+            if (!FormatOperandUintHlsl(i.src0, false, 0, s0, outError) ||
+                !FormatOperandUintHlsl(i.src1, false, 0, s1, outError)) return false;
+            body += "    u" + std::to_string(i.vdst) + " = (" + s0 + " * " + s1 + ");\n";
+        } else if (i.format == InstFormat::Mubuf && i.opcode == kMubufStoreDword) {
+            hasBufferStore = true;
+            body += "    gOut[u" + std::to_string(i.mubufVaddr) + "] = u" + std::to_string(i.mubufVdata) + ";\n";
+        }
+    }
+
+    if (!hasBufferStore) {
+        outError = "RDNA2 compute shader contains no MUBUF buffer_store_dword";
+        return false;
+    }
+
+    outHlsl =
+        "RWStructuredBuffer<uint> gOut : register(u0);\n"
+        "[numthreads(64, 1, 1)]\n"
+        "void CSMain(uint3 dtid : SV_DispatchThreadID) {\n";
+    for (uint8_t v : usedVgprs) {
+        if (v == 0u) outHlsl += "    uint u0 = dtid.x;\n";
+        else         outHlsl += "    uint u" + std::to_string(v) + " = 0u;\n";
+    }
+    outHlsl += body;
+    outHlsl += "}\n";
     return true;
 }
 

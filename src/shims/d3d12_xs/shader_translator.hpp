@@ -139,9 +139,10 @@ public:
         }
         ScarlettShaderContainerHeader hdr{};
         std::memcpy(&hdr, input.pShaderBytecode, sizeof(hdr));
+        const auto stage = static_cast<ScxsShaderStage>(hdr.stage);
         return hdr.containerVersion == 1 &&
                static_cast<ScxsPayloadFormat>(hdr.payloadFormat) == ScxsPayloadFormat::Rdna2Isa &&
-               static_cast<ScxsShaderStage>(hdr.stage) == ScxsShaderStage::Pixel;
+               (stage == ScxsShaderStage::Pixel || stage == ScxsShaderStage::Compute);
     }
 
     HRESULT Translate(
@@ -179,8 +180,12 @@ public:
             return E_NOTIMPL;
         }
 
+        const bool isCompute = (static_cast<ScxsShaderStage>(hdr.stage) == ScxsShaderStage::Compute);
         std::string liftedHlsl;
-        if (!rdna2::LiftPixelShaderToHlsl(prog, liftedHlsl, outError)) {
+        const bool lifted = isCompute
+            ? rdna2::LiftComputeShaderToHlsl(prog, liftedHlsl, outError)
+            : rdna2::LiftPixelShaderToHlsl(prog, liftedHlsl, outError);
+        if (!lifted) {
             return E_NOTIMPL;
         }
 
@@ -188,9 +193,9 @@ public:
         Microsoft::WRL::ComPtr<ID3DBlob> compileErr;
         HRESULT hr = D3DCompile(
             liftedHlsl.data(), liftedHlsl.size(),
-            "rdna2_lifted_ps.hlsl", nullptr, nullptr,
-            "PSMain", "ps_5_0", D3DCOMPILE_OPTIMIZATION_LEVEL3,
-            0, &dxbcBlob, &compileErr);
+            isCompute ? "rdna2_lifted_cs.hlsl" : "rdna2_lifted_ps.hlsl", nullptr, nullptr,
+            isCompute ? "CSMain" : "PSMain", isCompute ? "cs_5_0" : "ps_5_0",
+            D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &dxbcBlob, &compileErr);
         if (FAILED(hr) || !dxbcBlob) {
             outError = compileErr
                 ? std::string("RDNA2 lifted HLSL compile failed: ") +
