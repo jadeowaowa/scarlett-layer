@@ -129,6 +129,18 @@ uint64_t HashGraphicsPsoDesc(
     return h.Digest();
 }
 
+uint64_t HashComputePsoDesc(
+    const D3D12_COMPUTE_PIPELINE_STATE_DESC& desc,
+    uint64_t rootSigHash) {
+    Fnv1a64 h;
+    h.UpdatePod(rootSigHash);
+    h.UpdatePod(desc.CS.BytecodeLength);
+    h.Update(desc.CS.pShaderBytecode, desc.CS.BytecodeLength);
+    h.UpdatePod(desc.NodeMask);
+    h.UpdatePod(desc.Flags);
+    return h.Digest();
+}
+
 LRESULT CALLBACK ScarlettWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (msg == WM_NCCREATE) {
         auto* cs = reinterpret_cast<CREATESTRUCTW*>(lParam);
@@ -329,7 +341,7 @@ private:
         m_hwnd = CreateWindowExW(
             0,
             kWindowClassName,
-            L"Scarlett Layer - Xbox Series X [SCXS Translator + DXIL + PSO Cache]",
+            L"Scarlett Layer - Xbox Series X [Compute UAV + SCXS + PSO Cache]",
             WS_OVERLAPPEDWINDOW | WS_VISIBLE,
             CW_USEDEFAULT, CW_USEDEFAULT,
             rc.right - rc.left, rc.bottom - rc.top,
@@ -594,6 +606,13 @@ public:
         m_device->CreateShaderResourceView(pResource, pDesc, DestDescriptor);
     }
 
+    void STDMETHODCALLTYPE CreateUnorderedAccessView(
+        ID3D12Resource* pResource, ID3D12Resource* pCounterResource,
+        const D3D12_UNORDERED_ACCESS_VIEW_DESC* pDesc,
+        D3D12_CPU_DESCRIPTOR_HANDLE DestDescriptor) override {
+        m_device->CreateUnorderedAccessView(pResource, pCounterResource, pDesc, DestDescriptor);
+    }
+
     HRESULT STDMETHODCALLTYPE CreateFence(
         UINT64 InitialValue, D3D12_FENCE_FLAGS Flags, REFIID riid, void** ppFence) override {
         return m_device->CreateFence(InitialValue, Flags, riid, ppFence);
@@ -708,6 +727,87 @@ public:
                           stored ? " (stored in library)" : "",
                           vsInfo.c_str(), psInfo.c_str());
             sc::log::Write(sc::log::Level::Info, "d3d12_xs", "CreateGraphicsPipelineState", msg);
+        }
+        return hr;
+    }
+
+    HRESULT STDMETHODCALLTYPE CreateComputePipelineState(
+        const D3D12_COMPUTE_PIPELINE_STATE_DESC* pDesc,
+        REFIID riid,
+        void** ppPipelineState) override {
+        if (!pDesc || !ppPipelineState) {
+            return E_INVALIDARG;
+        }
+
+        const auto startTime = std::chrono::steady_clock::now();
+
+        D3D12_COMPUTE_PIPELINE_STATE_DESC hostDesc = *pDesc;
+        std::shared_ptr<const sc::d3d12::TranslatedShader> csXlat;
+        std::string csTag, xlatErr;
+
+        HRESULT xlatHr = TranslateStage(hostDesc.CS, csXlat, csTag, xlatErr);
+        if (FAILED(xlatHr)) {
+            std::string errMsg = "-> compute shader translation rejected: " + xlatErr;
+            sc::log::Write(sc::log::Level::Warn, "d3d12_xs", "CreateComputePipelineState", errMsg.c_str());
+            return xlatHr;
+        }
+
+        std::string csInfo = csTag + sc::d3d12::InspectShaderBytecode(hostDesc.CS);
+
+        uint64_t rsHash = 0;
+        {
+            std::lock_guard<std::mutex> lock(m_psoMtx);
+            auto it = m_rootSigHashes.find(hostDesc.pRootSignature);
+            if (it != m_rootSigHashes.end()) {
+                rsHash = it->second;
+            }
+        }
+
+        const uint64_t psoHash = HashComputePsoDesc(hostDesc, rsHash);
+        wchar_t keyW[32];
+        std::swprintf(keyW, _countof(keyW), L"CMP_%016llX", static_cast<unsigned long long>(psoHash));
+        char keyA[32];
+        std::snprintf(keyA, sizeof(keyA), "CMP_%016llX", static_cast<unsigned long long>(psoHash));
+
+        if (m_pipelineLibrary) {
+            std::lock_guard<std::mutex> lock(m_psoMtx);
+            HRESULT cacheHr = m_pipelineLibrary->LoadComputePipeline(keyW, &hostDesc, riid, ppPipelineState);
+            if (SUCCEEDED(cacheHr)) {
+                ++m_psoCacheHits;
+                const auto elapsedUs = std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::steady_clock::now() - startTime).count();
+                char msg[320];
+                std::snprintf(msg, sizeof(msg),
+                              "-> COMPUTE PSO CACHE HIT [%s] in %.2f ms | CS=%s",
+                              keyA, static_cast<double>(elapsedUs) / 1000.0, csInfo.c_str());
+                sc::log::Write(sc::log::Level::Info, "d3d12_xs", "CreateComputePipelineState", msg);
+                return S_OK;
+            }
+        }
+
+        HRESULT hr = m_device->CreateComputePipelineState(&hostDesc, riid, ppPipelineState);
+        if (SUCCEEDED(hr)) {
+            const auto elapsedUs = std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now() - startTime).count();
+            bool stored = false;
+            if (m_pipelineLibrary && *ppPipelineState) {
+                ComPtr<ID3D12PipelineState> psoObj;
+                if (SUCCEEDED(reinterpret_cast<IUnknown*>(*ppPipelineState)->QueryInterface(
+                        IID_PPV_ARGS(&psoObj)))) {
+                    std::lock_guard<std::mutex> lock(m_psoMtx);
+                    if (SUCCEEDED(m_pipelineLibrary->StorePipeline(keyW, psoObj.Get()))) {
+                        m_psoCacheDirty = true;
+                        stored = true;
+                    }
+                }
+            }
+            ++m_psoCacheMisses;
+            char msg[320];
+            std::snprintf(msg, sizeof(msg),
+                          "-> COMPUTE PSO CACHE MISS [%s] compiled in %.2f ms%s | CS=%s",
+                          keyA, static_cast<double>(elapsedUs) / 1000.0,
+                          stored ? " (stored in library)" : "", csInfo.c_str());
+            sc::log::Write(sc::log::Level::Info, "d3d12_xs", "CreateComputePipelineState", msg);
         }
         return hr;
     }

@@ -117,8 +117,6 @@ private:
     uint32_t m_attrs{0};
 };
 
-// Exercises BOTH native PCM passthrough (looping thruster hum) AND live 4:1 IMA-ADPCM
-// transparent decoding (boot chord + F5 quick-save chime) through xaudio2_9.dll.
 class TitleAudio {
 public:
     bool Init() {
@@ -365,7 +363,7 @@ struct ScarlettCompressedTexHeader {
     uint32_t reserved;
 };
 static_assert(sizeof(ScarlettCompressedTexHeader) == 40, "Compressed asset header must be 40 bytes");
-constexpr uint32_t kCompressedAssetMagic = 0x5A584353U; // 'SCXZ'
+constexpr uint32_t kCompressedAssetMagic = 0x5A584353U;
 
 struct AsyncWaiter {
     std::atomic<bool> done{false};
@@ -489,9 +487,44 @@ struct DrawConstants {
 };
 static_assert(sizeof(DrawConstants) == 32, "DrawConstants must be 8x 32-bit values");
 
+struct ComputeConstants {
+    float timeSec;
+    float turbo;
+    float starPosX;
+    float starPosY;
+};
+static_assert(sizeof(ComputeConstants) == 16, "ComputeConstants must be 4x 32-bit values");
+
+const char* kComputeShaderSource = R"(
+RWTexture2D<float4> gEnergyOut : register(u0);
+
+cbuffer ComputeParams : register(b0) {
+    float  uTime;
+    float  uTurbo;
+    float2 uStarPos;
+};
+
+[numthreads(8, 8, 1)]
+void CSMain(uint3 dtid : SV_DispatchThreadID) {
+    float2 uv = (float2(dtid.xy) + 0.5f) / 256.0f;
+    float2 p = uv * 2.0f - 1.0f;
+    float r = length(p - uStarPos * 0.25f);
+    float speed = (uTurbo > 0.5f) ? 10.0f : 3.5f;
+    float wave1 = 0.5f + 0.5f * sin(r * 16.0f - uTime * speed);
+    float wave2 = 0.5f + 0.5f * cos(p.x * 9.0f + p.y * 9.0f + uTime * 2.5f);
+    float energy = saturate(wave1 * 0.65f + wave2 * 0.35f);
+
+    float3 baseCol  = float3(0.08f, 0.72f, 0.42f) * energy;
+    float3 turboCol = float3(0.15f, 0.92f, 1.00f) * (0.35f + 0.65f * energy);
+    float3 outCol   = lerp(baseCol, turboCol, uTurbo);
+    gEnergyOut[dtid.xy] = float4(outCol, 1.0f);
+}
+)";
+
 const char* kShaderSource = R"(
-Texture2D<float4> gCrestTex : register(t0);
-SamplerState      gSampler  : register(s0);
+Texture2D<float4> gCrestTex  : register(t0);
+Texture2D<float4> gEnergyTex : register(t1);
+SamplerState      gSampler   : register(s0);
 
 cbuffer DrawParams : register(b0) {
     float2 uOffset;
@@ -533,10 +566,12 @@ PSIn VSMain(VSIn input) {
 
 float4 PSMain(PSIn input) : SV_TARGET {
     float2 animUv = input.uv + float2(uTime * 0.08f, -uTime * 0.05f);
-    float3 texCol = gCrestTex.Sample(gSampler, animUv).rgb;
+    float3 texCol    = gCrestTex.Sample(gSampler, animUv).rgb;
+    float3 energyCol = gEnergyTex.Sample(gSampler, input.uv).rgb;
     float3 turboTint = float3(0.18f, 0.96f, 1.00f);
-    float3 combined = lerp(input.col * (0.45f + 0.90f * texCol), turboTint * (0.55f + 0.75f * texCol), uTurbo * 0.55f);
-    float3 lit = saturate(combined * (0.85f + 0.30f * uPulse));
+    float3 baseMix   = input.col * (0.40f + 0.75f * texCol) + energyCol * (0.32f + 0.35f * uTurbo);
+    float3 combined  = lerp(baseMix, turboTint * (0.45f + 0.65f * texCol) + energyCol * 0.50f, uTurbo * 0.45f);
+    float3 lit       = saturate(combined * (0.85f + 0.30f * uPulse));
     return float4(lit, 1.0f);
 }
 )";
@@ -655,11 +690,13 @@ bool EnsureBakedCompressedTextureAsset(
     return true;
 }
 
-bool CompileShader(const char* entry, const char* target, ComPtr<ID3DBlob>& outBlob) {
+bool CompileShaderFromSource(
+    const char* source, const char* sourceName,
+    const char* entry, const char* target, ComPtr<ID3DBlob>& outBlob) {
     ComPtr<ID3DBlob> errors;
     HRESULT hr = D3DCompile(
-        kShaderSource, std::strlen(kShaderSource),
-        "scarlett_star_textured.hlsl", nullptr, nullptr,
+        source, std::strlen(source),
+        sourceName, nullptr, nullptr,
         entry, target, D3DCOMPILE_OPTIMIZATION_LEVEL3,
         0, &outBlob, &errors);
     if (FAILED(hr)) {
@@ -677,7 +714,6 @@ bool CompileShader(const char* entry, const char* target, ComPtr<ID3DBlob>& outB
 int main() {
     std::printf("[TITLE][T:%05lu] Booting synthetic Series X title...\n", GetCurrentThreadId());
 
-    // 0a. Query kernelx.dll console memory budget, CPU topology & MEM_GRAPHICS scratch arena
     TITLEMEMORYSTATUS memStat{};
     memStat.dwLength = sizeof(memStat);
     if (TitleMemoryStatus(&memStat)) {
@@ -695,7 +731,6 @@ int main() {
     void* gfxScratch = VirtualAllocX(
         nullptr, 65536, MEM_RESERVE | MEM_COMMIT | SC_MEM_GRAPHICS, PAGE_READWRITE);
 
-    // 0b. Exercise direct runtime LoadLibraryA/W IAT hooks
     HMODULE hPix = LoadLibraryW(L"pixevt.dll");
     PIXBeginEventFn pixBegin = nullptr;
     PIXEndEventFn   pixEnd   = nullptr;
@@ -709,7 +744,6 @@ int main() {
         }
     }
 
-    // 0c. Exercise multi-module hooking
     HMODULE hPlugin = LoadLibraryW(L"engine_plugin.dll");
     if (hPlugin) {
         auto runDiag = reinterpret_cast<PluginRunDiagnosticsFn>(
@@ -733,7 +767,6 @@ int main() {
         return 1;
     }
 
-    // 1. Async offline profile sign-in
     XUserHandle user = nullptr;
     {
         AsyncWaiter waiter{};
@@ -754,7 +787,6 @@ int main() {
         }
     }
 
-    // 2. Async Connected Storage (XGameSave) mount & restore
     XGameSaveProviderHandle saveProvider = nullptr;
     XGameSaveContainerHandle saveContainer = nullptr;
     float posX = 0.0f;
@@ -789,17 +821,14 @@ int main() {
         }
     }
 
-    // 3. Initialize XAudio2 (PCM thruster + live IMA-ADPCM decode voices)
     TitleAudio audio;
     audio.Init();
 
-    // 4. Initialize GameInput
     ComPtr<IGameInput> gameInput;
     if (FAILED(GameInputCreate(&gameInput))) {
         return 1;
     }
 
-    // 5. Scarlett D3D12.x graphics bootstrap
     D3D12XBOX_CREATE_DEVICE_PARAMETERS params{};
     params.Version = 1;
 
@@ -824,7 +853,6 @@ int main() {
     }
     HANDLE ioFenceEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
 
-    // 6. Velocity compressed asset streaming + live worker decompression -> 64KB xmem -> xg_xs detile
     XG_TEXTURE2D_DESC xgTiledDesc{};
     xgTiledDesc.Width = kTexSize;
     xgTiledDesc.Height = kTexSize;
@@ -976,10 +1004,66 @@ int main() {
     CloseHandle(ioFenceEvent);
     ioFence.Reset();
 
-    // 7. Build Root Signature, SCXS-wrapped PSO, Vertex Buffer, Placed Texture SRV & Render Target
+    // 7a. Build Compute Root Signature + SCXS-wrapped Compute PSO (live UAV plasma pass)
+    D3D12_DESCRIPTOR_RANGE uavRange{};
+    uavRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+    uavRange.NumDescriptors = 1;
+    uavRange.BaseShaderRegister = 0;
+    uavRange.RegisterSpace = 0;
+    uavRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+
+    D3D12_ROOT_PARAMETER csRootParams[2]{};
+    csRootParams[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+    csRootParams[0].Constants.ShaderRegister = 0;
+    csRootParams[0].Constants.RegisterSpace = 0;
+    csRootParams[0].Constants.Num32BitValues = sizeof(ComputeConstants) / sizeof(uint32_t);
+    csRootParams[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+    csRootParams[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    csRootParams[1].DescriptorTable.NumDescriptorRanges = 1;
+    csRootParams[1].DescriptorTable.pDescriptorRanges = &uavRange;
+    csRootParams[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+    D3D12_ROOT_SIGNATURE_DESC csRsDesc{};
+    csRsDesc.NumParameters = 2;
+    csRsDesc.pParameters = csRootParams;
+    csRsDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
+
+    ComPtr<ID3DBlob> csRsBlob, csRsErr;
+    if (FAILED(D3D12SerializeRootSignature(&csRsDesc, D3D_ROOT_SIGNATURE_VERSION_1, &csRsBlob, &csRsErr))) {
+        return 1;
+    }
+
+    ComPtr<ID3D12RootSignature> computeRootSig;
+    if (FAILED(deviceX->CreateRootSignature(0, csRsBlob->GetBufferPointer(), csRsBlob->GetBufferSize(),
+                                            IID_PPV_ARGS(&computeRootSig)))) {
+        return 1;
+    }
+
+    ComPtr<ID3DBlob> csBlob;
+    if (!CompileShaderFromSource(kComputeShaderSource, "scarlett_energy_cs.hlsl", "CSMain", "cs_5_0", csBlob)) {
+        return 1;
+    }
+
+    auto csScxs = sc::d3d12::BuildScxsContainer(
+        sc::d3d12::ScxsShaderStage::Compute,
+        sc::d3d12::ScxsTargetArch::Rdna2Scarlett,
+        sc::d3d12::ScxsPayloadFormat::EmbeddedDxbcOrDxil,
+        csBlob->GetBufferPointer(), csBlob->GetBufferSize(), 5, 0);
+
+    D3D12_COMPUTE_PIPELINE_STATE_DESC computePsoDesc{};
+    computePsoDesc.pRootSignature = computeRootSig.Get();
+    computePsoDesc.CS = { csScxs.data(), csScxs.size() };
+
+    ComPtr<ID3D12PipelineState> computePso;
+    if (FAILED(deviceX->CreateComputePipelineState(&computePsoDesc, IID_PPV_ARGS(&computePso)))) {
+        return 1;
+    }
+
+    // 7b. Build Graphics Root Signature (2 SRVs: t0=crest, t1=compute energy) + SCXS Graphics PSO
     D3D12_DESCRIPTOR_RANGE srvRange{};
     srvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    srvRange.NumDescriptors = 1;
+    srvRange.NumDescriptors = 2;
     srvRange.BaseShaderRegister = 0;
     srvRange.RegisterSpace = 0;
     srvRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
@@ -1017,8 +1101,7 @@ int main() {
     rsDesc.pStaticSamplers = &staticSampler;
     rsDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
 
-    ComPtr<ID3DBlob> rsBlob;
-    ComPtr<ID3DBlob> rsErr;
+    ComPtr<ID3DBlob> rsBlob, rsErr;
     if (FAILED(D3D12SerializeRootSignature(&rsDesc, D3D_ROOT_SIGNATURE_VERSION_1, &rsBlob, &rsErr))) {
         return 1;
     }
@@ -1029,9 +1112,9 @@ int main() {
         return 1;
     }
 
-    ComPtr<ID3DBlob> vsBlob;
-    ComPtr<ID3DBlob> psBlob;
-    if (!CompileShader("VSMain", "vs_5_0", vsBlob) || !CompileShader("PSMain", "ps_5_0", psBlob)) {
+    ComPtr<ID3DBlob> vsBlob, psBlob;
+    if (!CompileShaderFromSource(kShaderSource, "scarlett_star_compute.hlsl", "VSMain", "vs_5_0", vsBlob) ||
+        !CompileShaderFromSource(kShaderSource, "scarlett_star_compute.hlsl", "PSMain", "ps_5_0", psBlob)) {
         return 1;
     }
 
@@ -1108,6 +1191,7 @@ int main() {
     vbView.StrideInBytes = sizeof(Vertex);
     vbView.SizeInBytes = sizeof(kStarVertices);
 
+    // Place BOTH crestTexture (SRV) and energyTexture (UAV+SRV) inside one explicit GPU heap!
     D3D12_RESOURCE_DESC texDesc{};
     texDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
     texDesc.Width = kTexSize;
@@ -1117,11 +1201,20 @@ int main() {
     texDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
     texDesc.SampleDesc.Count = 1;
 
-    D3D12_RESOURCE_ALLOCATION_INFO texAllocInfo = deviceX->GetResourceAllocationInfo(0, 1, &texDesc);
+    D3D12_RESOURCE_DESC energyDesc = texDesc;
+    energyDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+
+    D3D12_RESOURCE_ALLOCATION_INFO texAllocInfo    = deviceX->GetResourceAllocationInfo(0, 1, &texDesc);
+    D3D12_RESOURCE_ALLOCATION_INFO energyAllocInfo = deviceX->GetResourceAllocationInfo(0, 1, &energyDesc);
+    const UINT64 heapAlign = std::max<UINT64>(
+        std::max<UINT64>(texAllocInfo.Alignment, energyAllocInfo.Alignment),
+        D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT);
+    const UINT64 energyOffset = (texAllocInfo.SizeInBytes + (heapAlign - 1ULL)) & ~(heapAlign - 1ULL);
+
     D3D12_HEAP_DESC texHeapDesc{};
-    texHeapDesc.SizeInBytes = std::max<UINT64>(texAllocInfo.SizeInBytes, 1024ULL * 1024ULL);
+    texHeapDesc.SizeInBytes = std::max<UINT64>(energyOffset + energyAllocInfo.SizeInBytes, 1024ULL * 1024ULL);
     texHeapDesc.Properties.Type = D3D12_HEAP_TYPE_DEFAULT;
-    texHeapDesc.Alignment = std::max<UINT64>(texAllocInfo.Alignment, D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT);
+    texHeapDesc.Alignment = heapAlign;
     texHeapDesc.Flags = D3D12_HEAP_FLAG_ALLOW_ONLY_NON_RT_DS_TEXTURES;
 
     ComPtr<ID3D12Heap> textureHeap;
@@ -1133,6 +1226,13 @@ int main() {
     if (FAILED(deviceX->CreatePlacedResource(
             textureHeap.Get(), 0, &texDesc,
             D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&crestTexture)))) {
+        return 1;
+    }
+
+    ComPtr<ID3D12Resource> energyTexture;
+    if (FAILED(deviceX->CreatePlacedResource(
+            textureHeap.Get(), energyOffset, &energyDesc,
+            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, nullptr, IID_PPV_ARGS(&energyTexture)))) {
         return 1;
     }
 
@@ -1154,22 +1254,37 @@ int main() {
     texUpload->Unmap(0, nullptr);
     detiledUploadMem.Reset();
 
+    // Shader-visible descriptor heap: [0] crest SRV (t0), [1] energy SRV (t1), [2] energy UAV (u0)
     D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc{};
     srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-    srvHeapDesc.NumDescriptors = 1;
+    srvHeapDesc.NumDescriptors = 3;
     srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
     ComPtr<ID3D12DescriptorHeap> srvHeap;
     if (FAILED(deviceX->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&srvHeap)))) {
         return 1;
     }
 
+    const UINT descInc = deviceX->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    D3D12_CPU_DESCRIPTOR_HANDLE cpuSlot0 = srvHeap->GetCPUDescriptorHandleForHeapStart();
+    D3D12_CPU_DESCRIPTOR_HANDLE cpuSlot1{ cpuSlot0.ptr + descInc };
+    D3D12_CPU_DESCRIPTOR_HANDLE cpuSlot2{ cpuSlot0.ptr + static_cast<SIZE_T>(descInc) * 2 };
+
+    D3D12_GPU_DESCRIPTOR_HANDLE gpuSrvTable = srvHeap->GetGPUDescriptorHandleForHeapStart();
+    D3D12_GPU_DESCRIPTOR_HANDLE gpuUavTable{ gpuSrvTable.ptr + static_cast<UINT64>(descInc) * 2 };
+
     D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
     srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
     srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
     srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
     srvDesc.Texture2D.MipLevels = 1;
-    deviceX->CreateShaderResourceView(crestTexture.Get(), &srvDesc,
-                                      srvHeap->GetCPUDescriptorHandleForHeapStart());
+    deviceX->CreateShaderResourceView(crestTexture.Get(), &srvDesc, cpuSlot0);
+    deviceX->CreateShaderResourceView(energyTexture.Get(), &srvDesc, cpuSlot1);
+
+    D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc{};
+    uavDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+    uavDesc.Texture2D.MipSlice = 0;
+    deviceX->CreateUnorderedAccessView(energyTexture.Get(), nullptr, &uavDesc, cpuSlot2);
 
     D3D12_RESOURCE_DESC rtDesc{};
     rtDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
@@ -1253,7 +1368,7 @@ int main() {
     D3D12_VIEWPORT viewport{ 0.0f, 0.0f, static_cast<float>(kWidth), static_cast<float>(kHeight), 0.0f, 1.0f };
     D3D12_RECT scissor{ 0, 0, static_cast<LONG>(kWidth), static_cast<LONG>(kHeight) };
 
-    std::printf("[TITLE] Controls: WASD/Stick = Move | Space/A = Turbo Hum | F5/Menu = ADPCM Save Chime | R/B = Reset | ESC = Auto-Save & Exit\n");
+    std::printf("[TITLE] Controls: WASD/Stick = Move | Space/A = Turbo Hum + Compute Surge | F5/Menu = ADPCM Save Chime | R/B = Reset | ESC = Exit\n");
 
     float elapsed = 0.0f;
     bool prevSavePressed = false;
@@ -1338,16 +1453,45 @@ int main() {
         deviceX->WaitFrameEventX(D3D12XBOX_FRAME_EVENT_ORIGIN, INFINITE, nullptr, &token);
 
         cmdAlloc->Reset();
-        cmdList->Reset(cmdAlloc.Get(), pso.Get());
+        cmdList->Reset(cmdAlloc.Get(), computePso.Get());
 
-        D3D12_RESOURCE_BARRIER toRT{};
-        toRT.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-        toRT.Transition.pResource = renderTarget.Get();
-        toRT.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-        toRT.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
-        toRT.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
-        cmdList->ResourceBarrier(1, &toRT);
+        ID3D12DescriptorHeap* heaps[] = { srvHeap.Get() };
+        cmdList->SetDescriptorHeaps(1, heaps);
 
+        // Pass 1: Live CS 5.0 procedural energy field dispatch into placed UAV texture
+        D3D12_RESOURCE_BARRIER energyToUav{};
+        energyToUav.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        energyToUav.Transition.pResource = energyTexture.Get();
+        energyToUav.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+        energyToUav.Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+        energyToUav.Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+        cmdList->ResourceBarrier(1, &energyToUav);
+
+        ComputeConstants cc{ elapsed, turbo ? 1.0f : 0.0f, posX, posY };
+        cmdList->SetComputeRootSignature(computeRootSig.Get());
+        cmdList->SetComputeRoot32BitConstants(0, sizeof(ComputeConstants) / sizeof(uint32_t), &cc, 0);
+        cmdList->SetComputeRootDescriptorTable(1, gpuUavTable);
+        cmdList->Dispatch(kTexSize / 8, kTexSize / 8, 1);
+
+        D3D12_RESOURCE_BARRIER postComputeBarriers[3]{};
+        postComputeBarriers[0].Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+        postComputeBarriers[0].UAV.pResource = energyTexture.Get();
+
+        postComputeBarriers[1].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        postComputeBarriers[1].Transition.pResource = energyTexture.Get();
+        postComputeBarriers[1].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+        postComputeBarriers[1].Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+        postComputeBarriers[1].Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+
+        postComputeBarriers[2].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        postComputeBarriers[2].Transition.pResource = renderTarget.Get();
+        postComputeBarriers[2].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+        postComputeBarriers[2].Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+        postComputeBarriers[2].Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+        cmdList->ResourceBarrier(3, postComputeBarriers);
+
+        // Pass 2: Rasterize textured + compute-lit star to console render target
+        cmdList->SetPipelineState(pso.Get());
         const float bgColor[4] = { 0.03f, 0.06f, 0.08f, 1.0f };
         cmdList->ClearRenderTargetView(rtvHandle, bgColor, 0, nullptr);
 
@@ -1356,8 +1500,6 @@ int main() {
         cmdList->RSSetScissorRects(1, &scissor);
 
         cmdList->SetGraphicsRootSignature(rootSig.Get());
-        ID3D12DescriptorHeap* heaps[] = { srvHeap.Get() };
-        cmdList->SetDescriptorHeaps(1, heaps);
 
         DrawConstants dc{};
         dc.offsetX = posX;
@@ -1370,7 +1512,7 @@ int main() {
         dc.timeSec = elapsed;
 
         cmdList->SetGraphicsRoot32BitConstants(0, sizeof(DrawConstants) / sizeof(uint32_t), &dc, 0);
-        cmdList->SetGraphicsRootDescriptorTable(1, srvHeap->GetGPUDescriptorHandleForHeapStart());
+        cmdList->SetGraphicsRootDescriptorTable(1, gpuSrvTable);
         cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         cmdList->IASetVertexBuffers(0, 1, &vbView);
         cmdList->DrawInstanced(static_cast<UINT>(_countof(kStarVertices)), 1, 0, 0);
@@ -1423,7 +1565,7 @@ int main() {
 
     audio.Shutdown();
 
-    std::printf("[TITLE] Rendered %llu frames via PresentX. Shutting down...\n",
+    std::printf("[TITLE] Rendered %llu frames via PresentX (with live CS 5.0 pass). Shutting down...\n",
                 static_cast<unsigned long long>(frame));
 
     CloseHandle(fenceEvent);
@@ -1432,12 +1574,15 @@ int main() {
     cmdAlloc.Reset();
     rtvHeap.Reset();
     srvHeap.Reset();
+    energyTexture.Reset();
     crestTexture.Reset();
     textureHeap.Reset();
     renderTarget.Reset();
     vertexBuffer.Reset();
     pso.Reset();
     rootSig.Reset();
+    computePso.Reset();
+    computeRootSig.Reset();
     cmdQueue.Reset();
     deviceX.Reset();
     gameInput.Reset();

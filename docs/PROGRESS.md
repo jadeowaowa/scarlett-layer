@@ -20,6 +20,7 @@
 | Sprint 14 | `kernelx.dll` unified memory & CPU topology shim + `d3d12_xs.dll` `CreateHeap` / `CreatePlacedResource` | Done |
 | Sprint 15 | SM 6.x `DXIL` LLVM bitcode inspector & pluggable `IShaderTranslator` (`SCXS` container pipeline) | Done |
 | Sprint 16 | `dstorage_xs.dll` live `SCLZ` CPU decompression & `xaudio2_9.dll` live IMA-ADPCM decode voice bridge | Done |
+| Sprint 17 | `d3d12_xs.dll` Compute PSOs (`CreateComputePipelineState`), UAVs, and live CS 5.0 procedural pass | Done |
 
 ## Shim & Export Coverage
 
@@ -29,7 +30,7 @@
 - [x] Multi-module runtime IAT hooks (`LoadLibraryA/W`, `LoadLibraryExA/W`) across main `.exe` and loaded sub-DLLs
 - [x] Virtual console drive mapping (`G:\` game root, `T:\` scratch, `S:\` save temp)
 - [x] Zero-dependency `SCLZ` LZ77 block codec + standard IMA-ADPCM (`0x0011`) audio codec
-- [x] Automated headless CTest suite (`scarlett_tests.exe`, 15 checks)
+- [x] Automated headless CTest suite (`scarlett_tests.exe`, 16 checks)
 
 ### `xgameruntime.dll`
 - [x] `XGameRuntimeInitialize`, `XGameRuntimeUninitialize`, `XSystemGetDeviceType`
@@ -39,11 +40,11 @@
 
 ### `d3d12_xs.dll`
 - [x] `D3D12XboxCreateDevice`, `D3D12SerializeRootSignature`
-- [x] `ID3D12DeviceX`: `CreateCommandQueueX`, `CreateCommittedResource`, `GetResourceAllocationInfo`, `CreateHeap`, `CreatePlacedResource`, `CreateRenderTargetView`, `CreateShaderResourceView`, `CreateRootSignature`, `CreateGraphicsPipelineState`, frame pacing
+- [x] `ID3D12DeviceX`: `CreateCommandQueueX`, `CreateCommittedResource`, `GetResourceAllocationInfo`, `CreateHeap`, `CreatePlacedResource`, `CreateRenderTargetView`, `CreateShaderResourceView`, `CreateUnorderedAccessView`, `CreateRootSignature`, `CreateGraphicsPipelineState`, `CreateComputePipelineState`, frame pacing
 - [x] `ID3D12CommandQueueX` (`PresentX` -> DXGI Flip-Discard swapchain)
 - [x] Deep `DXBC` + SM 6.x `DXIL` (`DxilProgramHeader`, LLVM `BC\xC0\xDE`, `PSV0`) container inspector
 - [x] Pluggable `IShaderTranslator` registry & `SCXS` console shader container translator + in-memory translation cache
-- [x] Persistent disk-backed `ID3D12PipelineLibrary` PSO cache (`build/bin/cache/`)
+- [x] Persistent disk-backed `ID3D12PipelineLibrary` cache for both Graphics (`GFX_*`) and Compute (`CMP_*`) PSOs
 
 ### `gameinput.dll`
 - [x] `GameInputCreate`, `IGameInput`, `IGameInputReading` (XInput + Win32 keyboard)
@@ -74,6 +75,6 @@
 - [x] `GetConsoleProcessorInfo`, `SetThreadAffinityMaskX` (7-core/14-thread Series X topology + safe host mask clamping)
 
 ## Upcoming Subsystems
-- [ ] Compute pipelines (`CreateComputePipelineState`, `CreateUnorderedAccessView`) + GPU procedural compute pass
-- [ ] Proof-of-concept RDNA2 ISA decoder & translator plugin
-- [ ] Technical Architecture Whitepaper (`docs/ARCHITECTURE_PAPER.md`)
+- [ ] Proof-of-concept RDNA2 ISA decoder & `Rdna2IsaTranslator` backend
+- [ ] Async compute command queues (`D3D12_COMMAND_LIST_TYPE_COMPUTE`) & multi-queue GPU fence sync
+- [ ] Next scheduled revision of `docs/ARCHITECTURE_PAPER.md`: Sprint 21

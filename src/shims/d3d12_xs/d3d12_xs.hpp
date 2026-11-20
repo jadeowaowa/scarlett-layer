@@ -112,6 +112,11 @@ struct ID3D12DeviceX : public IUnknown {
         ID3D12Resource* pResource,
         const D3D12_SHADER_RESOURCE_VIEW_DESC* pDesc,
         D3D12_CPU_DESCRIPTOR_HANDLE DestDescriptor) = 0;
+    virtual void STDMETHODCALLTYPE CreateUnorderedAccessView(
+        ID3D12Resource* pResource,
+        ID3D12Resource* pCounterResource,
+        const D3D12_UNORDERED_ACCESS_VIEW_DESC* pDesc,
+        D3D12_CPU_DESCRIPTOR_HANDLE DestDescriptor) = 0;
     virtual HRESULT STDMETHODCALLTYPE CreateFence(
         UINT64 InitialValue,
         D3D12_FENCE_FLAGS Flags,
@@ -125,6 +130,10 @@ struct ID3D12DeviceX : public IUnknown {
         void** ppvRootSignature) = 0;
     virtual HRESULT STDMETHODCALLTYPE CreateGraphicsPipelineState(
         const D3D12_GRAPHICS_PIPELINE_STATE_DESC* pDesc,
+        REFIID riid,
+        void** ppPipelineState) = 0;
+    virtual HRESULT STDMETHODCALLTYPE CreateComputePipelineState(
+        const D3D12_COMPUTE_PIPELINE_STATE_DESC* pDesc,
         REFIID riid,
         void** ppPipelineState) = 0;
     virtual HRESULT STDMETHODCALLTYPE SetFrameIntervalX(
