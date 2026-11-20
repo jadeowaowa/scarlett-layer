@@ -81,8 +81,15 @@ struct DSTORAGE_DESTINATION_MEMORY {
     uint32_t Size;
 };
 
+struct DSTORAGE_DESTINATION_BUFFER {
+    ID3D12Resource* Resource;
+    uint64_t        Offset;
+    uint32_t        Size;
+};
+
 union DSTORAGE_DESTINATION {
     DSTORAGE_DESTINATION_MEMORY Memory;
+    DSTORAGE_DESTINATION_BUFFER Buffer;
 };
 
 struct DSTORAGE_REQUEST {

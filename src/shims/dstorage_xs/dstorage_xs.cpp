@@ -232,6 +232,9 @@ struct QueuedOp {
     uint32_t srcSize{0};
     void* dstMemory{nullptr};
     uint32_t dstSize{0};
+    ComPtr<ID3D12Resource> dstBuffer;
+    uint64_t dstBufferOffset{0};
+    uint32_t dstBufferSize{0};
     uint32_t uncompressedSize{0};
     std::string reqName;
 
@@ -244,14 +247,21 @@ struct QueuedOp {
 
 class ScarlettStorageQueueX final : public IDStorageQueueX {
 public:
-    ScarlettStorageQueueX(const DSTORAGE_QUEUE_DESC& desc)
+    ScarlettStorageQueueX(const DSTORAGE_QUEUE_DESC& desc, uint32_t stagingSize)
         : m_desc(desc)
-        , m_name(desc.Name ? desc.Name : "unnamed_queue") {
+        , m_name(desc.Name ? desc.Name : "unnamed_queue")
+        , m_stagingSize(stagingSize > 0 ? stagingSize : (4u * 1024u * 1024u)) {
+        if (desc.Device) {
+            auto* unk = static_cast<IUnknown*>(desc.Device);
+            unk->QueryInterface(__uuidof(ID3D12Device),
+                                reinterpret_cast<void**>(m_device.GetAddressOf()));
+        }
         m_worker = std::thread([this]() { WorkerLoop(); });
-        char buf[160];
-        std::snprintf(buf, sizeof(buf), "-> created queue '%s' (capacity=%u, priority=%d)",
+        char buf[192];
+        std::snprintf(buf, sizeof(buf), "-> created queue '%s' (capacity=%u, priority=%d, gpu=%s)",
                       m_name.c_str(), static_cast<unsigned>(m_desc.Capacity),
-                      static_cast<int>(m_desc.Priority));
+                      static_cast<int>(m_desc.Priority),
+                      m_device ? "yes" : "no");
         sc::log::Write(sc::log::Level::Info, "dstorage_xs", "CreateQueue", buf);
     }
 
@@ -264,6 +274,7 @@ public:
         if (m_worker.joinable()) {
             m_worker.join();
         }
+        ReleaseGpuCopyContext();
         std::string msg = "-> closed queue '" + m_name + "'";
         sc::log::Write(sc::log::Level::Info, "dstorage_xs", "~ScarlettStorageQueueX", msg.c_str());
     }
@@ -300,10 +311,17 @@ public:
         QueuedOp op{};
         op.kind = QueueOpKind::ReadRequest;
         op.options = request->Options;
-        op.dstMemory = request->Destination.Memory.Buffer;
-        op.dstSize = request->Destination.Memory.Size;
         op.uncompressedSize = request->UncompressedSize;
         op.reqName = request->Name ? request->Name : "request";
+
+        if (request->Options.DestinationType == DSTORAGE_REQUEST_DESTINATION_BUFFER) {
+            op.dstBuffer = request->Destination.Buffer.Resource;
+            op.dstBufferOffset = request->Destination.Buffer.Offset;
+            op.dstBufferSize = request->Destination.Buffer.Size;
+        } else {
+            op.dstMemory = request->Destination.Memory.Buffer;
+            op.dstSize = request->Destination.Memory.Size;
+        }
 
         if (request->Options.SourceType == DSTORAGE_REQUEST_SOURCE_FILE) {
             op.fileOffset = request->Source.File.Offset;
@@ -389,6 +407,113 @@ public:
     }
 
 private:
+    void ReleaseGpuCopyContext() {
+        if (m_stagingBuffer && m_stagingMapped) {
+            D3D12_RANGE empty{ 0, 0 };
+            m_stagingBuffer->Unmap(0, &empty);
+            m_stagingMapped = nullptr;
+        }
+        m_stagingCapacity = 0;
+        m_stagingBuffer.Reset();
+        m_copyList.Reset();
+        m_copyAllocator.Reset();
+        m_copyFence.Reset();
+        m_copyQueue.Reset();
+        m_device.Reset();
+        if (m_copyEvent) {
+            CloseHandle(m_copyEvent);
+            m_copyEvent = nullptr;
+        }
+    }
+
+    HRESULT EnsureGpuCopyContext(uint64_t requiredBytes) {
+        if (!m_device) {
+            return E_INVALIDARG;
+        }
+        if (!m_copyQueue) {
+            D3D12_COMMAND_QUEUE_DESC qd{};
+            qd.Type = D3D12_COMMAND_LIST_TYPE_COPY;
+            qd.Priority = D3D12_COMMAND_QUEUE_PRIORITY_NORMAL;
+            qd.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
+            HRESULT hr = m_device->CreateCommandQueue(&qd, IID_PPV_ARGS(&m_copyQueue));
+            if (FAILED(hr)) {
+                return hr;
+            }
+
+            hr = m_device->CreateCommandAllocator(
+                D3D12_COMMAND_LIST_TYPE_COPY, IID_PPV_ARGS(&m_copyAllocator));
+            if (FAILED(hr)) {
+                return hr;
+            }
+
+            hr = m_device->CreateCommandList(
+                0, D3D12_COMMAND_LIST_TYPE_COPY, m_copyAllocator.Get(), nullptr,
+                IID_PPV_ARGS(&m_copyList));
+            if (FAILED(hr)) {
+                return hr;
+            }
+            hr = m_copyList->Close();
+            if (FAILED(hr)) {
+                return hr;
+            }
+
+            hr = m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_copyFence));
+            if (FAILED(hr)) {
+                return hr;
+            }
+
+            m_copyEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+            if (!m_copyEvent) {
+                return HRESULT_FROM_WIN32(GetLastError());
+            }
+        }
+
+        if (!m_stagingBuffer || m_stagingCapacity < requiredBytes) {
+            if (m_stagingBuffer && m_stagingMapped) {
+                D3D12_RANGE empty{ 0, 0 };
+                m_stagingBuffer->Unmap(0, &empty);
+                m_stagingMapped = nullptr;
+            }
+            m_stagingBuffer.Reset();
+            m_stagingCapacity = 0;
+
+            const uint64_t defaultCap = std::min<uint32_t>(m_stagingSize, 4u * 1024u * 1024u);
+            const uint64_t allocSize = std::max<uint64_t>(requiredBytes, std::max<uint64_t>(defaultCap, 65536u));
+
+            D3D12_HEAP_PROPERTIES hp{};
+            hp.Type = D3D12_HEAP_TYPE_UPLOAD;
+
+            D3D12_RESOURCE_DESC rd{};
+            rd.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+            rd.Width = allocSize;
+            rd.Height = 1;
+            rd.DepthOrArraySize = 1;
+            rd.MipLevels = 1;
+            rd.Format = DXGI_FORMAT_UNKNOWN;
+            rd.SampleDesc.Count = 1;
+            rd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+            HRESULT hr = m_device->CreateCommittedResource(
+                &hp, D3D12_HEAP_FLAG_NONE, &rd,
+                D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+                IID_PPV_ARGS(&m_stagingBuffer));
+            if (FAILED(hr)) {
+                return hr;
+            }
+
+            D3D12_RANGE readRange{ 0, 0 };
+            void* mapped = nullptr;
+            hr = m_stagingBuffer->Map(0, &readRange, &mapped);
+            if (FAILED(hr)) {
+                m_stagingBuffer.Reset();
+                return hr;
+            }
+            m_stagingMapped = static_cast<uint8_t*>(mapped);
+            m_stagingCapacity = allocSize;
+        }
+        return S_OK;
+    }
+
     void RecordError(HRESULT hr, const std::string& reqName) {
         std::lock_guard<std::mutex> lock(m_errMtx);
         if (m_errorRecord.FailureCount == 0) {
@@ -416,9 +541,102 @@ private:
         return S_OK;
     }
 
+    HRESULT ExecuteBufferRequest(const QueuedOp& op, uint64_t& outReadBytes, uint64_t& outProducedBytes) {
+        if (!m_device || !op.dstBuffer || op.dstBufferSize == 0) {
+            return E_INVALIDARG;
+        }
+
+        uint32_t bytesToCopy = 0;
+
+        if (op.options.CompressionFormat == DSTORAGE_COMPRESSION_FORMAT_NONE) {
+            if (op.srcSize > op.dstBufferSize) {
+                return HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
+            }
+            HRESULT hr = EnsureGpuCopyContext(op.srcSize);
+            if (FAILED(hr)) {
+                return hr;
+            }
+            uint32_t bytesRead = 0;
+            hr = ReadRawSource(op, m_stagingMapped, op.srcSize, bytesRead);
+            if (FAILED(hr)) {
+                return hr;
+            }
+            bytesToCopy = bytesRead;
+            outReadBytes = bytesRead;
+            outProducedBytes = bytesRead;
+        } else if (op.options.CompressionFormat == DSTORAGE_COMPRESSION_FORMAT_SCARLETT_LZ) {
+            const uint32_t expectedOut = (op.uncompressedSize > 0) ? op.uncompressedSize : op.dstBufferSize;
+            if (expectedOut > op.dstBufferSize) {
+                return HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
+            }
+            HRESULT hr = EnsureGpuCopyContext(expectedOut);
+            if (FAILED(hr)) {
+                return hr;
+            }
+            std::vector<uint8_t> compressedStaging(op.srcSize);
+            uint32_t bytesRead = 0;
+            hr = ReadRawSource(op, compressedStaging.data(), op.srcSize, bytesRead);
+            if (FAILED(hr)) {
+                return hr;
+            }
+            outReadBytes = bytesRead;
+
+            size_t decompressedBytes = 0;
+            if (!sc::codec::DecompressLzBlock(
+                    compressedStaging.data(), bytesRead,
+                    m_stagingMapped, expectedOut, decompressedBytes) ||
+                decompressedBytes != expectedOut) {
+                return E_FAIL;
+            }
+            bytesToCopy = static_cast<uint32_t>(decompressedBytes);
+            outProducedBytes = decompressedBytes;
+        } else {
+            return E_NOTIMPL;
+        }
+
+        HRESULT hr = m_copyAllocator->Reset();
+        if (FAILED(hr)) {
+            return hr;
+        }
+        hr = m_copyList->Reset(m_copyAllocator.Get(), nullptr);
+        if (FAILED(hr)) {
+            return hr;
+        }
+
+        m_copyList->CopyBufferRegion(
+            op.dstBuffer.Get(), op.dstBufferOffset,
+            m_stagingBuffer.Get(), 0, bytesToCopy);
+
+        hr = m_copyList->Close();
+        if (FAILED(hr)) {
+            return hr;
+        }
+
+        ID3D12CommandList* lists[] = { m_copyList.Get() };
+        m_copyQueue->ExecuteCommandLists(1, lists);
+
+        ++m_copyFenceValue;
+        hr = m_copyQueue->Signal(m_copyFence.Get(), m_copyFenceValue);
+        if (FAILED(hr)) {
+            return hr;
+        }
+        if (m_copyFence->GetCompletedValue() < m_copyFenceValue) {
+            hr = m_copyFence->SetEventOnCompletion(m_copyFenceValue, m_copyEvent);
+            if (FAILED(hr)) {
+                return hr;
+            }
+            WaitForSingleObject(m_copyEvent, INFINITE);
+        }
+        return S_OK;
+    }
+
     HRESULT ExecuteReadRequest(const QueuedOp& op, uint64_t& outReadBytes, uint64_t& outProducedBytes) {
         outReadBytes = 0;
         outProducedBytes = 0;
+
+        if (op.options.DestinationType == DSTORAGE_REQUEST_DESTINATION_BUFFER) {
+            return ExecuteBufferRequest(op, outReadBytes, outProducedBytes);
+        }
 
         if (op.options.DestinationType != DSTORAGE_REQUEST_DESTINATION_MEMORY || !op.dstMemory) {
             return E_INVALIDARG;
@@ -482,6 +700,7 @@ private:
             uint64_t totalRead = 0;
             uint64_t totalProduced = 0;
             uint32_t readCount = 0;
+            uint32_t gpuReadCount = 0;
 
             for (const auto& op : batch) {
                 switch (op.kind) {
@@ -492,6 +711,9 @@ private:
                         totalRead += bytesRead;
                         totalProduced += bytesProduced;
                         ++readCount;
+                        if (op.options.DestinationType == DSTORAGE_REQUEST_DESTINATION_BUFFER) {
+                            ++gpuReadCount;
+                        }
                         if (FAILED(hr)) {
                             if (SUCCEEDED(batchHr)) {
                                 batchHr = hr;
@@ -522,19 +744,19 @@ private:
                 const double sec = std::max(static_cast<double>(elapsedUs) / 1000000.0, 0.000001);
                 const double effMbps = (static_cast<double>(totalProduced) / (1024.0 * 1024.0)) / sec;
 
-                char buf[224];
+                char buf[256];
                 if (totalProduced > totalRead && totalRead > 0) {
                     const double ratio = static_cast<double>(totalProduced) / static_cast<double>(totalRead);
                     std::snprintf(buf, sizeof(buf),
-                                  "-> batch done on '%s': %u req(s), %llu B -> %llu B decompressed (%.2fx) in %.2f ms (%.1f MB/s eff)",
-                                  m_name.c_str(), readCount,
+                                  "-> batch done on '%s': %u req(s) (%u GPU), %llu B -> %llu B decompressed (%.2fx) in %.2f ms (%.1f MB/s eff)",
+                                  m_name.c_str(), readCount, gpuReadCount,
                                   static_cast<unsigned long long>(totalRead),
                                   static_cast<unsigned long long>(totalProduced),
                                   ratio, static_cast<double>(elapsedUs) / 1000.0, effMbps);
                 } else {
                     std::snprintf(buf, sizeof(buf),
-                                  "-> batch done on '%s': %u req(s), %llu B in %.2f ms (%.1f MB/s)",
-                                  m_name.c_str(), readCount,
+                                  "-> batch done on '%s': %u req(s) (%u GPU), %llu B in %.2f ms (%.1f MB/s)",
+                                  m_name.c_str(), readCount, gpuReadCount,
                                   static_cast<unsigned long long>(totalProduced),
                                   static_cast<double>(elapsedUs) / 1000.0, effMbps);
                 }
@@ -546,6 +768,18 @@ private:
     std::atomic<ULONG> m_refs{1};
     DSTORAGE_QUEUE_DESC m_desc{};
     std::string m_name;
+    uint32_t m_stagingSize{4u * 1024u * 1024u};
+
+    ComPtr<ID3D12Device> m_device;
+    ComPtr<ID3D12CommandQueue> m_copyQueue;
+    ComPtr<ID3D12CommandAllocator> m_copyAllocator;
+    ComPtr<ID3D12GraphicsCommandList> m_copyList;
+    ComPtr<ID3D12Fence> m_copyFence;
+    uint64_t m_copyFenceValue{0};
+    HANDLE m_copyEvent{nullptr};
+    ComPtr<ID3D12Resource> m_stagingBuffer;
+    uint8_t* m_stagingMapped{nullptr};
+    uint64_t m_stagingCapacity{0};
 
     std::mutex m_mtx;
     std::condition_variable m_cv;
@@ -601,7 +835,7 @@ public:
             return E_INVALIDARG;
         }
         *ppv = nullptr;
-        auto* queue = new ScarlettStorageQueueX(*desc);
+        auto* queue = new ScarlettStorageQueueX(*desc, m_stagingSize);
         HRESULT hr = queue->QueryInterface(riid, ppv);
         queue->Release();
         return hr;

@@ -83,3 +83,9 @@
 - [ ] Async compute command queues (`D3D12_COMMAND_LIST_TYPE_COMPUTE`) & cross-queue GPU fence sync
 - [ ] RDNA2 `64KB_S` swizzling & BCn block-compressed texture support (`xg_xs.dll`)
 - [ ] Next scheduled revision of `docs/ARCHITECTURE_PAPER.md`: Sprint 21
+
+## Sprint 23: DirectStorage Direct-to-VRAM GPU Buffer Streaming
+- Added DSTORAGE_DESTINATION_BUFFER to DSTORAGE_DESTINATION union in dstorage_xs.hpp.
+- Implemented dedicated D3D12_COMMAND_LIST_TYPE_COPY queue, fence/event sync, and auto-growing persistently mapped UPLOAD staging buffer in ScarlettStorageQueueX.
+- Added DSTORAGE_REQUEST_DESTINATION_BUFFER support (raw + SCARLETT_LZ decompression directly into staging -> CopyBufferRegion to DEFAULT VRAM) with GPU telemetry logging.
+- Added CTest #22 (DStorageGpuBufferStreaming) verifying bit-for-bit GPU readback and E_INVALIDARG error recording on null GPU resources (22 passed, 0 failed, zero leaks).

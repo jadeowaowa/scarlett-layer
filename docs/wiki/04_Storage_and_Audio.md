@@ -1,7 +1,7 @@
 # 04 â€” Velocity Storage (`dstorage_xs`) & Audio Proxy (`xaudio2_9`)
 
 ## `dstorage_xs.dll`
-**Files:** `src/shims/dstorage_xs/dstorage_xs.cpp` (703 L), `src/shims/dstorage_xs/dstorage_xs.def` (4 L), `src/shims/dstorage_xs/dstorage_xs.hpp` (159 L)
+**Files:** `src/shims/dstorage_xs/dstorage_xs.cpp` (937 L), `src/shims/dstorage_xs/dstorage_xs.def` (4 L), `src/shims/dstorage_xs/dstorage_xs.hpp` (166 L)
 
 **DLL Exports (`.def`):** `DStorageGetFactory`, `DStorageSetConfiguration`
 

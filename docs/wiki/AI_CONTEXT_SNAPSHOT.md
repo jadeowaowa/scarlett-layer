@@ -1,7 +1,7 @@
 # Scarlett Layer â€” AI Context Snapshot
 
-**Commit:** `f8fcebf` (#24) | **Generated:** 2026-11-20 09:14 UTC  
-**Totals:** 49 files (13,613 LOC) | 9 shims | 21 CTest checks
+**Commit:** `9ab0d99` (#26) | **Generated:** 2026-11-20 19:32 UTC  
+**Totals:** 49 files (14,016 LOC) | 9 shims | 22 CTest checks
 
 ---
 
@@ -78,9 +78,9 @@
  1085  src/shims/d3d12_xs/rdna2_isa.hpp
   201  src/shims/d3d12_xs/shader_inspector.hpp
   364  src/shims/d3d12_xs/shader_translator.hpp
-  703  src/shims/dstorage_xs/dstorage_xs.cpp
+  937  src/shims/dstorage_xs/dstorage_xs.cpp
     4  src/shims/dstorage_xs/dstorage_xs.def
-  159  src/shims/dstorage_xs/dstorage_xs.hpp
+  166  src/shims/dstorage_xs/dstorage_xs.hpp
   277  src/shims/gameinput/gameinput.cpp
     3  src/shims/gameinput/gameinput.def
    82  src/shims/gameinput/gameinput.hpp
@@ -109,7 +109,7 @@
  1651  src/tests/dummy_title/main.cpp
    59  src/tests/engine_plugin/engine_plugin.cpp
     3  src/tests/engine_plugin/engine_plugin.def
- 2225  src/tests/scarlett_tests/main.cpp
+ 2387  src/tests/scarlett_tests/main.cpp
   242  tools/audit_imports.py
   505  tools/build_wiki.py
   108  tools/test_brief.py
@@ -153,7 +153,7 @@
 - `[21]` `HRESULT WaitFrameEventX( D3D12XBOX_FRAME_EVENT Event, DWORD TimeoutInMilliseconds, HANDLE hEvent, D3D12XBOX_FRAME_PIPELINE_TOKEN* pToken)`
 
 ## `dstorage_xs.dll`
-**Files:** `src/shims/dstorage_xs/dstorage_xs.cpp` (703 L), `src/shims/dstorage_xs/dstorage_xs.def` (4 L), `src/shims/dstorage_xs/dstorage_xs.hpp` (159 L)
+**Files:** `src/shims/dstorage_xs/dstorage_xs.cpp` (937 L), `src/shims/dstorage_xs/dstorage_xs.def` (4 L), `src/shims/dstorage_xs/dstorage_xs.hpp` (166 L)
 
 **DLL Exports (`.def`):** `DStorageGetFactory`, `DStorageSetConfiguration`
 
@@ -273,7 +273,7 @@
 - `VintrpOp`: kVintrpP1F32 = 0x00u, kVintrpP2F32 = 0x01u, kVintrpMovF32 = 0x02u
 - `InstFormat`: Sopp, Vop1, Vop2, Vop3, Exp, Mubuf, Smem, Vintrp
 
-## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 21 total)
+## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 22 total)
 ```cpp
     RunTest("VfsPathTranslation",         TestVfsPathTranslation);
     RunTest("RuntimeAndXUser",            TestRuntimeAndXUser);
@@ -296,9 +296,12 @@
     RunTest("Rdna2ComputeIsaExecution", TestRdna2ComputeIsaExecution);
     RunTest("Rdna2VertexAndPixelPipelineWithCbv", TestRdna2VertexAndPixelPipelineWithCbv);
     RunTest("XgXs64KbsAndBcnBlockSwizzle",       TestXgXs64KbsAndBcnBlockSwizzle);
+    RunTest("DStorageGpuBufferStreaming",        TestDStorageGpuBufferStreaming);
 ```
 
 ## 6. Recent Git History
+- `9ab0d99 Tools: add directory-safe build.bat wrapper for Hermes Desktop`
+- `c4b8cc0 Sprint 22: xg_xs RDNA2 64KB_S swizzling and BC1/BC3/BC7 block compression`
 - `f8fcebf Tools: add test_brief.py and --slim mode for AI_CONTEXT_SNAPSHOT.md`
 - `116f183 Tools: add zero-dependency wiki generator (build_wiki.py), INVARIANTS.md, and AI context snapshot`
 - `a72f224 Docs: Sprint 21 technical architecture paper revision (Sprints 17-21)`
@@ -307,5 +310,3 @@
 - `d878d33 Sprint 19: d3d12_xs async COMPUTE command queues and cross-queue GPU sync`
 - `f45bc16 Sprint 18: RDNA2 ISA binary decoder, HLSL lifter, and live GPU execution`
 - `5121d22 Sprint 17: d3d12_xs Compute PSOs, UAVs, and live CS 5.0 procedural pass`
-- `d1e20ea Docs: add Sprint 16 technical architecture paper (docs/ARCHITECTURE_PAPER.md)`
-- `2e2243d Sprint 16: dstorage_xs SCLZ CPU decompression and xaudio2_9 live IMA-ADPCM decode bridge`
