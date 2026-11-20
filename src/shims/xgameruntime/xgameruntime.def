@@ -1,0 +1,6 @@
+LIBRARY xgameruntime
+EXPORTS
+    XGameRuntimeInitialize
+    XGameRuntimeUninitialize
+    XSystemGetDeviceType
+    XUserAddAsync
