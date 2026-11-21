@@ -2371,6 +2371,94 @@ static size_t CurlTestWriteCb(char* ptr, size_t size, size_t nmemb, void* userda
     return total;
 }
 
+bool TestPeDelayLoadAndOrdinalAuditE2E() {
+    const auto tmpDir = std::filesystem::temp_directory_path() / "scarlett_sprint51_pe_audit";
+    std::error_code ec;
+    std::filesystem::remove_all(tmpDir, ec);
+    std::filesystem::create_directories(tmpDir, ec);
+
+    // Synthesize a minimal PE64 with 1 .rdata section (RVA 0x1000, RawOffset 0x200, Size 0x1000)
+    std::vector<uint8_t> pe(0x1200, 0);
+    auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(pe.data());
+    dos->e_magic = IMAGE_DOS_SIGNATURE;
+    dos->e_lfanew = 0x80;
+
+    auto* nt = reinterpret_cast<IMAGE_NT_HEADERS64*>(pe.data() + 0x80);
+    nt->Signature = IMAGE_NT_SIGNATURE;
+    nt->FileHeader.Machine = IMAGE_FILE_MACHINE_AMD64;
+    nt->FileHeader.NumberOfSections = 1;
+    nt->FileHeader.SizeOfOptionalHeader = sizeof(IMAGE_OPTIONAL_HEADER64);
+    nt->OptionalHeader.Magic = IMAGE_NT_OPTIONAL_HDR64_MAGIC;
+    nt->OptionalHeader.NumberOfRvaAndSizes = IMAGE_NUMBEROF_DIRECTORY_ENTRIES;
+
+    // Import Directory at RVA 0x1000, Delay-Load Directory at RVA 0x1100
+    nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress = 0x1000;
+    nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size = sizeof(IMAGE_IMPORT_DESCRIPTOR) * 2;
+    nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT].VirtualAddress = 0x1100;
+    nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT].Size = sizeof(IMAGE_DELAYLOAD_DESCRIPTOR) * 3;
+
+    auto* sec = IMAGE_FIRST_SECTION(nt);
+    std::memcpy(sec->Name, ".rdata", 6);
+    sec->Misc.VirtualSize = 0x1000;
+    sec->VirtualAddress = 0x1000;
+    sec->SizeOfRawData = 0x1000;
+    sec->PointerToRawData = 0x200;
+
+    // Helper: write at RVA (0x1000 + off -> file offset 0x200 + off)
+    auto atRva = [&](uint32_t rva) -> uint8_t* { return pe.data() + 0x200 + (rva - 0x1000); };
+
+    // Strings at 0x1300+
+    std::strcpy(reinterpret_cast<char*>(atRva(0x1300)), "d3d12_xs.dll");
+    std::strcpy(reinterpret_cast<char*>(atRva(0x1320)), "xgameruntime.dll");
+    std::strcpy(reinterpret_cast<char*>(atRva(0x1340)), "custom_missing_delay.dll");
+
+    // Standard import: d3d12_xs.dll -> 1 named thunk + 1 ordinal thunk (#42)
+    auto* imp = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(atRva(0x1000));
+    imp[0].OriginalFirstThunk = 0x1200;
+    imp[0].Name = 0x1300;
+    auto* t0 = reinterpret_cast<uint64_t*>(atRva(0x1200));
+    t0[0] = 0x1380ULL;                       // named RVA
+    t0[1] = IMAGE_ORDINAL_FLAG64 | 42ULL;    // ordinal #42
+    t0[2] = 0;
+
+    // Delay-load imports: xgameruntime.dll (1 named) + custom_missing_delay.dll (1 ordinal #7)
+    auto* dimp = reinterpret_cast<IMAGE_DELAYLOAD_DESCRIPTOR*>(atRva(0x1100));
+    dimp[0].Attributes.AllAttributes = 1;
+    dimp[0].DllNameRVA = 0x1320;
+    dimp[0].ImportNameTableRVA = 0x1220;
+    auto* t1 = reinterpret_cast<uint64_t*>(atRva(0x1220));
+    t1[0] = 0x13A0ULL;
+    t1[1] = 0;
+
+    dimp[1].Attributes.AllAttributes = 1;
+    dimp[1].DllNameRVA = 0x1340;
+    dimp[1].ImportNameTableRVA = 0x1240;
+    auto* t2 = reinterpret_cast<uint64_t*>(atRva(0x1240));
+    t2[0] = IMAGE_ORDINAL_FLAG64 | 7ULL;     // ordinal #7
+    t2[1] = 0;
+
+    const auto pePath = tmpDir / "synthetic_delay_ordinal.exe";
+    {
+        std::ofstream ofs(pePath, std::ios::binary);
+        ofs.write(reinterpret_cast<const char*>(pe.data()), static_cast<std::streamsize>(pe.size()));
+    }
+
+    wchar_t shimDirBuf[MAX_PATH]{};
+    DWORD shimLen = GetEnvironmentVariableW(L"SCARLETT_SHIM_DIR", shimDirBuf, MAX_PATH);
+    SC_EXPECT(shimLen > 0);
+    const auto audit = sc::loader::InspectPeImports(pePath, std::filesystem::path(shimDirBuf));
+
+    SC_EXPECT(audit.validPe64);
+    SC_EXPECT(audit.delayLoadImports.size() == 2);
+    SC_EXPECT(audit.shimmedImports.size() == 2);
+    SC_EXPECT(audit.missingImports.size() == 1 && audit.missingImports[0] == "custom_missing_delay.dll");
+    SC_EXPECT(audit.totalImportedSymbols == 4);
+    SC_EXPECT(audit.ordinalImportCount == 2);
+
+    std::filesystem::remove_all(tmpDir, ec);
+    return true;
+}
+
 bool TestScarlettFullStack50SprintCapstoneE2E() {
     using Microsoft::WRL::ComPtr;
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
@@ -5673,6 +5761,7 @@ int main() {
     RunTest("DStorageVelocityDynamicE2E",        TestDStorageVelocityDynamicE2E);
     RunTest("LoaderXvdAndGameConfigE2E",         TestLoaderXvdAndGameConfigE2E);
     RunTest("ScarlettFullStack50SprintCapstoneE2E", TestScarlettFullStack50SprintCapstoneE2E);
+    RunTest("PeDelayLoadAndOrdinalAuditE2E",     TestPeDelayLoadAndOrdinalAuditE2E);
 
     XGameRuntimeUninitialize();
 

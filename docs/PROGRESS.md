@@ -207,3 +207,7 @@
 ## Sprint 50: Phase 4 Closeout & 50-Sprint Golden Master Capstone (`v1.0.0`)
 - Added CTest #49 (`ScarlettFullStack50SprintCapstoneE2E`) in `src/tests/scarlett_tests/main.cpp` uniting all 9 shims (`d3d12_xs`, `xgameruntime`, `gameinput`, `dstorage_xs`, `xmem`, `kernelx`, `pixevt`, `xaudio2_9`, `xg_xs`) plus unencrypted XVD / `MicrosoftGame.Config` packaging into a single end-to-end boot-to-frame-to-save Golden Master pipeline (`49 passed, 0 failed`, zero leaks).
 - Completed all **50 Sprints (Phases 1–4)** and tagged **`sprint-50-baseline`** + **`v1.0.0-scarlett-layer`**.
+
+## Sprint 51: Phase 5 Kickoff — PE64 Delay-Load & Ordinal Import Auditing
+- Extended `sc::loader::InspectPeImports` in `src/loader/pe_inspector.hpp` to parse `IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT` (`IMAGE_DELAYLOAD_DESCRIPTOR`) and count `IMAGE_ORDINAL_FLAG64` ordinal-only imports across both standard and delay-load tables.
+- Added CTest #50 (`PeDelayLoadAndOrdinalAuditE2E`) in `src/tests/scarlett_tests/main.cpp` validating synthetic PE64 delay-load and ordinal import auditing (`50 passed, 0 failed`).

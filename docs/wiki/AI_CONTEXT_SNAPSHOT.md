@@ -1,7 +1,7 @@
 # Scarlett Layer â€” AI Context Snapshot
 
-**Commit:** `273f98d` (#83) | **Generated:** 2026-11-21 05:29 UTC  
-**Totals:** 61 files (19,518 LOC) | 12 shims | 49 CTest checks
+**Commit:** `834af4f` (#84) | **Generated:** 2026-11-21 05:34 UTC  
+**Totals:** 61 files (19,638 LOC) | 12 shims | 50 CTest checks
 
 ---
 
@@ -71,7 +71,7 @@
   161  src/common/xvd_container.hpp
   172  src/loader/game_config.hpp
   196  src/loader/main.cpp
-  177  src/loader/pe_inspector.hpp
+  208  src/loader/pe_inspector.hpp
   396  src/loader/pe_patcher.cpp
    19  src/loader/pe_patcher.hpp
   469  src/loader/scarlett_hook.cpp
@@ -121,7 +121,7 @@
  1651  src/tests/dummy_title/main.cpp
    59  src/tests/engine_plugin/engine_plugin.cpp
     3  src/tests/engine_plugin/engine_plugin.def
- 5681  src/tests/scarlett_tests/main.cpp
+ 5770  src/tests/scarlett_tests/main.cpp
   242  tools/audit_imports.py
   505  tools/build_wiki.py
   108  tools/test_brief.py
@@ -381,7 +381,7 @@
 - `MimgOp`: kMimgImageSample = 0x20u
 - `InstFormat`: Sopp, Vop1, Vop2, Vop3, Exp, Mubuf, Smem, Vintrp, Mimg
 
-## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 49 total)
+## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 50 total)
 ```cpp
     RunTest("VfsPathTranslation",         TestVfsPathTranslation);
     RunTest("RuntimeAndXUser",            TestRuntimeAndXUser);
@@ -432,9 +432,11 @@
     RunTest("DStorageVelocityDynamicE2E",        TestDStorageVelocityDynamicE2E);
     RunTest("LoaderXvdAndGameConfigE2E",         TestLoaderXvdAndGameConfigE2E);
     RunTest("ScarlettFullStack50SprintCapstoneE2E", TestScarlettFullStack50SprintCapstoneE2E);
+    RunTest("PeDelayLoadAndOrdinalAuditE2E",     TestPeDelayLoadAndOrdinalAuditE2E);
 ```
 
 ## 6. Recent Git History
+- `834af4f Docs: Clean up README for v1.0.0 release and add v2.0+ roadmap`
 - `273f98d Docs: Add v1.0.0 Golden Master milestone summary to README`
 - `0d60944 Merge Sprint 50: 50-Sprint Golden Master Capstone (49/49 CTests)`
 - `c40af26 Sprint 50: 50-Sprint Golden Master Capstone — all 9 shims + XVD/Config E2E (CTest #49)`
@@ -444,4 +446,3 @@
 - `ad04cf2 Sprint 48: dstorage_xs dynamic Velocity streaming & status-array E2E (CTest #47)`
 - `48df6a1 Merge Sprint 47: xmem & xg_xs physical memory + BC7 swizzle E2E (46/46 CTests)`
 - `8ed0b9c Sprint 47: xmem & xg_xs physical memory + 64KB_S BC7 swizzle E2E (CTest #46)`
-- `03e18a1 Merge Sprint 46: kernelx & pixevt OS/profiler E2E (45/45 CTests)`
