@@ -184,3 +184,6 @@
 ## Sprint 43: XUser Profile Parity & XGameSave Offline E2E
 - Added `XUserState`, `XUserLocalId`, and exported `XUserGetId`, `XUserGetState`, and `XUserGetLocalId` in `src/shims/xgameruntime/` (`gdk_types.hpp`, `xgameruntime.def`, `xgameruntime.cpp`).
 - Added CTest #42 (`XUserAndGameSaveProfileE2E`) in `src/tests/scarlett_tests/main.cpp` exercising the full offline `XUser` identity + `XGameSave` write/read round-trip (`42 passed, 0 failed`).
+
+## Sprint 44: GameInput Runtime Polling E2E
+- Added CTest #43 (`GameInputRuntimePollingE2E`) in `src/tests/scarlett_tests/main.cpp` dynamically loading `shims\gameinput.dll` and validating `GameInputCreate`, monotonic timestamps, synthetic gamepad injection, and `GetCurrentReading` -> `GetGamepadState` parity (`43 passed, 0 failed`).
