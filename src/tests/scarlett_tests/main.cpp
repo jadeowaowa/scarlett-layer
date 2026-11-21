@@ -2364,6 +2364,272 @@ static size_t TestXCurlWriteCb(char* ptr, size_t size, size_t nmemb, void* userd
     return size * nmemb;
 }
 
+bool TestRdna2TexturedDrawE2E() {
+    using namespace sc::d3d12::rdna2;
+    using Microsoft::WRL::ComPtr;
+
+    // 1. Build, decode, lift, and compile RDNA2 IMAGE_SAMPLE pixel shader
+    std::vector<uint32_t> isa;
+    AppendVintrpMov(isa, 0, 0, 0);
+    AppendVintrpMov(isa, 1, 0, 1);
+    AppendMimgImageSample(isa, 2, 0, 0, 0, 0xFu, 1u);
+    AppendExp(isa, kExpTargetMrt0, 2, 3, 4, 5, 0xFu, true, false);
+    AppendSopp(isa, kSoppEndpgm);
+
+    DecodedProgram prog{};
+    std::string err;
+    SC_EXPECT(DecodeProgram(isa.data(), isa.size() * sizeof(uint32_t), prog, err));
+
+    std::string psHlsl;
+    SC_EXPECT(LiftPixelShaderToHlsl(prog, psHlsl, err));
+
+    ComPtr<ID3DBlob> psBlob, vsBlob, errBlob;
+    SC_EXPECT(SUCCEEDED(D3DCompile(
+        psHlsl.data(), psHlsl.size(), "rdna2_e2e_ps.hlsl",
+        nullptr, nullptr, "PSMain", "ps_5_0", 0, 0, &psBlob, &errBlob)));
+
+    const char* vsHlsl = R"(
+struct VSOut {
+    float4 svPos  : SV_POSITION;
+    float4 param0 : TEXCOORD0;
+};
+VSOut VSMain(uint id : SV_VertexID) {
+    VSOut o;
+    float2 uv = float2((id << 1) & 2, id & 2);
+    o.svPos  = float4(uv * float2(2.0f, -2.0f) + float2(-1.0f, 1.0f), 0.0f, 1.0f);
+    o.param0 = float4(uv, 0.0f, 1.0f);
+    return o;
+}
+)";
+    SC_EXPECT(SUCCEEDED(D3DCompile(
+        vsHlsl, std::strlen(vsHlsl), "rdna2_e2e_vs.hlsl",
+        nullptr, nullptr, "VSMain", "vs_5_0", 0, 0, &vsBlob, &errBlob)));
+
+    // 2. Create D3D12 device, queue, allocator, list, and fence
+    HMODULE d3d12Mod = LoadLibraryW(L"d3d12.dll");
+    SC_EXPECT(d3d12Mod != nullptr);
+    auto pD3D12CreateDevice = reinterpret_cast<PFN_D3D12_CREATE_DEVICE>(
+        GetProcAddress(d3d12Mod, "D3D12CreateDevice"));
+    SC_EXPECT(pD3D12CreateDevice != nullptr);
+
+    ComPtr<ID3D12Device> dev;
+    SC_EXPECT(SUCCEEDED(pD3D12CreateDevice(nullptr, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&dev))));
+
+    D3D12_COMMAND_QUEUE_DESC qDesc{};
+    qDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+    ComPtr<ID3D12CommandQueue> queue;
+    SC_EXPECT(SUCCEEDED(dev->CreateCommandQueue(&qDesc, IID_PPV_ARGS(&queue))));
+
+    ComPtr<ID3D12CommandAllocator> alloc;
+    SC_EXPECT(SUCCEEDED(dev->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&alloc))));
+
+    ComPtr<ID3D12GraphicsCommandList> cmd;
+    SC_EXPECT(SUCCEEDED(dev->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, alloc.Get(), nullptr, IID_PPV_ARGS(&cmd))));
+
+    ComPtr<ID3D12Fence> fence;
+    SC_EXPECT(SUCCEEDED(dev->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence))));
+    HANDLE fenceEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    SC_EXPECT(fenceEvent != nullptr);
+
+    // 3. Root signature: 1 SRV descriptor table (t0) + 1 static sampler (s0)
+    D3D12_DESCRIPTOR_RANGE srvRange{};
+    srvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    srvRange.NumDescriptors = 1;
+    srvRange.BaseShaderRegister = 0;
+    srvRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+
+    D3D12_ROOT_PARAMETER rootParam{};
+    rootParam.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    rootParam.DescriptorTable.NumDescriptorRanges = 1;
+    rootParam.DescriptorTable.pDescriptorRanges = &srvRange;
+    rootParam.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+    D3D12_STATIC_SAMPLER_DESC staticSamp{};
+    staticSamp.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
+    staticSamp.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    staticSamp.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    staticSamp.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    staticSamp.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
+    staticSamp.MaxLOD = D3D12_FLOAT32_MAX;
+    staticSamp.ShaderRegister = 0;
+    staticSamp.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+    D3D12_ROOT_SIGNATURE_DESC rsDesc{};
+    rsDesc.NumParameters = 1;
+    rsDesc.pParameters = &rootParam;
+    rsDesc.NumStaticSamplers = 1;
+    rsDesc.pStaticSamplers = &staticSamp;
+
+    ComPtr<ID3DBlob> rsBlob;
+    SC_EXPECT(SUCCEEDED(D3D12SerializeRootSignature(&rsDesc, D3D_ROOT_SIGNATURE_VERSION_1, &rsBlob, &errBlob)));
+    ComPtr<ID3D12RootSignature> rootSig;
+    SC_EXPECT(SUCCEEDED(dev->CreateRootSignature(0, rsBlob->GetBufferPointer(), rsBlob->GetBufferSize(), IID_PPV_ARGS(&rootSig))));
+
+    // 4. Graphics PSO
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc{};
+    psoDesc.pRootSignature = rootSig.Get();
+    psoDesc.VS = { vsBlob->GetBufferPointer(), vsBlob->GetBufferSize() };
+    psoDesc.PS = { psBlob->GetBufferPointer(), psBlob->GetBufferSize() };
+    psoDesc.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+    psoDesc.SampleMask = UINT_MAX;
+    psoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
+    psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    psoDesc.NumRenderTargets = 1;
+    psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+    psoDesc.SampleDesc.Count = 1;
+
+    ComPtr<ID3D12PipelineState> pso;
+    SC_EXPECT(SUCCEEDED(dev->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pso))));
+
+    // 5. Create 2x2 SRV texture + upload buffer, 64x64 RTV texture + readback buffer
+    D3D12_HEAP_PROPERTIES defaultHeap{ D3D12_HEAP_TYPE_DEFAULT };
+    D3D12_HEAP_PROPERTIES uploadHeap{ D3D12_HEAP_TYPE_UPLOAD };
+    D3D12_HEAP_PROPERTIES readbackHeap{ D3D12_HEAP_TYPE_READBACK };
+
+    D3D12_RESOURCE_DESC texDesc{};
+    texDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    texDesc.Width = 2;
+    texDesc.Height = 2;
+    texDesc.DepthOrArraySize = 1;
+    texDesc.MipLevels = 1;
+    texDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    texDesc.SampleDesc.Count = 1;
+
+    ComPtr<ID3D12Resource> srcTex;
+    SC_EXPECT(SUCCEEDED(dev->CreateCommittedResource(
+        &defaultHeap, D3D12_HEAP_FLAG_NONE, &texDesc,
+        D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&srcTex))));
+
+    D3D12_RESOURCE_DESC upDesc{};
+    upDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    upDesc.Width = 512; // 2 rows * 256-byte aligned pitch
+    upDesc.Height = 1;
+    upDesc.DepthOrArraySize = 1;
+    upDesc.MipLevels = 1;
+    upDesc.SampleDesc.Count = 1;
+    upDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+    ComPtr<ID3D12Resource> upBuf;
+    SC_EXPECT(SUCCEEDED(dev->CreateCommittedResource(
+        &uploadHeap, D3D12_HEAP_FLAG_NONE, &upDesc,
+        D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&upBuf))));
+
+    uint8_t* upPtr = nullptr;
+    SC_EXPECT(SUCCEEDED(upBuf->Map(0, nullptr, reinterpret_cast<void**>(&upPtr))));
+    std::memset(upPtr, 0, 512);
+    const uint8_t kExpected[4] = { 40, 180, 240, 255 };
+    for (int y = 0; y < 2; ++y) {
+        for (int x = 0; x < 2; ++x) {
+            std::memcpy(upPtr + y * 256 + x * 4, kExpected, 4);
+        }
+    }
+    upBuf->Unmap(0, nullptr);
+
+    D3D12_RESOURCE_DESC rtDesc = texDesc;
+    rtDesc.Width = 64;
+    rtDesc.Height = 64;
+    rtDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+
+    ComPtr<ID3D12Resource> rtTex;
+    SC_EXPECT(SUCCEEDED(dev->CreateCommittedResource(
+        &defaultHeap, D3D12_HEAP_FLAG_NONE, &rtDesc,
+        D3D12_RESOURCE_STATE_RENDER_TARGET, nullptr, IID_PPV_ARGS(&rtTex))));
+
+    D3D12_RESOURCE_DESC rbDesc = upDesc;
+    rbDesc.Width = 64 * 256; // 64 rows * 256 bytes/row (64 * 4 = 256)
+    ComPtr<ID3D12Resource> rbBuf;
+    SC_EXPECT(SUCCEEDED(dev->CreateCommittedResource(
+        &readbackHeap, D3D12_HEAP_FLAG_NONE, &rbDesc,
+        D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&rbBuf))));
+
+    // 6. Descriptor heaps (RTV + shader-visible SRV)
+    D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc{};
+    rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+    rtvHeapDesc.NumDescriptors = 1;
+    ComPtr<ID3D12DescriptorHeap> rtvHeap;
+    SC_EXPECT(SUCCEEDED(dev->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&rtvHeap))));
+    dev->CreateRenderTargetView(rtTex.Get(), nullptr, rtvHeap->GetCPUDescriptorHandleForHeapStart());
+
+    D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc{};
+    srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+    srvHeapDesc.NumDescriptors = 1;
+    srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+    ComPtr<ID3D12DescriptorHeap> srvHeap;
+    SC_EXPECT(SUCCEEDED(dev->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&srvHeap))));
+    dev->CreateShaderResourceView(srcTex.Get(), nullptr, srvHeap->GetCPUDescriptorHandleForHeapStart());
+
+    // 7. Record upload -> transition -> draw -> readback
+    D3D12_TEXTURE_COPY_LOCATION srcLoc{};
+    srcLoc.pResource = upBuf.Get();
+    srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    srcLoc.PlacedFootprint.Footprint = { DXGI_FORMAT_R8G8B8A8_UNORM, 2, 2, 1, 256 };
+
+    D3D12_TEXTURE_COPY_LOCATION dstLoc{};
+    dstLoc.pResource = srcTex.Get();
+    dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    cmd->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
+
+    D3D12_RESOURCE_BARRIER toSrv{};
+    toSrv.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    toSrv.Transition = { srcTex.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+                         D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE };
+    cmd->ResourceBarrier(1, &toSrv);
+
+    const float clearCol[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+    auto rtvHandle = rtvHeap->GetCPUDescriptorHandleForHeapStart();
+    cmd->ClearRenderTargetView(rtvHandle, clearCol, 0, nullptr);
+    cmd->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+
+    D3D12_VIEWPORT vp{ 0.0f, 0.0f, 64.0f, 64.0f, 0.0f, 1.0f };
+    D3D12_RECT sc{ 0, 0, 64, 64 };
+    cmd->RSSetViewports(1, &vp);
+    cmd->RSSetScissorRects(1, &sc);
+
+    ID3D12DescriptorHeap* heaps[] = { srvHeap.Get() };
+    cmd->SetDescriptorHeaps(1, heaps);
+    cmd->SetGraphicsRootSignature(rootSig.Get());
+    cmd->SetGraphicsRootDescriptorTable(0, srvHeap->GetGPUDescriptorHandleForHeapStart());
+    cmd->SetPipelineState(pso.Get());
+    cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    cmd->DrawInstanced(3, 1, 0, 0);
+
+    D3D12_RESOURCE_BARRIER toCopy{};
+    toCopy.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    toCopy.Transition = { rtTex.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+                          D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_SOURCE };
+    cmd->ResourceBarrier(1, &toCopy);
+
+    D3D12_TEXTURE_COPY_LOCATION rbDst{};
+    rbDst.pResource = rbBuf.Get();
+    rbDst.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    rbDst.PlacedFootprint.Footprint = { DXGI_FORMAT_R8G8B8A8_UNORM, 64, 64, 1, 256 };
+
+    D3D12_TEXTURE_COPY_LOCATION rtSrc{};
+    rtSrc.pResource = rtTex.Get();
+    rtSrc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    cmd->CopyTextureRegion(&rbDst, 0, 0, 0, &rtSrc, nullptr);
+
+    SC_EXPECT(SUCCEEDED(cmd->Close()));
+    ID3D12CommandList* lists[] = { cmd.Get() };
+    queue->ExecuteCommandLists(1, lists);
+    SC_EXPECT(SUCCEEDED(queue->Signal(fence.Get(), 1)));
+    SC_EXPECT(SUCCEEDED(fence->SetEventOnCompletion(1, fenceEvent)));
+    WaitForSingleObject(fenceEvent, 5000);
+    CloseHandle(fenceEvent);
+
+    // 8. Verify center pixel (32, 32) matches sampled RGBA texel
+    uint8_t* rbPtr = nullptr;
+    SC_EXPECT(SUCCEEDED(rbBuf->Map(0, nullptr, reinterpret_cast<void**>(&rbPtr))));
+    const uint8_t* px = rbPtr + 32 * 256 + 32 * 4;
+    const bool match = (px[0] == kExpected[0] && px[1] == kExpected[1] &&
+                        px[2] == kExpected[2] && px[3] == kExpected[3]);
+    rbBuf->Unmap(0, nullptr);
+    SC_EXPECT(match);
+
+    return true;
+}
+
 bool TestGameConfigBootParser() {
     // 1. Synthetic MicrosoftGame.Config round-trip
     const auto tmpDir = std::filesystem::temp_directory_path() / "scarlett_gameconfig_test";
@@ -2655,7 +2921,7 @@ bool TestRdna2ImageSampleShader() {
     AppendVintrpMov(isa, 0, 0, 0);
     AppendVintrpMov(isa, 1, 0, 1);
     AppendMimgImageSample(isa, 2, 0, 0, 0, 0xFu, 1u);
-    AppendExp(isa, kExpTargetMrt0, 0xFu, 2, 3, 4, 5, true, true);
+    AppendExp(isa, kExpTargetMrt0, 2, 3, 4, 5, 0xFu, true, false);
     AppendSopp(isa, kSoppEndpgm);
 
     DecodedProgram prog{};
@@ -3256,6 +3522,7 @@ int main() {
     RunTest("PresentXDescriptorAudit",           TestPresentXDescriptorAudit);
     RunTest("ScarlettXConformanceSuite",         TestScarlettXConformanceSuite);
     RunTest("GameConfigBootParser",              TestGameConfigBootParser);
+    RunTest("Rdna2TexturedDrawE2E",              TestRdna2TexturedDrawE2E);
 
     XGameRuntimeUninitialize();
 

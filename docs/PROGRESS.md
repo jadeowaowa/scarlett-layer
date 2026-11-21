@@ -132,3 +132,8 @@
 - Added header-only `src/loader/game_config.hpp` parsing `<Identity>`, `<TitleId>`, `<ShellVisuals>`, and `<Executable>` from GDK `MicrosoftGame.Config` manifests.
 - Wired `loader.exe --inspect-package <dir>` and `loader.exe --boot <dir> [args...]` into `src/loader/main.cpp` to auto-resolve title executables and forward arguments into the injection pipeline.
 - Added CTest #30 (`GameConfigBootParser`) verifying synthetic manifest round-trips, error handling, and all 4 ScarlettX synthetic game manifests (`30 passed, 0 failed`).
+
+## Sprint 32: End-to-End RDNA2 IMAGE_SAMPLE Textured GPU Draw
+- Added CTest #31 (`Rdna2TexturedDrawE2E`) in `src/tests/scarlett_tests/main.cpp`.
+- Decoded binary RDNA2 `MIMG IMAGE_SAMPLE` pixel shader, lifted to HLSL, compiled to `ps_5_0`, bound a `2x2` `RGBA8` `Texture2D` SRV + static `SamplerState`, drew a fullscreen triangle on D3D12 hardware, and verified exact `(40, 180, 240, 255)` RGBA pixel readback.
+- Fixed `AppendExp` argument order (`v0..v3, en, done, compr`) in both `TestRdna2ImageSampleShader` and `TestRdna2TexturedDrawE2E` (`31 passed, 0 failed`).
