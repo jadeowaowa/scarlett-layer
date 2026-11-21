@@ -246,6 +246,11 @@ public:
         }
 
         ID3D12Resource* srcResource = pPlaneParameters[0].ppResources[0];
+        D3D12_RESOURCE_DESC srcDesc = srcResource->GetDesc();
+        if (srcDesc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D ||
+            srcDesc.Width == 0 || srcDesc.Height == 0) {
+            return E_INVALIDARG;
+        }
 
         if (!m_swapChain) {
             HRESULT hr = InitPresentationPipeline(srcResource);
@@ -288,7 +293,30 @@ public:
         preBarriers[1].Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
         m_copyCmdList->ResourceBarrier(2, preBarriers);
 
-        m_copyCmdList->CopyResource(dstBackBuffer, srcResource);
+        D3D12_RESOURCE_DESC dstDesc = dstBackBuffer->GetDesc();
+        if (srcDesc.Width == dstDesc.Width && srcDesc.Height == dstDesc.Height &&
+            srcDesc.Format == dstDesc.Format) {
+            m_copyCmdList->CopyResource(dstBackBuffer, srcResource);
+        } else {
+            D3D12_TEXTURE_COPY_LOCATION dstLoc{};
+            dstLoc.pResource = dstBackBuffer;
+            dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+            dstLoc.SubresourceIndex = 0;
+
+            D3D12_TEXTURE_COPY_LOCATION srcLoc{};
+            srcLoc.pResource = srcResource;
+            srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+            srcLoc.SubresourceIndex = 0;
+
+            D3D12_BOX srcBox{};
+            srcBox.left = 0;
+            srcBox.top = 0;
+            srcBox.front = 0;
+            srcBox.right = static_cast<UINT>((std::min)(srcDesc.Width, dstDesc.Width));
+            srcBox.bottom = (std::min)(srcDesc.Height, dstDesc.Height);
+            srcBox.back = 1;
+            m_copyCmdList->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, &srcBox);
+        }
 
         D3D12_RESOURCE_BARRIER postBarriers[2]{};
         postBarriers[0].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;

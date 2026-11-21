@@ -2363,6 +2363,161 @@ static size_t TestXCurlWriteCb(char* ptr, size_t size, size_t nmemb, void* userd
     return size * nmemb;
 }
 
+bool TestPresentXDescriptorAudit() {
+    D3D12XBOX_CREATE_DEVICE_PARAMETERS params{};
+    params.Version = D3D12_SDK_VERSION;
+    ID3D12DeviceX* dev = nullptr;
+    SC_EXPECT(SUCCEEDED(D3D12XboxCreateDevice(nullptr, &params, IID_ID3D12DeviceX, reinterpret_cast<void**>(&dev))) && dev != nullptr);
+
+    // 1. Audit descriptor handle increment sizes for all 4 heap types
+    const UINT incCbv = dev->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    const UINT incSmp = dev->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
+    const UINT incRtv = dev->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+    const UINT incDsv = dev->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
+    SC_EXPECT(incCbv > 0 && incSmp > 0 && incRtv > 0 && incDsv > 0);
+
+    // 2. Create command queue, allocator, command list, and RTV heap
+    D3D12_COMMAND_QUEUE_DESC qDesc{};
+    qDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+    ID3D12CommandQueueX* queue = nullptr;
+    SC_EXPECT(SUCCEEDED(dev->CreateCommandQueueX(&qDesc, &queue)) && queue != nullptr);
+
+    // Reject invalid PresentX arguments cleanly
+    SC_EXPECT(FAILED(queue->PresentX(0, nullptr, nullptr)));
+
+    ID3D12DescriptorHeap* rtvHeap = nullptr;
+    D3D12_DESCRIPTOR_HEAP_DESC heapDesc{};
+    heapDesc.NumDescriptors = 2;
+    heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+    heapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+    SC_EXPECT(SUCCEEDED(dev->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&rtvHeap))) && rtvHeap != nullptr);
+
+    D3D12_CPU_DESCRIPTOR_HANDLE rtv0 = rtvHeap->GetCPUDescriptorHandleForHeapStart();
+    D3D12_CPU_DESCRIPTOR_HANDLE rtv1{ rtv0.ptr + incRtv };
+    SC_EXPECT(rtv0.ptr != 0 && rtv1.ptr == rtv0.ptr + incRtv);
+
+    // 3. Create 64x64 R8G8B8A8_UNORM render target + readback buffer
+    D3D12_HEAP_PROPERTIES defHeap{};
+    defHeap.Type = D3D12_HEAP_TYPE_DEFAULT;
+    D3D12_RESOURCE_DESC rtDesc{};
+    rtDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    rtDesc.Width = 64;
+    rtDesc.Height = 64;
+    rtDesc.DepthOrArraySize = 1;
+    rtDesc.MipLevels = 1;
+    rtDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    rtDesc.SampleDesc.Count = 1;
+    rtDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+
+    ID3D12Resource* rt = nullptr;
+    SC_EXPECT(SUCCEEDED(dev->CreateCommittedResource(
+        &defHeap, D3D12_HEAP_FLAG_NONE, &rtDesc,
+        D3D12_RESOURCE_STATE_RENDER_TARGET, nullptr, IID_PPV_ARGS(&rt))) && rt != nullptr);
+
+    dev->CreateRenderTargetView(rt, nullptr, rtv0);
+
+    D3D12_HEAP_PROPERTIES rbHeap{};
+    rbHeap.Type = D3D12_HEAP_TYPE_READBACK;
+    D3D12_RESOURCE_DESC rbDesc{};
+    rbDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    rbDesc.Width = 256 * 64; // 256-byte aligned row pitch * 64 rows
+    rbDesc.Height = 1;
+    rbDesc.DepthOrArraySize = 1;
+    rbDesc.MipLevels = 1;
+    rbDesc.Format = DXGI_FORMAT_UNKNOWN;
+    rbDesc.SampleDesc.Count = 1;
+    rbDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+    ID3D12Resource* readback = nullptr;
+    SC_EXPECT(SUCCEEDED(dev->CreateCommittedResource(
+        &rbHeap, D3D12_HEAP_FLAG_NONE, &rbDesc,
+        D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&readback))) && readback != nullptr);
+
+    // 4. Bind RTV via descriptor handle, clear to non-white RGBA, copy to readback, transition to PRESENT
+    ID3D12CommandAllocator* alloc = nullptr;
+    ID3D12GraphicsCommandList* cmd = nullptr;
+    SC_EXPECT(SUCCEEDED(dev->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&alloc))));
+    SC_EXPECT(SUCCEEDED(dev->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, alloc, nullptr, IID_PPV_ARGS(&cmd))));
+
+    const float clearColor[4] = { 0.25f, 0.50f, 0.75f, 1.0f };
+    cmd->OMSetRenderTargets(1, &rtv0, FALSE, nullptr);
+    cmd->ClearRenderTargetView(rtv0, clearColor, 0, nullptr);
+
+    D3D12_RESOURCE_BARRIER b0{};
+    b0.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    b0.Transition.pResource = rt;
+    b0.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    b0.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+    b0.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
+    cmd->ResourceBarrier(1, &b0);
+
+    D3D12_TEXTURE_COPY_LOCATION dstLoc{};
+    dstLoc.pResource = readback;
+    dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    dstLoc.PlacedFootprint.Offset = 0;
+    dstLoc.PlacedFootprint.Footprint.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    dstLoc.PlacedFootprint.Footprint.Width = 64;
+    dstLoc.PlacedFootprint.Footprint.Height = 64;
+    dstLoc.PlacedFootprint.Footprint.Depth = 1;
+    dstLoc.PlacedFootprint.Footprint.RowPitch = 256;
+
+    D3D12_TEXTURE_COPY_LOCATION srcLoc{};
+    srcLoc.pResource = rt;
+    srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    srcLoc.SubresourceIndex = 0;
+    cmd->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
+
+    D3D12_RESOURCE_BARRIER b1{};
+    b1.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    b1.Transition.pResource = rt;
+    b1.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    b1.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_SOURCE;
+    b1.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+    cmd->ResourceBarrier(1, &b1);
+
+    SC_EXPECT(SUCCEEDED(cmd->Close()));
+    ID3D12CommandList* lists[] = { cmd };
+    queue->ExecuteCommandLists(1, lists);
+
+    // 5. Submit PresentX with the rendered target
+    ID3D12Resource* planes[] = { rt };
+    D3D12XBOX_PRESENT_PLANE_PARAMETERS planeParams{};
+    planeParams.ResourceCount = 1;
+    planeParams.ppResources = planes;
+    SC_EXPECT(SUCCEEDED(queue->PresentX(1, &planeParams, nullptr)));
+
+    // Fence wait and verify non-white pixel values
+    ID3D12Fence* fence = nullptr;
+    SC_EXPECT(SUCCEEDED(dev->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence))));
+    HANDLE evt = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    SC_EXPECT(evt != nullptr);
+    SC_EXPECT(SUCCEEDED(queue->Signal(fence, 1)));
+    if (fence->GetCompletedValue() < 1) {
+        SC_EXPECT(SUCCEEDED(fence->SetEventOnCompletion(1, evt)));
+        WaitForSingleObject(evt, 5000);
+    }
+    CloseHandle(evt);
+
+    uint8_t* mapped = nullptr;
+    SC_EXPECT(SUCCEEDED(readback->Map(0, nullptr, reinterpret_cast<void**>(&mapped))) && mapped != nullptr);
+    // Expected: R~64, G~128, B~191, A=255
+    SC_EXPECT(mapped[0] >= 62 && mapped[0] <= 66);
+    SC_EXPECT(mapped[1] >= 126 && mapped[1] <= 130);
+    SC_EXPECT(mapped[2] >= 189 && mapped[2] <= 193);
+    SC_EXPECT(mapped[3] == 255);
+    readback->Unmap(0, nullptr);
+
+    fence->Release();
+    cmd->Release();
+    alloc->Release();
+    readback->Release();
+    rt->Release();
+    rtvHeap->Release();
+    queue->Release();
+    dev->Release();
+    return true;
+}
+
 bool TestRdna2ImageSampleShader() {
     using namespace sc::d3d12::rdna2;
 
@@ -2973,6 +3128,7 @@ int main() {
     RunTest("RetailBringUpShims",                TestRetailBringUpShims);
     RunTest("LoaderInspectAndXvdMount",          TestLoaderInspectAndXvdMount);
     RunTest("Rdna2ImageSampleShader",            TestRdna2ImageSampleShader);
+    RunTest("PresentXDescriptorAudit",           TestPresentXDescriptorAudit);
 
     XGameRuntimeUninitialize();
 
