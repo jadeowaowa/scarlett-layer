@@ -1,7 +1,7 @@
 # Scarlett Layer â€” AI Context Snapshot
 
-**Commit:** `f4fcfe1` (#97) | **Generated:** 2026-11-21 06:45 UTC  
-**Totals:** 62 files (20,888 LOC) | 12 shims | 57 CTest checks
+**Commit:** `be8b006` (#99) | **Generated:** 2026-11-21 09:41 UTC  
+**Totals:** 62 files (20,900 LOC) | 12 shims | 57 CTest checks
 
 ---
 
@@ -78,7 +78,7 @@
   105  src/shims/acphal/acphal.cpp
     7  src/shims/acphal/acphal.def
    33  src/shims/acphal/acphal.hpp
- 1438  src/shims/d3d12_xs/d3d12_xs.cpp
+ 1444  src/shims/d3d12_xs/d3d12_xs.cpp
     4  src/shims/d3d12_xs/d3d12_xs.def
   237  src/shims/d3d12_xs/d3d12_xs.hpp
  1191  src/shims/d3d12_xs/rdna2_isa.hpp
@@ -122,7 +122,7 @@
    59  src/tests/engine_plugin/engine_plugin.cpp
     3  src/tests/engine_plugin/engine_plugin.def
   328  src/tests/scarlett_3d_demo/main.cpp
- 6521  src/tests/scarlett_tests/main.cpp
+ 6527  src/tests/scarlett_tests/main.cpp
   242  tools/audit_imports.py
   505  tools/build_wiki.py
   108  tools/test_brief.py
@@ -143,7 +143,7 @@
 - `HRESULT WINAPI ApuFree(void* virtualAddress)`
 
 ## `d3d12_xs.dll`
-**Files:** `src/shims/d3d12_xs/d3d12_xs.cpp` (1438 L), `src/shims/d3d12_xs/d3d12_xs.def` (4 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (237 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1191 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_translator.hpp` (401 L)
+**Files:** `src/shims/d3d12_xs/d3d12_xs.cpp` (1444 L), `src/shims/d3d12_xs/d3d12_xs.def` (4 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (237 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1191 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_translator.hpp` (401 L)
 
 **DLL Exports (`.def`):** `D3D12XboxCreateDevice`, `D3D12SerializeRootSignature = ScarlettSerializeRootSignature`
 
@@ -444,6 +444,8 @@
 ```
 
 ## 6. Recent Git History
+- `be8b006 Merge Sprint 58: Async compute & cross-queue fence sync (57/57 CTests)`
+- `be60a74 Sprint 58: Async compute & cross-queue fence sync E2E + PresentX lifetime hardening (CTest #57)`
 - `f4fcfe1 Merge Sprint 57: Headless PresentX mode (56/56 CTests)`
 - `dffe91f Sprint 57: Headless PresentX mode (SCARLETT_HEADLESS=1) & E2E (CTest #56)`
 - `2d78b03 Merge Sprint 55: Zero-readback GPU PresentX & DXGI SwapChain E2E (54/54 CTests)`
@@ -452,5 +454,3 @@
 - `e1f56ac Sprint 54: COM vtable ABI conformance & raw slot invocation E2E (CTest #53)`
 - `df427cd Demo: Add live interactive scarlett_3d_demo (d3d12_xs spinning lit 3D cube)`
 - `9647773 Merge Sprint 53: 3D perspective & depth-buffer E2E render (52/52 CTests)`
-- `b7fe9bc Sprint 53: 3D perspective-projected indexed render & D32_FLOAT Z-buffer E2E (CTest #52)`
-- `d5ac70c Merge Sprint 52: Runtime delay-load & GetProcAddress ordinal hooks (51/51 CTests)`

@@ -234,3 +234,8 @@
 ## Sprint 58: Async Compute & Cross-Queue Fence Synchronization
 - Hardened `ScarlettCommandQueueX` in `src/shims/d3d12_xs/d3d12_xs.cpp`: release backbuffers and `IDXGISwapChain3` before `DestroyWindow`, back `SCARLETT_HEADLESS=1` with offscreen `ID3D12Resource` ring buffers, retain in-flight `PresentX` source resources until their GPU copy fence completes, and register an `ID3D12InfoQueue1` debug callback in `_DEBUG` builds.
 - Added CTest #57 (`D3D12XsAsyncComputeCrossQueueSyncE2E`) in `src/tests/scarlett_tests/main.cpp` verifying `D3D12_COMMAND_LIST_TYPE_COMPUTE` and `D3D12_COMMAND_LIST_TYPE_DIRECT` queues running a CS 5.0 producer with GPU-to-GPU `Signal()`/`Wait()` synchronization and readback validation (`57 passed, 0 failed`).
+
+## Sprint 59: Zero-Warning D3D12 Validation & Strict Mode
+- Silenced raw `ID3D12CommandList::BeginEvent`/`EndEvent`/`SetMarker` forwarding in `ScarlettGraphicsCommandListX` (`src/shims/d3d12_xs/d3d12_xs.cpp`) to eliminate D3D12 debug-layer `BeginEvent` and unmatched `PixEndEvent` errors.
+- Added `SCARLETT_STRICT_D3D12=1` abort enforcement inside the `_DEBUG` `ID3D12InfoQueue1` validation callback.
+- Standardized UAV buffer initial states to `D3D12_RESOURCE_STATE_COMMON` and supplied optimized `D3D12_CLEAR_VALUE` structs on render-target creation in `src/tests/scarlett_tests/main.cpp` (`57 passed, 0 failed`, 0 D3D12 debug errors/warnings).
