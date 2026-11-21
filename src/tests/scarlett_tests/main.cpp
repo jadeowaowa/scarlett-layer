@@ -2371,6 +2371,83 @@ static size_t CurlTestWriteCb(char* ptr, size_t size, size_t nmemb, void* userda
     return total;
 }
 
+bool TestGameInputRuntimePollingE2E() {
+    HMODULE giMod = LoadLibraryW(L"shims\\gameinput.dll");
+    if (!giMod) giMod = LoadLibraryW(L"gameinput.dll");
+    SC_EXPECT(giMod != nullptr);
+
+    struct LocalGamepadState {
+        uint32_t buttons;
+        float    leftTrigger;
+        float    rightTrigger;
+        float    leftThumbstickX;
+        float    leftThumbstickY;
+        float    rightThumbstickX;
+        float    rightThumbstickY;
+    };
+    struct LocalKeyState {
+        uint32_t scanCode;
+        uint32_t codePoint;
+        uint8_t  virtualKey;
+        bool     isDeadKey;
+    };
+    struct ILocalGameInputReading : public IUnknown {
+        virtual uint32_t STDMETHODCALLTYPE GetInputKind() = 0;
+        virtual uint64_t STDMETHODCALLTYPE GetTimestamp() = 0;
+        virtual bool     STDMETHODCALLTYPE GetGamepadState(LocalGamepadState* state) = 0;
+        virtual uint32_t STDMETHODCALLTYPE GetKeyCount() = 0;
+        virtual uint32_t STDMETHODCALLTYPE GetKeyState(uint32_t count, LocalKeyState* arr) = 0;
+    };
+    struct ILocalGameInput : public IUnknown {
+        virtual uint64_t STDMETHODCALLTYPE GetCurrentTimestamp() = 0;
+        virtual HRESULT  STDMETHODCALLTYPE GetCurrentReading(
+            uint32_t inputKind, void* device, ILocalGameInputReading** reading) = 0;
+    };
+
+    using PFN_GameInputCreate = HRESULT(WINAPI*)(ILocalGameInput**);
+    using PFN_SetSynthetic = void(WINAPI*)(bool, const LocalGamepadState*);
+
+    auto pCreate = reinterpret_cast<PFN_GameInputCreate>(GetProcAddress(giMod, "GameInputCreate"));
+    auto pSetSynth = reinterpret_cast<PFN_SetSynthetic>(GetProcAddress(giMod, "ScarlettGameInputSetSyntheticGamepad"));
+    SC_EXPECT(pCreate != nullptr && pSetSynth != nullptr);
+
+    ILocalGameInput* gi = nullptr;
+    SC_EXPECT(SUCCEEDED(pCreate(&gi)) && gi != nullptr);
+    const uint64_t t0 = gi->GetCurrentTimestamp();
+    SC_EXPECT(t0 > 0);
+
+    LocalGamepadState injected{};
+    injected.buttons = 0x00000004u | 0x00000800u; // A | RightShoulder
+    injected.leftTrigger = 0.25f;
+    injected.rightTrigger = 0.75f;
+    injected.leftThumbstickX = -0.5f;
+    injected.leftThumbstickY = 0.5f;
+    injected.rightThumbstickX = 0.25f;
+    injected.rightThumbstickY = -0.25f;
+    pSetSynth(true, &injected);
+
+    ILocalGameInputReading* reading = nullptr;
+    SC_EXPECT(SUCCEEDED(gi->GetCurrentReading(0x00020000u, nullptr, &reading)) && reading != nullptr);
+    SC_EXPECT(reading->GetInputKind() == 0x00020000u);
+    SC_EXPECT(reading->GetTimestamp() >= t0);
+
+    LocalGamepadState polled{};
+    SC_EXPECT(reading->GetGamepadState(&polled));
+    SC_EXPECT(polled.buttons == injected.buttons);
+    SC_EXPECT(polled.leftTrigger == injected.leftTrigger);
+    SC_EXPECT(polled.rightTrigger == injected.rightTrigger);
+    SC_EXPECT(polled.leftThumbstickX == injected.leftThumbstickX);
+    SC_EXPECT(polled.leftThumbstickY == injected.leftThumbstickY);
+    SC_EXPECT(polled.rightThumbstickX == injected.rightThumbstickX);
+    SC_EXPECT(polled.rightThumbstickY == injected.rightThumbstickY);
+
+    pSetSynth(false, nullptr);
+    reading->Release();
+    gi->Release();
+    FreeLibrary(giMod);
+    return true;
+}
+
 bool TestXUserAndGameSaveProfileE2E() {
     HMODULE xgrMod = LoadLibraryW(L"shims\\xgameruntime.dll");
     if (!xgrMod) xgrMod = LoadLibraryW(L"xgameruntime.dll");
@@ -4618,6 +4695,7 @@ int main() {
     RunTest("XAudio2RuntimePlaybackE2E",         TestXAudio2RuntimePlaybackE2E);
     RunTest("NetworkingShimsE2E",                TestNetworkingShimsE2E);
     RunTest("XUserAndGameSaveProfileE2E",        TestXUserAndGameSaveProfileE2E);
+    RunTest("GameInputRuntimePollingE2E",        TestGameInputRuntimePollingE2E);
 
     XGameRuntimeUninitialize();
 
