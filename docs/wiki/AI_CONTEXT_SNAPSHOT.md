@@ -1,7 +1,7 @@
 # Scarlett Layer â€” AI Context Snapshot
 
-**Commit:** `62406f1` (#70) | **Generated:** 2026-11-21 05:01 UTC  
-**Totals:** 61 files (18,803 LOC) | 12 shims | 44 CTest checks
+**Commit:** `7ab8721` (#72) | **Generated:** 2026-11-21 05:04 UTC  
+**Totals:** 61 files (18,889 LOC) | 12 shims | 45 CTest checks
 
 ---
 
@@ -121,7 +121,7 @@
  1651  src/tests/dummy_title/main.cpp
    59  src/tests/engine_plugin/engine_plugin.cpp
     3  src/tests/engine_plugin/engine_plugin.def
- 4966  src/tests/scarlett_tests/main.cpp
+ 5052  src/tests/scarlett_tests/main.cpp
   242  tools/audit_imports.py
   505  tools/build_wiki.py
   108  tools/test_brief.py
@@ -381,7 +381,7 @@
 - `MimgOp`: kMimgImageSample = 0x20u
 - `InstFormat`: Sopp, Vop1, Vop2, Vop3, Exp, Mubuf, Smem, Vintrp, Mimg
 
-## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 44 total)
+## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 45 total)
 ```cpp
     RunTest("VfsPathTranslation",         TestVfsPathTranslation);
     RunTest("RuntimeAndXUser",            TestRuntimeAndXUser);
@@ -427,9 +427,12 @@
     RunTest("XUserAndGameSaveProfileE2E",        TestXUserAndGameSaveProfileE2E);
     RunTest("GameInputRuntimePollingE2E",        TestGameInputRuntimePollingE2E);
     RunTest("ScarlettTitleBringUpE2E",           TestScarlettTitleBringUpE2E);
+    RunTest("KernelXAndPixEvtE2E",               TestKernelXAndPixEvtE2E);
 ```
 
 ## 6. Recent Git History
+- `7ab8721 Merge Sprint 45: Phase 3 closeout (44/44 CTests)`
+- `6f628b4 Sprint 45: Phase 3 closeout — full Scarlett title bring-up E2E (CTest #44)`
 - `62406f1 Merge Sprint 44: GameInput runtime polling E2E (43/43 CTests)`
 - `3b6ec9e Sprint 44: GameInput runtime polling E2E (CTest #43)`
 - `bf159be Merge Sprint 43: XUser profile parity & XGameSave E2E (42/42 CTests)`
@@ -438,5 +441,3 @@
 - `6b2fae4 Sprint 42: Phase 3 networking shims E2E (libHttpClient + XCurl, CTest #41)`
 - `20de58b Merge Sprint 41: Phase 3 audio runtime E2E (40/40 CTests)`
 - `96e1a65 Sprint 41: Phase 3 audio runtime E2E (xaudio2_9 + AcpHal, CTest #40)`
-- `3585cbf Merge Sprint 40: Phase 2B closeout (39/39 CTests)`
-- `840a046 Sprint 40: Phase 2B closeout — cmdlist draw/depth/root-const parity + RDNA2 Compute E2E (CTest #39)`

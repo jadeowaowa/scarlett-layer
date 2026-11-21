@@ -191,3 +191,6 @@
 ## Sprint 45: Phase 3 Closeout — Full Scarlett Title Bring-Up E2E
 - Added CTest #44 (`ScarlettTitleBringUpE2E`) in `src/tests/scarlett_tests/main.cpp` integrating `xgameruntime` (`XUser` + `XGameSave`), `libHttpClient`, `gameinput`, `xaudio2_9`, and `d3d12_xs` into a single end-to-end boot-to-frame-to-save loop (`44 passed, 0 failed`).
 - Marked **Phase 3 (Runtime Bring-Up)** complete at `sprint-45-baseline`.
+
+## Sprint 46: Phase 4 Kickoff — kernelx & pixevt OS/Profiler E2E
+- Added CTest #45 (`KernelXAndPixEvtE2E`) in `src/tests/scarlett_tests/main.cpp` dynamically loading `shims\kernelx.dll` and `shims\pixevt.dll` to validate 13.5 GiB `TitleMemoryStatus`, `VirtualAllocX`/`VirtualFreeX`, `GetConsoleProcessorInfo` (7 cores / 14 SMT threads), `SetThreadAffinityMaskX`, and nested `PIXBeginEvent`/`PIXSetMarker`/`PIXEndEvent` calls (`45 passed, 0 failed`).
