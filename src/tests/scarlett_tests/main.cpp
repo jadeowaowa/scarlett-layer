@@ -2364,6 +2364,74 @@ static size_t TestXCurlWriteCb(char* ptr, size_t size, size_t nmemb, void* userd
     return size * nmemb;
 }
 
+bool TestXAudio2RuntimePlaybackE2E() {
+    CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+
+    HMODULE xaMod = LoadLibraryW(L"shims\\xaudio2_9.dll");
+    if (!xaMod) xaMod = LoadLibraryW(L"xaudio2_9.dll");
+    SC_EXPECT(xaMod != nullptr);
+
+    using PFN_XAudio2Create = HRESULT(WINAPI*)(IXAudio2**, UINT32, XAUDIO2_PROCESSOR);
+    auto pCreate = reinterpret_cast<PFN_XAudio2Create>(GetProcAddress(xaMod, "XAudio2Create"));
+    SC_EXPECT(pCreate != nullptr);
+
+    IXAudio2* xa = nullptr;
+    SC_EXPECT(SUCCEEDED(pCreate(&xa, 0, XAUDIO2_DEFAULT_PROCESSOR)));
+    SC_EXPECT(xa != nullptr);
+
+    IXAudio2MasteringVoice* master = nullptr;
+    HRESULT hr = xa->CreateMasteringVoice(&master);
+    if (SUCCEEDED(hr) && master != nullptr) {
+        WAVEFORMATEX wfx{};
+        wfx.wFormatTag = WAVE_FORMAT_PCM;
+        wfx.nChannels = 1;
+        wfx.nSamplesPerSec = 48000;
+        wfx.wBitsPerSample = 16;
+        wfx.nBlockAlign = 2;
+        wfx.nAvgBytesPerSec = 96000;
+
+        IXAudio2SourceVoice* src = nullptr;
+        SC_EXPECT(SUCCEEDED(xa->CreateSourceVoice(&src, &wfx)));
+        SC_EXPECT(src != nullptr);
+
+        // 10 ms silent/low-amplitude 48 kHz PCM buffer (480 samples)
+        std::vector<int16_t> pcm(480, 0);
+        XAUDIO2_BUFFER buf{};
+        buf.AudioBytes = static_cast<UINT32>(pcm.size() * sizeof(int16_t));
+        buf.pAudioData = reinterpret_cast<const BYTE*>(pcm.data());
+        buf.Flags = XAUDIO2_END_OF_STREAM;
+
+        SC_EXPECT(SUCCEEDED(src->SubmitSourceBuffer(&buf)));
+        XAUDIO2_VOICE_STATE st{};
+        src->GetState(&st);
+        SC_EXPECT(st.BuffersQueued == 1);
+
+        SC_EXPECT(SUCCEEDED(src->Start(0)));
+        SC_EXPECT(SUCCEEDED(src->Stop(0)));
+        SC_EXPECT(SUCCEEDED(src->FlushSourceBuffers()));
+
+        src->DestroyVoice();
+        master->DestroyVoice();
+    }
+    xa->Release();
+    FreeLibrary(xaMod);
+
+    // Verify AcpHal shim lifecycle exports
+    HMODULE acpMod = LoadLibraryW(L"shims\\AcpHal.dll");
+    if (!acpMod) acpMod = LoadLibraryW(L"AcpHal.dll");
+    SC_EXPECT(acpMod != nullptr);
+    using PFN_AcpHalCreate = HRESULT(WINAPI*)(void**);
+    using PFN_AcpHalReleaseCtx = HRESULT(WINAPI*)(void);
+    auto pAcpCreate = reinterpret_cast<PFN_AcpHalCreate>(GetProcAddress(acpMod, "AcpHalCreate"));
+    auto pAcpRel = reinterpret_cast<PFN_AcpHalReleaseCtx>(GetProcAddress(acpMod, "AcpHalReleaseShapeContexts"));
+    SC_EXPECT(pAcpCreate != nullptr && pAcpRel != nullptr);
+    void* acpObj = nullptr;
+    SC_EXPECT(SUCCEEDED(pAcpCreate(&acpObj)) && acpObj != nullptr);
+    SC_EXPECT(SUCCEEDED(pAcpRel()));
+    FreeLibrary(acpMod);
+    return true;
+}
+
 bool TestD3D12XsCmdListComputeDispatchE2E() {
     using Microsoft::WRL::ComPtr;
     using namespace sc::d3d12;
@@ -4280,6 +4348,7 @@ int main() {
     RunTest("D3D12XsCommandListWrapperE2E",      TestD3D12XsCommandListWrapperE2E);
     RunTest("D3D12XsCmdListRenderClearE2E",      TestD3D12XsCmdListRenderClearE2E);
     RunTest("D3D12XsCmdListComputeDispatchE2E",  TestD3D12XsCmdListComputeDispatchE2E);
+    RunTest("XAudio2RuntimePlaybackE2E",         TestXAudio2RuntimePlaybackE2E);
 
     XGameRuntimeUninitialize();
 

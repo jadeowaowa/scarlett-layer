@@ -1,7 +1,7 @@
 # Scarlett Layer â€” AI Context Snapshot
 
-**Commit:** `568000d` (#60) | **Generated:** 2026-11-21 04:17 UTC  
-**Totals:** 61 files (18,090 LOC) | 12 shims | 39 CTest checks
+**Commit:** `3585cbf` (#62) | **Generated:** 2026-11-21 04:30 UTC  
+**Totals:** 61 files (18,159 LOC) | 12 shims | 40 CTest checks
 
 ---
 
@@ -121,7 +121,7 @@
  1651  src/tests/dummy_title/main.cpp
    59  src/tests/engine_plugin/engine_plugin.cpp
     3  src/tests/engine_plugin/engine_plugin.def
- 4288  src/tests/scarlett_tests/main.cpp
+ 4357  src/tests/scarlett_tests/main.cpp
   242  tools/audit_imports.py
   505  tools/build_wiki.py
   108  tools/test_brief.py
@@ -381,7 +381,7 @@
 - `MimgOp`: kMimgImageSample = 0x20u
 - `InstFormat`: Sopp, Vop1, Vop2, Vop3, Exp, Mubuf, Smem, Vintrp, Mimg
 
-## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 39 total)
+## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 40 total)
 ```cpp
     RunTest("VfsPathTranslation",         TestVfsPathTranslation);
     RunTest("RuntimeAndXUser",            TestRuntimeAndXUser);
@@ -422,9 +422,12 @@
     RunTest("D3D12XsCommandListWrapperE2E",      TestD3D12XsCommandListWrapperE2E);
     RunTest("D3D12XsCmdListRenderClearE2E",      TestD3D12XsCmdListRenderClearE2E);
     RunTest("D3D12XsCmdListComputeDispatchE2E",  TestD3D12XsCmdListComputeDispatchE2E);
+    RunTest("XAudio2RuntimePlaybackE2E",         TestXAudio2RuntimePlaybackE2E);
 ```
 
 ## 6. Recent Git History
+- `3585cbf Merge Sprint 40: Phase 2B closeout (39/39 CTests)`
+- `840a046 Sprint 40: Phase 2B closeout — cmdlist draw/depth/root-const parity + RDNA2 Compute E2E (CTest #39)`
 - `568000d Merge Sprint 39: ID3D12GraphicsCommandListX render & descriptor parity`
 - `46ad4db Sprint 39: ID3D12GraphicsCommandListX render/descriptor parity + RTV clear E2E (CTest #38)`
 - `9ece10b Merge Sprint 38: ID3D12GraphicsCommandListX wrapper parity`
@@ -433,5 +436,3 @@
 - `8713ddc Sprint 37: Disk-backed RDNA2-to-DXBC shader cache + CTest #36`
 - `110b00e docs: overhaul README.md with architecture, subsystem matrix, and delivery timeline`
 - `b35f5a9 Merge Sprint 36: RDNA2 compute shader lifter & GPU Dispatch E2E`
-- `81fd6b2 Sprint 36: RDNA2 MUBUF load/store compute lifter + GPU Dispatch E2E (CTest #35)`
-- `2dcbd9d Merge Sprint 35: DStorage GPU buffer streaming & fence E2E`

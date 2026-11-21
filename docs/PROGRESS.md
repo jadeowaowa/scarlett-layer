@@ -174,3 +174,6 @@
 - Added `IASetVertexBuffers`, `IASetIndexBuffer`, `DrawIndexedInstanced`, `ClearDepthStencilView`, `SetGraphicsRoot32BitConstants`, and `SetComputeRoot32BitConstants` to `ID3D12GraphicsCommandListX` / `ScarlettGraphicsCommandListX`.
 - Added CTest #39 (`D3D12XsCmdListComputeDispatchE2E`) executing a lifted binary RDNA2 compute shader end-to-end through `ID3D12DeviceX` + `ID3D12GraphicsCommandListX` + `ID3D12CommandQueueX` (`39 passed, 0 failed`).
 - Added `AGENTS.md` to repo root and marked **Phase 2B** complete.
+
+## Sprint 41: Phase 3 Audio Runtime E2E (xaudio2_9 + AcpHal)
+- Added CTest #40 (`XAudio2RuntimePlaybackE2E`) in `src/tests/scarlett_tests/main.cpp` exercising `shims\xaudio2_9.dll` (`XAudio2Create` -> `CreateMasteringVoice` -> `CreateSourceVoice` -> `SubmitSourceBuffer` -> `GetState` -> `Start`/`Stop`/`FlushSourceBuffers`) and `shims\AcpHal.dll` (`AcpHalCreate` / `AcpHalReleaseShapeContexts`) (`40 passed, 0 failed`).
