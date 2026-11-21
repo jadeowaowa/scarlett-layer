@@ -1,7 +1,7 @@
 # Scarlett Layer â€” AI Context Snapshot
 
-**Commit:** `f8f6eeb` (#105) | **Generated:** 2026-11-21 09:59 UTC  
-**Totals:** 74 files (21,189 LOC) | 12 shims | 0 CTest checks
+**Commit:** `6b866ec` (#107) | **Generated:** 2026-11-21 10:13 UTC  
+**Totals:** 74 files (21,189 LOC) | 12 shims | 57 CTest checks
 
 ---
 
@@ -394,11 +394,70 @@
 - `MimgOp`: kMimgImageSample = 0x20u
 - `InstFormat`: Sopp, Vop1, Vop2, Vop3, Exp, Mubuf, Smem, Vintrp, Mimg
 
-## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 0 total)
+## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 57 total)
 ```cpp
+    {"VfsPathTranslation",                 TestVfsPathTranslation},
+    {"RuntimeAndXUser",                    TestRuntimeAndXUser},
+    {"XGameSaveEdgeCases",                 TestXGameSaveEdgeCases},
+    {"XgXsMultiMipAndNpotSwizzle",         TestXgXsMultiMipAndNpotSwizzle},
+    {"DStorageVfsAndErrorRecord",          TestDStorageVfsAndErrorRecord},
+    {"XAudio2Xma2Rejection",               TestXAudio2Xma2Rejection},
+    {"XMemAlignmentAndInvariants",         TestXMemAlignmentAndInvariants},
+    {"DynamicAndMultiModuleHooks",         TestDynamicAndMultiModuleHooks},
+    {"D3D12HeadlessDeviceAndPso",          TestD3D12HeadlessDeviceAndPso},
+    {"KernelXMemoryAndTopology",           TestKernelXMemoryAndTopology},
+    {"D3D12PlacedResourcesAndHeap",        TestD3D12PlacedResourcesAndHeap},
+    {"DxilSm6BitcodeInspector",            TestDxilSm6BitcodeInspector},
+    {"ScxsTranslatorAndPsoCache",          TestScxsTranslatorAndPsoCache},
+    {"DStorageLzDecompression",            TestDStorageLzDecompression},
+    {"XAudio2ImaAdpcmDecodeBridge",        TestXAudio2ImaAdpcmDecodeBridge},
+    {"D3D12ComputePsoAndUavExecution",     TestD3D12ComputePsoAndUavExecution},
+    {"Rdna2IsaDecoderAndGpuExecution",     TestRdna2IsaDecoderAndGpuExecution},
+    {"D3D12AsyncComputeCrossQueueSync",    TestD3D12AsyncComputeCrossQueueSync},
+    {"Rdna2ComputeIsaExecution",           TestRdna2ComputeIsaExecution},
+    {"Rdna2VertexAndPixelPipelineWithCbv", TestRdna2VertexAndPixelPipelineWithCbv},
+    {"XgXs64KbsAndBcnBlockSwizzle",        TestXgXs64KbsAndBcnBlockSwizzle},
+    {"DStorageGpuBufferStreaming",         TestDStorageGpuBufferStreaming},
+    {"DStorageGpuTextureStreaming",        TestDStorageGpuTextureStreaming},
+    {"DStorageDeviceXBridgeAndMipChain",   TestDStorageDeviceXBridgeAndMipChain},
+    {"RetailBringUpShims",                 TestRetailBringUpShims},
+    {"LoaderInspectAndXvdMount",           TestLoaderInspectAndXvdMount},
+    {"Rdna2ImageSampleShader",             TestRdna2ImageSampleShader},
+    {"PresentXDescriptorAudit",            TestPresentXDescriptorAudit},
+    {"ScarlettXConformanceSuite",          TestScarlettXConformanceSuite},
+    {"GameConfigBootParser",               TestGameConfigBootParser},
+    {"Rdna2TexturedDrawE2E",               TestRdna2TexturedDrawE2E},
+    {"GameInputLivePolling",               TestGameInputLivePolling},
+    {"DynamicLoaderHooks",                 TestDynamicLoaderHooks},
+    {"DStorageGpuBufferAndFenceE2E",       TestDStorageGpuBufferAndFenceE2E},
+    {"Rdna2ComputeDispatchE2E",            TestRdna2ComputeDispatchE2E},
+    {"ShaderDiskCacheE2E",                 TestShaderDiskCacheE2E},
+    {"D3D12XsCommandListWrapperE2E",       TestD3D12XsCommandListWrapperE2E},
+    {"D3D12XsCmdListRenderClearE2E",       TestD3D12XsCmdListRenderClearE2E},
+    {"D3D12XsCmdListComputeDispatchE2E",   TestD3D12XsCmdListComputeDispatchE2E},
+    {"XAudio2RuntimePlaybackE2E",          TestXAudio2RuntimePlaybackE2E},
+    {"NetworkingShimsE2E",                 TestNetworkingShimsE2E},
+    {"XUserAndGameSaveProfileE2E",         TestXUserAndGameSaveProfileE2E},
+    {"GameInputRuntimePollingE2E",         TestGameInputRuntimePollingE2E},
+    {"ScarlettTitleBringUpE2E",            TestScarlettTitleBringUpE2E},
+    {"KernelXAndPixEvtE2E",                TestKernelXAndPixEvtE2E},
+    {"XMemAndXgXsSwizzleE2E",              TestXMemAndXgXsSwizzleE2E},
+    {"DStorageVelocityDynamicE2E",         TestDStorageVelocityDynamicE2E},
+    {"LoaderXvdAndGameConfigE2E",          TestLoaderXvdAndGameConfigE2E},
+    {"ScarlettFullStack50SprintCapstoneE2E", TestScarlettFullStack50SprintCapstoneE2E},
+    {"PeDelayLoadAndOrdinalAuditE2E",      TestPeDelayLoadAndOrdinalAuditE2E},
+    {"RuntimeDelayLoadAndOrdinalHookE2E",  TestRuntimeDelayLoadAndOrdinalHookE2E},
+    {"D3D12Xs3DPerspectiveDepthRenderE2E", TestD3D12Xs3DPerspectiveDepthRenderE2E},
+    {"D3D12XsComVtableAbiConformanceE2E",  TestD3D12XsComVtableAbiConformanceE2E},
+    {"D3D12XsPresentXSwapChainE2E",        TestD3D12XsPresentXSwapChainE2E},
+    {"D3D12XsFramePacingTokensE2E",        TestD3D12XsFramePacingTokensE2E},
+    {"D3D12XsHeadlessPresentXModeE2E",     TestD3D12XsHeadlessPresentXModeE2E},
+    {"D3D12XsAsyncComputeCrossQueueSyncE2E", TestD3D12XsAsyncComputeCrossQueueSyncE2E},
 ```
 
 ## 6. Recent Git History
+- `6b866ec Merge Sprint 62: COM/RAII hygiene & centralized config (57/57 CTests)`
+- `ef51508 Sprint 62: Centralized sc::config, MakeCom RAII factories, and /W4 hygiene`
 - `f8f6eeb Merge Sprint 61: Modularize scarlett_tests suite (57/57 CTests)`
 - `199d672 Sprint 61: Modularize scarlett_tests into subsystem suites + CLI filtering`
 - `d5f5fb0 Merge Sprint 60: Modularize d3d12_xs shim (57/57 CTests)`
@@ -407,5 +466,3 @@
 - `ab98a72 Sprint 59: Zero-warning D3D12 validation + SCARLETT_STRICT_D3D12=1`
 - `be8b006 Merge Sprint 58: Async compute & cross-queue fence sync (57/57 CTests)`
 - `be60a74 Sprint 58: Async compute & cross-queue fence sync E2E + PresentX lifetime hardening (CTest #57)`
-- `f4fcfe1 Merge Sprint 57: Headless PresentX mode (56/56 CTests)`
-- `dffe91f Sprint 57: Headless PresentX mode (SCARLETT_HEADLESS=1) & E2E (CTest #56)`

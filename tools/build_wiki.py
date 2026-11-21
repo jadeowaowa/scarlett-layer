@@ -202,7 +202,7 @@ def parse_ctest_cases(test_cpp: Path) -> List[Tuple[str, str, str]]:
         return []
     cases: List[Tuple[str, str, str]] = []
     for raw_line in read_text(test_cpp).splitlines():
-        m = re.search(r'RunTest\(\s*"([^"]+)"\s*,\s*(\w+)\s*\)\s*;', raw_line)
+        m = re.search(r'(?:RunTest\(\s*|\{\s*)"([^"]+)"\s*,\s*(\w+)\s*(?:\)\s*;|\}\s*,?)', raw_line)
         if m:
             cases.append((m.group(1), m.group(2), raw_line.strip()))
     return cases
