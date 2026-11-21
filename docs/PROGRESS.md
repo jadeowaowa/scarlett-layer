@@ -100,3 +100,9 @@
 - Exposed `IID_ScarlettNativeD3D12Device` in `ScarlettDeviceX::QueryInterface` (`d3d12_xs`) and wired `ScarlettStorageQueueX` (`dstorage_xs`) to unwrap shimmed `ID3D12DeviceX*` devices directly (`gpu=yes(d3d12_xs)`).
 - Added `DSTORAGE_REQUEST_DESTINATION_MULTIPLE_SUBRESOURCES` and `ExecuteMultipleSubresourcesRequest` to stream tightly packed mip chains in a single request using `GetCopyableFootprints` repacking on the `COPY` queue.
 - Added CTest #24 (`DStorageDeviceXBridgeAndMipChain`) verifying 3-mip `SCARLETT_LZ` streaming through `ID3D12DeviceX*`, bit-for-bit `ID3D12CommandQueueX` readback, and `E_INVALIDARG` on out-of-bounds `FirstSubresource` (`24 passed, 0 failed`, zero leaks).
+
+## Sprint 26: Retail Bring-Up Shims (ScarlettX Collab)
+- Updated `gameinput.def` to export `GameInputCreate` at ordinal `@1` for retail GDK import compatibility.
+- Added `AcpHal.dll` (`src/shims/acphal/`) implementing `AcpHalCreate` (`IAcpHal` vtable: `Connect`, `Disconnect`, `SubmitCommand`, `PopMessage` with `0x80` disconnect event), `AcpHalAllocateShapeContexts`/`ReleaseShapeContexts`, and aligned `ApuAlloc`/`ApuFree`.
+- Added `libHttpClient.GDK.dll` (`src/shims/libhttpclient/`) and `XCurl.dll` (`src/shims/xcurl/`) with offline mock routing for retail bring-up without live network dependencies.
+- Added CTest #25 (`RetailBringUpShims`) verifying `gameinput.dll` dynamic hook + ordinal `#1`, `AcpHal` lifecycle/alignment, and `libHttpClient`/`XCurl` mock round-trips (`25 passed, 0 failed`).

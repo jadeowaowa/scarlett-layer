@@ -1,7 +1,7 @@
 # 01 â€” Loader, Runtime IAT Hooking & Common Utilities
 
 ## Source Files
-- `CMakeLists.txt` (155 lines)
+- `CMakeLists.txt` (182 lines)
 - `src/common/codecs.hpp` (343 lines)
 - `src/common/stub.hpp` (43 lines)
 - `src/common/vfs.hpp` (76 lines)
