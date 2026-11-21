@@ -47,6 +47,10 @@ sc_set_runtime_dir(xgameruntime "${SC_BIN_DIR}/shims")
 # Shim #2: d3d12_xs.dll -> build/bin/shims/
 add_library(d3d12_xs SHARED
     src/shims/d3d12_xs/d3d12_xs.cpp
+    src/shims/d3d12_xs/d3d12_xs_utils.cpp
+    src/shims/d3d12_xs/command_queue_x.cpp
+    src/shims/d3d12_xs/command_list_x.cpp
+    src/shims/d3d12_xs/device_x.cpp
     src/shims/d3d12_xs/d3d12_xs.def
 )
 target_link_libraries(d3d12_xs PRIVATE sc_common d3d12 dxgi user32 d3dcompiler)
