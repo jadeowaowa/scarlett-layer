@@ -2371,6 +2371,91 @@ static size_t CurlTestWriteCb(char* ptr, size_t size, size_t nmemb, void* userda
     return total;
 }
 
+bool TestKernelXAndPixEvtE2E() {
+    // 1. kernelx OS shim E2E
+    HMODULE kxMod = LoadLibraryW(L"shims\\kernelx.dll");
+    if (!kxMod) kxMod = LoadLibraryW(L"kernelx.dll");
+    SC_EXPECT(kxMod != nullptr);
+
+    struct LocalTitleMemoryStatus {
+        DWORD    dwLength;
+        DWORD    dwReserved;
+        uint64_t ullTotalMem;
+        uint64_t ullAvailMem;
+        uint64_t ullLegacyUsed;
+        uint64_t ullLegacyPeak;
+        uint64_t ullLegacyAvail;
+        uint64_t ullTitleUsed;
+        uint64_t ullTitlePeak;
+        uint64_t ullTitleAvail;
+    };
+    struct LocalProcessorInfo {
+        uint32_t  TitleCoreCount;
+        uint32_t  TitleLogicalThreadCount;
+        uint32_t  HostLogicalThreadCount;
+        DWORD_PTR HostProcessAffinityMask;
+    };
+
+    auto pTitleMem  = reinterpret_cast<BOOL(WINAPI*)(LocalTitleMemoryStatus*)>(GetProcAddress(kxMod, "TitleMemoryStatus"));
+    auto pVAllocX   = reinterpret_cast<void*(WINAPI*)(void*, size_t, DWORD, DWORD)>(GetProcAddress(kxMod, "VirtualAllocX"));
+    auto pVFreeX    = reinterpret_cast<BOOL(WINAPI*)(void*, size_t, DWORD)>(GetProcAddress(kxMod, "VirtualFreeX"));
+    auto pProcInfo  = reinterpret_cast<BOOL(WINAPI*)(LocalProcessorInfo*)>(GetProcAddress(kxMod, "GetConsoleProcessorInfo"));
+    auto pSetAffX   = reinterpret_cast<DWORD_PTR(WINAPI*)(HANDLE, DWORD_PTR)>(GetProcAddress(kxMod, "SetThreadAffinityMaskX"));
+    SC_EXPECT(pTitleMem && pVAllocX && pVFreeX && pProcInfo && pSetAffX);
+
+    LocalTitleMemoryStatus memBefore{};
+    memBefore.dwLength = sizeof(memBefore);
+    SC_EXPECT(pTitleMem(&memBefore) != FALSE);
+    SC_EXPECT(memBefore.ullTotalMem == 14495514624ULL); // 13.5 GiB Series X budget
+    SC_EXPECT(memBefore.ullAvailMem <= memBefore.ullTotalMem);
+
+    // Allocate 64 KiB with SC_MEM_TITLE_BUDGET (0x08000000)
+    constexpr size_t kAllocSize = 64 * 1024;
+    void* mem = pVAllocX(nullptr, kAllocSize, MEM_COMMIT | MEM_RESERVE | 0x08000000u, PAGE_READWRITE);
+    SC_EXPECT(mem != nullptr);
+    std::memset(mem, 0xA5, kAllocSize);
+    SC_EXPECT(static_cast<uint8_t*>(mem)[0] == 0xA5 && static_cast<uint8_t*>(mem)[kAllocSize - 1] == 0xA5);
+
+    LocalTitleMemoryStatus memDuring{};
+    memDuring.dwLength = sizeof(memDuring);
+    SC_EXPECT(pTitleMem(&memDuring) != FALSE);
+    SC_EXPECT(memDuring.ullTitleUsed >= memBefore.ullTitleUsed);
+
+    SC_EXPECT(pVFreeX(mem, 0, MEM_RELEASE) != FALSE);
+
+    LocalProcessorInfo procInfo{};
+    SC_EXPECT(pProcInfo(&procInfo) != FALSE);
+    SC_EXPECT(procInfo.TitleCoreCount == 7);
+    SC_EXPECT(procInfo.TitleLogicalThreadCount == 14);
+    SC_EXPECT(procInfo.HostLogicalThreadCount >= 1);
+    SC_EXPECT(procInfo.HostProcessAffinityMask != 0);
+
+    const DWORD_PTR prevMask = pSetAffX(GetCurrentThread(), procInfo.HostProcessAffinityMask);
+    SC_EXPECT(prevMask != 0);
+    SC_EXPECT(pSetAffX(GetCurrentThread(), prevMask) != 0);
+
+    FreeLibrary(kxMod);
+
+    // 2. pixevt profiler shim E2E
+    HMODULE pixMod = LoadLibraryW(L"shims\\pixevt.dll");
+    if (!pixMod) pixMod = LoadLibraryW(L"pixevt.dll");
+    SC_EXPECT(pixMod != nullptr);
+
+    auto pBegin  = reinterpret_cast<void(WINAPI*)(uint64_t, const char*)>(GetProcAddress(pixMod, "PIXBeginEvent"));
+    auto pEnd    = reinterpret_cast<void(WINAPI*)(void)>(GetProcAddress(pixMod, "PIXEndEvent"));
+    auto pMarker = reinterpret_cast<void(WINAPI*)(uint64_t, const char*)>(GetProcAddress(pixMod, "PIXSetMarker"));
+    SC_EXPECT(pBegin && pEnd && pMarker);
+
+    pBegin(0xFF00FF00ULL, "Sprint46::Frame");
+    pBegin(0xFF0088FFULL, "Sprint46::ShadowPass");
+    pMarker(0xFFFFAA00ULL, "Sprint46::DispatchSync");
+    pEnd();
+    pEnd();
+
+    FreeLibrary(pixMod);
+    return true;
+}
+
 bool TestScarlettTitleBringUpE2E() {
     using Microsoft::WRL::ComPtr;
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
@@ -4958,6 +5043,7 @@ int main() {
     RunTest("XUserAndGameSaveProfileE2E",        TestXUserAndGameSaveProfileE2E);
     RunTest("GameInputRuntimePollingE2E",        TestGameInputRuntimePollingE2E);
     RunTest("ScarlettTitleBringUpE2E",           TestScarlettTitleBringUpE2E);
+    RunTest("KernelXAndPixEvtE2E",               TestKernelXAndPixEvtE2E);
 
     XGameRuntimeUninitialize();
 
