@@ -187,3 +187,6 @@ add_test(
     NAME scarlett_shim_suite
     COMMAND $<TARGET_FILE:loader> $<TARGET_FILE:scarlett_tests>
 )
+set_tests_properties(scarlett_shim_suite PROPERTIES
+    ENVIRONMENT "SCARLETT_HEADLESS=1"
+)

@@ -2371,6 +2371,113 @@ static size_t CurlTestWriteCb(char* ptr, size_t size, size_t nmemb, void* userda
     return total;
 }
 
+bool TestD3D12XsHeadlessPresentXModeE2E() {
+    using Microsoft::WRL::ComPtr;
+
+    char prevEnv[16]{};
+    const bool hadPrev = GetEnvironmentVariableA("SCARLETT_HEADLESS", prevEnv, sizeof(prevEnv)) > 0;
+    SetEnvironmentVariableA("SCARLETT_HEADLESS", "1");
+
+    D3D12XBOX_CREATE_DEVICE_PARAMETERS devParams{};
+    devParams.Version = 1;
+    ComPtr<ID3D12DeviceX> devX;
+    SC_EXPECT(SUCCEEDED(D3D12XboxCreateDevice(nullptr, &devParams, IID_ID3D12DeviceX,
+        reinterpret_cast<void**>(devX.GetAddressOf()))));
+
+    D3D12_COMMAND_QUEUE_DESC qd{};
+    qd.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+    ComPtr<ID3D12CommandQueueX> queueX;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommandQueueX(&qd, queueX.GetAddressOf())));
+
+    D3D12_HEAP_PROPERTIES defHeap{ D3D12_HEAP_TYPE_DEFAULT };
+    D3D12_RESOURCE_DESC rtDesc{};
+    rtDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    rtDesc.Width = 64; rtDesc.Height = 64; rtDesc.DepthOrArraySize = 1; rtDesc.MipLevels = 1;
+    rtDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM; rtDesc.SampleDesc.Count = 1;
+    rtDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+    ComPtr<ID3D12Resource> rtTex;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommittedResource(&defHeap, D3D12_HEAP_FLAG_NONE, &rtDesc,
+        D3D12_RESOURCE_STATE_PRESENT, nullptr, IID_PPV_ARGS(&rtTex))));
+
+    ID3D12Resource* resArr[] = { rtTex.Get() };
+    D3D12XBOX_PRESENT_PLANE_PARAMETERS plane{};
+    plane.ResourceCount = 1;
+    plane.ppResources   = resArr;
+    D3D12XBOX_PRESENT_PARAMETERS params{};
+
+    for (uint32_t i = 0; i < 5; ++i) {
+        SC_EXPECT(queueX->PresentX(1, &plane, &params) == S_OK);
+    }
+
+    SetEnvironmentVariableA("SCARLETT_HEADLESS", hadPrev ? prevEnv : nullptr);
+    return true;
+}
+
+bool TestD3D12XsFramePacingTokensE2E() {
+    using Microsoft::WRL::ComPtr;
+
+    D3D12XBOX_CREATE_DEVICE_PARAMETERS devParams{};
+    devParams.Version = 1;
+    ComPtr<ID3D12DeviceX> devX;
+    SC_EXPECT(SUCCEEDED(D3D12XboxCreateDevice(nullptr, &devParams, IID_ID3D12DeviceX,
+        reinterpret_cast<void**>(devX.GetAddressOf()))));
+
+    D3D12_COMMAND_QUEUE_DESC qd{};
+    qd.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+    ComPtr<ID3D12CommandQueueX> queueX;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommandQueueX(&qd, queueX.GetAddressOf())));
+
+    // 1. Configure 5 ms (200 Hz) frame interval and verify ScheduleFrameEventX signals
+    SC_EXPECT(SUCCEEDED(devX->SetFrameIntervalX(nullptr, 5000, 1, D3D12XBOX_FRAME_INTERVAL_FLAG_NONE)));
+    HANDLE schedEv = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    SC_EXPECT(schedEv != nullptr);
+    SC_EXPECT(SUCCEEDED(devX->ScheduleFrameEventX(D3D12XBOX_FRAME_EVENT_ORIGIN, 0, schedEv, 0)));
+    SC_EXPECT(WaitForSingleObject(schedEv, 1000) == WAIT_OBJECT_0);
+    CloseHandle(schedEv);
+
+    // 2. Create 64x64 PRESENT render target for token-synced PresentX
+    D3D12_HEAP_PROPERTIES defHeap{ D3D12_HEAP_TYPE_DEFAULT };
+    D3D12_RESOURCE_DESC rtDesc{};
+    rtDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    rtDesc.Width = 64; rtDesc.Height = 64; rtDesc.DepthOrArraySize = 1; rtDesc.MipLevels = 1;
+    rtDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM; rtDesc.SampleDesc.Count = 1;
+    rtDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+    ComPtr<ID3D12Resource> rtTex;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommittedResource(&defHeap, D3D12_HEAP_FLAG_NONE, &rtDesc,
+        D3D12_RESOURCE_STATE_PRESENT, nullptr, IID_PPV_ARGS(&rtTex))));
+
+    ID3D12Resource* resArr[] = { rtTex.Get() };
+    D3D12XBOX_PRESENT_PLANE_PARAMETERS plane{};
+    plane.ResourceCount = 1;
+    plane.ppResources   = resArr;
+    D3D12XBOX_PRESENT_PARAMETERS params{};
+
+    // 3. Run 4 paced frames: verify monotonic tokens + QPC pacing elapsed >= 12 ms
+    LARGE_INTEGER freq{}, tStart{}, tEnd{};
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&tStart);
+
+    D3D12XBOX_FRAME_PIPELINE_TOKEN prevToken = D3D12XBOX_FRAME_PIPELINE_TOKEN_NULL;
+    for (uint32_t i = 0; i < 4; ++i) {
+        D3D12XBOX_FRAME_PIPELINE_TOKEN tok = D3D12XBOX_FRAME_PIPELINE_TOKEN_NULL;
+        SC_EXPECT(SUCCEEDED(devX->WaitFrameEventX(D3D12XBOX_FRAME_EVENT_ORIGIN, 1000, nullptr, &tok)));
+        SC_EXPECT(tok != D3D12XBOX_FRAME_PIPELINE_TOKEN_NULL);
+        if (i > 0) {
+            SC_EXPECT(tok == prevToken + 1);
+        }
+        prevToken = tok;
+
+        plane.Token = tok;
+        SC_EXPECT(queueX->PresentX(1, &plane, &params) == S_OK);
+    }
+
+    QueryPerformanceCounter(&tEnd);
+    const double elapsedMs = static_cast<double>(tEnd.QuadPart - tStart.QuadPart) * 1000.0 /
+                             static_cast<double>(freq.QuadPart);
+    SC_EXPECT(elapsedMs >= 12.0);
+    return true;
+}
+
 bool TestD3D12XsPresentXSwapChainE2E() {
     using Microsoft::WRL::ComPtr;
 
@@ -6268,6 +6375,8 @@ int main() {
     RunTest("D3D12Xs3DPerspectiveDepthRenderE2E", TestD3D12Xs3DPerspectiveDepthRenderE2E);
     RunTest("D3D12XsComVtableAbiConformanceE2E",  TestD3D12XsComVtableAbiConformanceE2E);
     RunTest("D3D12XsPresentXSwapChainE2E",        TestD3D12XsPresentXSwapChainE2E);
+    RunTest("D3D12XsFramePacingTokensE2E",        TestD3D12XsFramePacingTokensE2E);
+    RunTest("D3D12XsHeadlessPresentXModeE2E",     TestD3D12XsHeadlessPresentXModeE2E);
 
     XGameRuntimeUninitialize();
 
