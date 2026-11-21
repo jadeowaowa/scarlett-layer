@@ -169,3 +169,8 @@
 ## Sprint 39: ID3D12GraphicsCommandListX Render & Descriptor Parity E2E
 - Extended `ID3D12GraphicsCommandListX` / `ScarlettGraphicsCommandListX` with `IASetPrimitiveTopology`, `RSSetViewports`, `RSSetScissorRects`, `OMSetRenderTargets`, `ClearRenderTargetView`, `SetDescriptorHeaps`, `SetGraphics/ComputeRootDescriptorTable`, `SetGraphics/ComputeRootConstantBufferView`, and `CopyTextureRegion`.
 - Added CTest #38 (`D3D12XsCmdListRenderClearE2E`) verifying a 4x4 `R8G8B8A8_UNORM` render-target clear and `CopyTextureRegion` GPU readback through `ID3D12GraphicsCommandListX` (`38 passed, 0 failed`).
+
+## Sprint 40: Phase 2B Closeout — ID3D12GraphicsCommandListX Draw/Depth/RootConstant Parity & Compute Dispatch E2E
+- Added `IASetVertexBuffers`, `IASetIndexBuffer`, `DrawIndexedInstanced`, `ClearDepthStencilView`, `SetGraphicsRoot32BitConstants`, and `SetComputeRoot32BitConstants` to `ID3D12GraphicsCommandListX` / `ScarlettGraphicsCommandListX`.
+- Added CTest #39 (`D3D12XsCmdListComputeDispatchE2E`) executing a lifted binary RDNA2 compute shader end-to-end through `ID3D12DeviceX` + `ID3D12GraphicsCommandListX` + `ID3D12CommandQueueX` (`39 passed, 0 failed`).
+- Added `AGENTS.md` to repo root and marked **Phase 2B** complete.

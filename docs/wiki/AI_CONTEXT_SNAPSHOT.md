@@ -1,7 +1,7 @@
 # Scarlett Layer â€” AI Context Snapshot
 
-**Commit:** `9ece10b` (#58) | **Generated:** 2026-11-21 04:09 UTC  
-**Totals:** 61 files (17,912 LOC) | 12 shims | 38 CTest checks
+**Commit:** `568000d` (#60) | **Generated:** 2026-11-21 04:17 UTC  
+**Totals:** 61 files (18,090 LOC) | 12 shims | 39 CTest checks
 
 ---
 
@@ -78,9 +78,9 @@
   105  src/shims/acphal/acphal.cpp
     7  src/shims/acphal/acphal.def
    33  src/shims/acphal/acphal.hpp
- 1288  src/shims/d3d12_xs/d3d12_xs.cpp
+ 1318  src/shims/d3d12_xs/d3d12_xs.cpp
     4  src/shims/d3d12_xs/d3d12_xs.def
-  222  src/shims/d3d12_xs/d3d12_xs.hpp
+  237  src/shims/d3d12_xs/d3d12_xs.hpp
  1191  src/shims/d3d12_xs/rdna2_isa.hpp
   201  src/shims/d3d12_xs/shader_inspector.hpp
   401  src/shims/d3d12_xs/shader_translator.hpp
@@ -121,7 +121,7 @@
  1651  src/tests/dummy_title/main.cpp
    59  src/tests/engine_plugin/engine_plugin.cpp
     3  src/tests/engine_plugin/engine_plugin.def
- 4155  src/tests/scarlett_tests/main.cpp
+ 4288  src/tests/scarlett_tests/main.cpp
   242  tools/audit_imports.py
   505  tools/build_wiki.py
   108  tools/test_brief.py
@@ -142,7 +142,7 @@
 - `HRESULT WINAPI ApuFree(void* virtualAddress)`
 
 ## `d3d12_xs.dll`
-**Files:** `src/shims/d3d12_xs/d3d12_xs.cpp` (1288 L), `src/shims/d3d12_xs/d3d12_xs.def` (4 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (222 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1191 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_translator.hpp` (401 L)
+**Files:** `src/shims/d3d12_xs/d3d12_xs.cpp` (1318 L), `src/shims/d3d12_xs/d3d12_xs.def` (4 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (237 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1191 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_translator.hpp` (401 L)
 
 **DLL Exports (`.def`):** `D3D12XboxCreateDevice`, `D3D12SerializeRootSignature = ScarlettSerializeRootSignature`
 
@@ -180,9 +180,15 @@
 - `[24]` `void SetComputeRootDescriptorTable( UINT RootParameterIndex, D3D12_GPU_DESCRIPTOR_HANDLE BaseDescriptor)`
 - `[25]` `void SetGraphicsRootConstantBufferView( UINT RootParameterIndex, D3D12_GPU_VIRTUAL_ADDRESS BufferLocation)`
 - `[26]` `void SetComputeRootConstantBufferView( UINT RootParameterIndex, D3D12_GPU_VIRTUAL_ADDRESS BufferLocation)`
-- `[27]` `void CopyTextureRegion( const D3D12_TEXTURE_COPY_LOCATION* pDst, UINT DstX, UINT DstY, UINT DstZ, const D3D12_TEXTURE_COPY_LOCATION* pSrc, const D3D12_BOX* pSrcBox)`
-- `[28]` `void InsertWaitOnPresent(UINT64 PresentToken)`
-- `[29]` `ID3D12GraphicsCommandList* GetNativeCommandList()`
+- `[27]` `void IASetVertexBuffers( UINT StartSlot, UINT NumViews, const D3D12_VERTEX_BUFFER_VIEW* pViews)`
+- `[28]` `void IASetIndexBuffer(const D3D12_INDEX_BUFFER_VIEW* pView)`
+- `[29]` `void DrawIndexedInstanced( UINT IndexCountPerInstance, UINT InstanceCount, UINT StartIndexLocation, INT BaseVertexLocation, UINT StartInstanceLocation)`
+- `[30]` `void ClearDepthStencilView( D3D12_CPU_DESCRIPTOR_HANDLE DepthStencilView, D3D12_CLEAR_FLAGS ClearFlags, FLOAT Depth, UINT8 Stencil, UINT NumRects, const D3D12_RECT* pRects)`
+- `[31]` `void SetGraphicsRoot32BitConstants( UINT RootParameterIndex, UINT Num32BitValuesToSet, const void* pSrcData, UINT DestOffsetIn32BitValues)`
+- `[32]` `void SetComputeRoot32BitConstants( UINT RootParameterIndex, UINT Num32BitValuesToSet, const void* pSrcData, UINT DestOffsetIn32BitValues)`
+- `[33]` `void CopyTextureRegion( const D3D12_TEXTURE_COPY_LOCATION* pDst, UINT DstX, UINT DstY, UINT DstZ, const D3D12_TEXTURE_COPY_LOCATION* pSrc, const D3D12_BOX* pSrcBox)`
+- `[34]` `void InsertWaitOnPresent(UINT64 PresentToken)`
+- `[35]` `ID3D12GraphicsCommandList* GetNativeCommandList()`
 
 **COM Interface `ID3D12DeviceX : IUnknown`:**
 - `[03]` `HRESULT CreateCommandQueueX( const D3D12_COMMAND_QUEUE_DESC* pDesc, ID3D12CommandQueueX** ppCommandQueue)`
@@ -375,7 +381,7 @@
 - `MimgOp`: kMimgImageSample = 0x20u
 - `InstFormat`: Sopp, Vop1, Vop2, Vop3, Exp, Mubuf, Smem, Vintrp, Mimg
 
-## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 38 total)
+## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 39 total)
 ```cpp
     RunTest("VfsPathTranslation",         TestVfsPathTranslation);
     RunTest("RuntimeAndXUser",            TestRuntimeAndXUser);
@@ -415,9 +421,12 @@
     RunTest("ShaderDiskCacheE2E",                TestShaderDiskCacheE2E);
     RunTest("D3D12XsCommandListWrapperE2E",      TestD3D12XsCommandListWrapperE2E);
     RunTest("D3D12XsCmdListRenderClearE2E",      TestD3D12XsCmdListRenderClearE2E);
+    RunTest("D3D12XsCmdListComputeDispatchE2E",  TestD3D12XsCmdListComputeDispatchE2E);
 ```
 
 ## 6. Recent Git History
+- `568000d Merge Sprint 39: ID3D12GraphicsCommandListX render & descriptor parity`
+- `46ad4db Sprint 39: ID3D12GraphicsCommandListX render/descriptor parity + RTV clear E2E (CTest #38)`
 - `9ece10b Merge Sprint 38: ID3D12GraphicsCommandListX wrapper parity`
 - `6e997d4 Sprint 38: ID3D12GraphicsCommandListX wrapper parity + GPU E2E (CTest #37)`
 - `94dddef Merge Sprint 37: Disk-backed RDNA2-to-DXBC shader cache`
@@ -426,5 +435,3 @@
 - `b35f5a9 Merge Sprint 36: RDNA2 compute shader lifter & GPU Dispatch E2E`
 - `81fd6b2 Sprint 36: RDNA2 MUBUF load/store compute lifter + GPU Dispatch E2E (CTest #35)`
 - `2dcbd9d Merge Sprint 35: DStorage GPU buffer streaming & fence E2E`
-- `53a16f5 Sprint 35: DStorage GPU buffer streaming + fence E2E test (CTest #34)`
-- `9896241 Merge Sprint 34: dynamic GetModuleHandle* redirects`

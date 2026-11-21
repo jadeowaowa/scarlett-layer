@@ -112,6 +112,21 @@ struct ID3D12GraphicsCommandListX : public IUnknown {
         UINT RootParameterIndex, D3D12_GPU_VIRTUAL_ADDRESS BufferLocation) = 0;
     virtual void STDMETHODCALLTYPE SetComputeRootConstantBufferView(
         UINT RootParameterIndex, D3D12_GPU_VIRTUAL_ADDRESS BufferLocation) = 0;
+    virtual void STDMETHODCALLTYPE IASetVertexBuffers(
+        UINT StartSlot, UINT NumViews, const D3D12_VERTEX_BUFFER_VIEW* pViews) = 0;
+    virtual void STDMETHODCALLTYPE IASetIndexBuffer(const D3D12_INDEX_BUFFER_VIEW* pView) = 0;
+    virtual void STDMETHODCALLTYPE DrawIndexedInstanced(
+        UINT IndexCountPerInstance, UINT InstanceCount,
+        UINT StartIndexLocation, INT BaseVertexLocation, UINT StartInstanceLocation) = 0;
+    virtual void STDMETHODCALLTYPE ClearDepthStencilView(
+        D3D12_CPU_DESCRIPTOR_HANDLE DepthStencilView, D3D12_CLEAR_FLAGS ClearFlags,
+        FLOAT Depth, UINT8 Stencil, UINT NumRects, const D3D12_RECT* pRects) = 0;
+    virtual void STDMETHODCALLTYPE SetGraphicsRoot32BitConstants(
+        UINT RootParameterIndex, UINT Num32BitValuesToSet,
+        const void* pSrcData, UINT DestOffsetIn32BitValues) = 0;
+    virtual void STDMETHODCALLTYPE SetComputeRoot32BitConstants(
+        UINT RootParameterIndex, UINT Num32BitValuesToSet,
+        const void* pSrcData, UINT DestOffsetIn32BitValues) = 0;
     virtual void STDMETHODCALLTYPE CopyTextureRegion(
         const D3D12_TEXTURE_COPY_LOCATION* pDst, UINT DstX, UINT DstY, UINT DstZ,
         const D3D12_TEXTURE_COPY_LOCATION* pSrc, const D3D12_BOX* pSrcBox) = 0;
