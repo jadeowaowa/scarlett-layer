@@ -2371,6 +2371,83 @@ static size_t CurlTestWriteCb(char* ptr, size_t size, size_t nmemb, void* userda
     return total;
 }
 
+bool TestLoaderXvdAndGameConfigE2E() {
+    const auto tmpDir = std::filesystem::temp_directory_path() / "scarlett_sprint49_xvd_pkg";
+    std::error_code ec;
+    std::filesystem::remove_all(tmpDir, ec);
+    std::filesystem::create_directories(tmpDir, ec);
+
+    const std::string xmlManifest =
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+        "<Game configVersion=\"1\">\n"
+        "  <Identity Name=\"ScarlettPackageE2E\" Publisher=\"CN=Scarlett\" Version=\"4.9.0.0\" />\n"
+        "  <TitleId>778899AA</TitleId>\n"
+        "  <ShellVisuals DefaultDisplayName=\"Scarlett E2E Title\" />\n"
+        "  <ExecutableList>\n"
+        "    <Executable Name=\"ScarlettDemo.exe\" Id=\"Game\" />\n"
+        "  </ExecutableList>\n"
+        "</Game>\n";
+
+    std::vector<uint8_t> payload(xmlManifest.begin(), xmlManifest.end());
+
+    // 1. Verify encrypted XVD rejection
+    const auto encImg = sc::vfs::XvdContainer::BuildSyntheticUnencryptedXvd(
+        payload, 1u, sc::vfs::kXvdFlagEncrypted);
+    const auto encPath = tmpDir / "encrypted_reject.xvd";
+    {
+        std::ofstream ofs(encPath, std::ios::binary);
+        ofs.write(reinterpret_cast<const char*>(encImg.data()), static_cast<std::streamsize>(encImg.size()));
+    }
+    {
+        sc::vfs::XvdContainer encXvd;
+        std::string encErr;
+        SC_EXPECT(!encXvd.Open(encPath, encErr));
+    }
+
+    // 2. Build & open unencrypted XVD, extract embedded MicrosoftGame.Config
+    const auto rawImg = sc::vfs::XvdContainer::BuildSyntheticUnencryptedXvd(payload, 1u, 0u);
+    const auto xvdPath = tmpDir / "title_pkg.xvd";
+    {
+        std::ofstream ofs(xvdPath, std::ios::binary);
+        ofs.write(reinterpret_cast<const char*>(rawImg.data()), static_cast<std::streamsize>(rawImg.size()));
+    }
+
+    sc::vfs::XvdContainer xvd;
+    std::string err;
+    SC_EXPECT(xvd.Open(xvdPath, err));
+    SC_EXPECT(!xvd.Header().IsEncrypted());
+
+    std::vector<uint8_t> extracted;
+    SC_EXPECT(xvd.ReadUserData(0, payload.size(), extracted, err));
+    SC_EXPECT(extracted.size() == payload.size());
+    SC_EXPECT(std::memcmp(extracted.data(), payload.data(), payload.size()) == 0);
+
+    // 3. Stage extracted manifest + target executable and parse via ParseGameConfig
+    const auto pkgRoot = tmpDir / "mounted_pkg";
+    std::filesystem::create_directories(pkgRoot, ec);
+    {
+        std::ofstream ofs(pkgRoot / "MicrosoftGame.Config", std::ios::binary);
+        ofs.write(reinterpret_cast<const char*>(extracted.data()), static_cast<std::streamsize>(extracted.size()));
+    }
+    {
+        std::ofstream ofs(pkgRoot / "ScarlettDemo.exe", std::ios::binary);
+        ofs << "MZ";
+    }
+
+    const auto cfg = sc::loader::ParseGameConfig(pkgRoot);
+    SC_EXPECT(cfg.valid);
+    SC_EXPECT(cfg.identityName == "ScarlettPackageE2E");
+    SC_EXPECT(cfg.version == "4.9.0.0");
+    SC_EXPECT(cfg.titleId == "778899AA");
+    SC_EXPECT(cfg.displayName == "Scarlett E2E Title");
+    SC_EXPECT(cfg.executableName == "ScarlettDemo.exe");
+    SC_EXPECT(cfg.executableId == "Game");
+    SC_EXPECT(std::filesystem::exists(cfg.executablePath));
+
+    std::filesystem::remove_all(tmpDir, ec);
+    return true;
+}
+
 bool TestDStorageVelocityDynamicE2E() {
     HMODULE dsMod = LoadLibraryW(L"shims\\dstorage_xs.dll");
     if (!dsMod) dsMod = LoadLibraryW(L"dstorage_xs.dll");
@@ -5261,6 +5338,7 @@ int main() {
     RunTest("KernelXAndPixEvtE2E",               TestKernelXAndPixEvtE2E);
     RunTest("XMemAndXgXsSwizzleE2E",             TestXMemAndXgXsSwizzleE2E);
     RunTest("DStorageVelocityDynamicE2E",        TestDStorageVelocityDynamicE2E);
+    RunTest("LoaderXvdAndGameConfigE2E",         TestLoaderXvdAndGameConfigE2E);
 
     XGameRuntimeUninitialize();
 
