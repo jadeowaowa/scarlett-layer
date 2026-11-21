@@ -112,7 +112,7 @@ The test runner is split into five suites: `tests_d3d12_core`, `tests_d3d12_shad
 
 All source code in this repository was generated with Gemini, working through an agent workflow (see [`AGENTS.md`](AGENTS.md)), and directed and reviewed by the repository owner. Treat it accordingly: the test suite is the main safeguard, so run it, and read the code before relying on it for anything important.
 
-`[TODO: if true, add one sentence on what you made, reviewed or verified yourself]`
+
 
 ## Legal
 
