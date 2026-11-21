@@ -1489,3 +1489,36 @@ bool TestXMemAndXgXsSwizzleE2E() {
     FreeLibrary(xmemMod);
     return true;
 }
+
+bool TestXMemMin16ByteAlignment() {
+    // Request sub-16B alignments (code=1 -> 4B, code=2 -> 8B) and default (code=0):
+    // Xbox Series X|S / SlimEra ABI mandates >= 16-byte alignment from XMemAllocDefault.
+    const uint32_t attr4B   = (1u << 8) | (1u << 14); // 4B code + zero-init
+    const uint32_t attr8B   = (2u << 8) | (1u << 14); // 8B code + zero-init
+    const uint32_t attrDef  = (0u << 8) | (1u << 14); // default + zero-init
+    const uint32_t attr256B = (7u << 8);              // 256B code
+
+    void* p4   = XMemAllocDefault(24, attr4B);
+    void* p8   = XMemAllocDefault(37, attr8B);
+    void* pDef = XMemAllocDefault(19, attrDef);
+    void* p256 = XMemAllocDefault(512, attr256B);
+
+    SC_EXPECT(p4 != nullptr && p8 != nullptr && pDef != nullptr && p256 != nullptr);
+    SC_EXPECT((reinterpret_cast<uintptr_t>(p4)   % 16u) == 0u);
+    SC_EXPECT((reinterpret_cast<uintptr_t>(p8)   % 16u) == 0u);
+    SC_EXPECT((reinterpret_cast<uintptr_t>(pDef) % 16u) == 0u);
+    SC_EXPECT((reinterpret_cast<uintptr_t>(p256) % 256u) == 0u);
+    SC_EXPECT(XMemSizeDefault(p4, attr4B) == 24u);
+    SC_EXPECT(XMemSizeDefault(p8, attr8B) == 37u);
+
+    const auto* bytes8 = static_cast<const uint8_t*>(p8);
+    for (size_t i = 0; i < 37; ++i) {
+        SC_EXPECT(bytes8[i] == 0u);
+    }
+
+    XMemFreeDefault(p256, attr256B);
+    XMemFreeDefault(pDef, attrDef);
+    XMemFreeDefault(p8, attr8B);
+    XMemFreeDefault(p4, attr4B);
+    return true;
+}

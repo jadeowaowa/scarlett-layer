@@ -254,3 +254,9 @@
 - Added `src/common/config.hpp` (`sc::config::IsHeadless`, `IsStrictD3D12`, `GetShimDir`, `ResolveDataDir`) to replace duplicated `GetEnvironmentVariable*` blocks and fixed `MAX_PATH` buffers across `d3d12_xs`, `xgameruntime`, and `scarlett_hook`.
 - Added `sc::d3d12xs::MakeCom<Interface, Impl>()` in `d3d12_xs_internal.hpp` and migrated `CreateScarlettDeviceX`, `CreateScarlettCommandQueueX`, and `CreateScarlettGraphicsCommandListX` to return `Microsoft::WRL::ComPtr<T>`, eliminating all raw `new` and manual `->Release()` calls across `d3d12_xs` translation units.
 - Verified clean `/W4 /permissive-` build with zero compiler warnings and `57 passed, 0 failed` with zero `d3d12_debug` output under `SCARLETT_STRICT_D3D12=1`.
+
+## Sprint 63: PE64 Implicit TLS, Isolated Guest `atexit` & `XMem` 16-Byte Alignment
+- Hardened `XMemAllocDefault` (`src/shims/xmem/xmem.cpp`) to enforce a 16-byte minimum alignment floor even for sub-16B alignment codes (matching Xbox Series X|S / `SlimEra` ABI invariants).
+- Extended `sc::loader::InspectPeImports` (`src/loader/pe_inspector.hpp`) to parse `IMAGE_DIRECTORY_ENTRY_TLS` (`IMAGE_TLS_DIRECTORY64`) raw template size, zero-fill size, characteristics, and callback table counts.
+- Added runtime implicit TLS initialization/teardown (`ScarlettHookInspectModuleTls`, `ScarlettHookInitImplicitTls`, `ScarlettHookFreeImplicitTls`) and an isolated LIFO guest `atexit` registry (`ScarlettHookRegisterGuestAtExit`, `ScarlettHookRunGuestAtExit`, auto-drained on `DLL_PROCESS_DETACH`) to `src/loader/scarlett_hook.cpp`.
+- Added `XMemMin16ByteAlignment` and `Pe64ImplicitTlsAndGuestAtExitE2E` (`59 passed, 0 failed`, zero `/W4` warnings, zero `d3d12_debug` output under `SCARLETT_STRICT_D3D12=1`).

@@ -1,7 +1,7 @@
 # Scarlett Layer â€” AI Context Snapshot
 
-**Commit:** `6b866ec` (#107) | **Generated:** 2026-11-21 10:13 UTC  
-**Totals:** 74 files (21,189 LOC) | 12 shims | 57 CTest checks
+**Commit:** `56bfe0e` (#109) | **Generated:** 2026-11-21 15:01 UTC  
+**Totals:** 74 files (21,576 LOC) | 12 shims | 59 CTest checks
 
 ---
 
@@ -72,10 +72,10 @@
   161  src/common/xvd_container.hpp
   172  src/loader/game_config.hpp
   196  src/loader/main.cpp
-  208  src/loader/pe_inspector.hpp
+  248  src/loader/pe_inspector.hpp
   396  src/loader/pe_patcher.cpp
    19  src/loader/pe_patcher.hpp
-  510  src/loader/scarlett_hook.cpp
+  663  src/loader/scarlett_hook.cpp
   105  src/shims/acphal/acphal.cpp
     7  src/shims/acphal/acphal.def
    33  src/shims/acphal/acphal.hpp
@@ -121,20 +121,20 @@
    13  src/shims/xgameruntime/task_queue.hpp
   173  src/shims/xgameruntime/xgameruntime.cpp
    29  src/shims/xgameruntime/xgameruntime.def
-  277  src/shims/xmem/xmem.cpp
+  279  src/shims/xmem/xmem.cpp
     8  src/shims/xmem/xmem.def
    62  src/shims/xmem/xmem.hpp
  1651  src/tests/dummy_title/main.cpp
    59  src/tests/engine_plugin/engine_plugin.cpp
     3  src/tests/engine_plugin/engine_plugin.def
   328  src/tests/scarlett_3d_demo/main.cpp
-  136  src/tests/scarlett_tests/main.cpp
-  166  src/tests/scarlett_tests/test_harness.hpp
+  138  src/tests/scarlett_tests/main.cpp
+  168  src/tests/scarlett_tests/test_harness.hpp
  1312  src/tests/scarlett_tests/tests_d3d12_core.cpp
  1658  src/tests/scarlett_tests/tests_d3d12_shaders_present.cpp
- 1024  src/tests/scarlett_tests/tests_loader_e2e.cpp
+ 1179  src/tests/scarlett_tests/tests_loader_e2e.cpp
   876  src/tests/scarlett_tests/tests_runtime_io.cpp
- 1491  src/tests/scarlett_tests/tests_storage_swizzle.cpp
+ 1524  src/tests/scarlett_tests/tests_storage_swizzle.cpp
   242  tools/audit_imports.py
   505  tools/build_wiki.py
   108  tools/test_brief.py
@@ -370,7 +370,7 @@
 **DLL Exports (`.def`):** `XGameRuntimeInitialize`, `XGameRuntimeUninitialize`, `XSystemGetDeviceType`, `XTaskQueueCreate`, `XTaskQueueDispatch`, `XTaskQueueCloseHandle`, `XAsyncGetStatus`, `XUserAddAsync`, `XUserAddResult`, `XUserGetGamertag`, `XUserGetId`, `XUserGetState`, `XUserGetLocalId`, `XUserCloseHandle`, `XGameSaveInitializeProviderAsync`, `XGameSaveInitializeProviderResult`, `XGameSaveCloseProvider`, `XGameSaveCreateContainer`, `XGameSaveCloseContainer`, `XGameSaveCreateUpdate`, `XGameSaveCloseUpdate`, `XGameSaveSubmitBlobWrite`, `XGameSaveSubmitBlobDelete`, `XGameSaveSubmitUpdateAsync`, `XGameSaveSubmitUpdateResult`, `XGameSaveReadBlobDataAsync`, `XGameSaveReadBlobDataResult`
 
 ## `xmem.dll`
-**Files:** `src/shims/xmem/xmem.cpp` (277 L), `src/shims/xmem/xmem.def` (8 L), `src/shims/xmem/xmem.hpp` (62 L)
+**Files:** `src/shims/xmem/xmem.cpp` (279 L), `src/shims/xmem/xmem.def` (8 L), `src/shims/xmem/xmem.hpp` (62 L)
 
 **DLL Exports (`.def`):** `XMemAlloc`, `XMemFree`, `XMemSize`, `XMemAllocDefault`, `XMemFreeDefault`, `XMemSizeDefault`
 
@@ -394,7 +394,7 @@
 - `MimgOp`: kMimgImageSample = 0x20u
 - `InstFormat`: Sopp, Vop1, Vop2, Vop3, Exp, Mubuf, Smem, Vintrp, Mimg
 
-## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 57 total)
+## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 59 total)
 ```cpp
     {"VfsPathTranslation",                 TestVfsPathTranslation},
     {"RuntimeAndXUser",                    TestRuntimeAndXUser},
@@ -453,9 +453,13 @@
     {"D3D12XsFramePacingTokensE2E",        TestD3D12XsFramePacingTokensE2E},
     {"D3D12XsHeadlessPresentXModeE2E",     TestD3D12XsHeadlessPresentXModeE2E},
     {"D3D12XsAsyncComputeCrossQueueSyncE2E", TestD3D12XsAsyncComputeCrossQueueSyncE2E},
+    {"XMemMin16ByteAlignment",             TestXMemMin16ByteAlignment},
+    {"Pe64ImplicitTlsAndGuestAtExitE2E",   TestPe64ImplicitTlsAndGuestAtExitE2E},
 ```
 
 ## 6. Recent Git History
+- `56bfe0e Merge docs refresh: Sprint 62 README, Sprints 63-72 roadmap, wiki test parser`
+- `ed5696e Docs: Add 10-sprint roadmap (Sprints 63-72), refresh README for sprint-62-baseline, fix build_wiki kTests parser`
 - `6b866ec Merge Sprint 62: COM/RAII hygiene & centralized config (57/57 CTests)`
 - `ef51508 Sprint 62: Centralized sc::config, MakeCom RAII factories, and /W4 hygiene`
 - `f8f6eeb Merge Sprint 61: Modularize scarlett_tests suite (57/57 CTests)`
@@ -464,5 +468,3 @@
 - `6e5f1ef Sprint 60: Decompose d3d12_xs.cpp monolith into modular translation units`
 - `b037f35 Merge Sprint 59: Zero-warning D3D12 validation (57/57 CTests)`
 - `ab98a72 Sprint 59: Zero-warning D3D12 validation + SCARLETT_STRICT_D3D12=1`
-- `be8b006 Merge Sprint 58: Async compute & cross-queue fence sync (57/57 CTests)`
-- `be60a74 Sprint 58: Async compute & cross-queue fence sync E2E + PresentX lifetime hardening (CTest #57)`

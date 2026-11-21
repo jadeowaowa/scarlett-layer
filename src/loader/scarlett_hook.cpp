@@ -1,7 +1,9 @@
 #include "common/config.hpp"
 #include "common/stub.hpp"
 
+#include <atomic>
 #include <cctype>
+#include <cstdlib>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -467,6 +469,8 @@ uint32_t HookAllLoadedTitleModules(HMODULE k32) {
 
 } // namespace
 
+extern "C" __declspec(dllexport) uint32_t WINAPI ScarlettHookRunGuestAtExit();
+
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID) {
     if (reason == DLL_PROCESS_ATTACH) {
         g_selfModule = hModule;
@@ -494,9 +498,58 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID) {
                       "-> armed %u multi-module LoadLibrary IAT hook(s) across %zu discovered shim(s)",
                       patched, g_shimsWide.size());
         sc::log::Write(sc::log::Level::Info, "scarlett_hook", "DllMain", buf);
+    } else if (reason == DLL_PROCESS_DETACH) {
+        const uint32_t drained = ScarlettHookRunGuestAtExit();
+        if (drained > 0) {
+            char buf[96];
+            std::snprintf(buf, sizeof(buf), "-> drained %u isolated guest atexit handler(s)", drained);
+            sc::log::Write(sc::log::Level::Info, "scarlett_hook", "DllMain[Detach]", buf);
+        }
     }
     return TRUE;
 }
+
+namespace {
+
+std::mutex g_guestAtExitMtx;
+std::vector<void(__cdecl*)()> g_guestAtExitHandlers;
+
+bool InspectLoadedModuleTlsImpl(
+    HMODULE mod,
+    uint32_t* outRawSize,
+    uint32_t* outZeroFill,
+    uint32_t* outCallbackCount) {
+    if (!mod) return false;
+    const auto* base = reinterpret_cast<const uint8_t*>(mod);
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) return false;
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(base + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE ||
+        nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
+        return false;
+    }
+    const auto& dir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_TLS];
+    if (dir.VirtualAddress == 0 || dir.Size == 0) {
+        return false;
+    }
+    const auto* tls = reinterpret_cast<const IMAGE_TLS_DIRECTORY64*>(base + dir.VirtualAddress);
+    const uint32_t rawSize = (tls->EndAddressOfRawData >= tls->StartAddressOfRawData)
+        ? static_cast<uint32_t>(tls->EndAddressOfRawData - tls->StartAddressOfRawData)
+        : 0u;
+    uint32_t cbCount = 0;
+    if (tls->AddressOfCallBacks != 0) {
+        const auto* cbs = reinterpret_cast<const PIMAGE_TLS_CALLBACK*>(tls->AddressOfCallBacks);
+        while (cbCount < 256 && cbs[cbCount] != nullptr) {
+            ++cbCount;
+        }
+    }
+    if (outRawSize)       *outRawSize       = rawSize;
+    if (outZeroFill)      *outZeroFill      = tls->SizeOfZeroFill;
+    if (outCallbackCount) *outCallbackCount = cbCount;
+    return true;
+}
+
+} // namespace
 
 extern "C" __declspec(dllexport) uint32_t WINAPI ScarlettHookPatchModuleForTest(HMODULE mod) {
     return PatchModuleIat(mod);
@@ -507,4 +560,104 @@ extern "C" __declspec(dllexport) void WINAPI ScarlettHookGetRuntimeStats(
     uint32_t* outOrdinalLookups) {
     if (outDelayPatched)   *outDelayPatched   = static_cast<uint32_t>(g_delayPatchedCount);
     if (outOrdinalLookups) *outOrdinalLookups = static_cast<uint32_t>(g_ordinalLookupCount);
+}
+
+extern "C" __declspec(dllexport) int WINAPI ScarlettHookRegisterGuestAtExit(void(__cdecl* fn)()) {
+    if (!fn) return -1;
+    std::lock_guard<std::mutex> lock(g_guestAtExitMtx);
+    g_guestAtExitHandlers.push_back(fn);
+    return 0;
+}
+
+extern "C" __declspec(dllexport) uint32_t WINAPI ScarlettHookRunGuestAtExit() {
+    std::vector<void(__cdecl*)()> pending;
+    {
+        std::lock_guard<std::mutex> lock(g_guestAtExitMtx);
+        pending.swap(g_guestAtExitHandlers);
+    }
+    for (auto it = pending.rbegin(); it != pending.rend(); ++it) {
+        if (*it) {
+            (*it)();
+        }
+    }
+    return static_cast<uint32_t>(pending.size());
+}
+
+extern "C" __declspec(dllexport) BOOL WINAPI ScarlettHookInspectModuleTls(
+    HMODULE mod,
+    uint32_t* outRawSize,
+    uint32_t* outZeroFill,
+    uint32_t* outCallbackCount) {
+    return InspectLoadedModuleTlsImpl(mod, outRawSize, outZeroFill, outCallbackCount) ? TRUE : FALSE;
+}
+
+extern "C" __declspec(dllexport) BOOL WINAPI ScarlettHookInitImplicitTls(
+    const IMAGE_TLS_DIRECTORY64* tlsDir,
+    HMODULE moduleHandle,
+    void** outTlsBlock,
+    uint32_t* outTlsIndex,
+    uint32_t* outCallbacksRun) {
+    if (!tlsDir || !outTlsBlock || !outTlsIndex) return FALSE;
+    *outTlsBlock = nullptr;
+    *outTlsIndex = TLS_OUT_OF_INDEXES;
+    if (outCallbacksRun) *outCallbacksRun = 0;
+
+    if (tlsDir->EndAddressOfRawData < tlsDir->StartAddressOfRawData) return FALSE;
+    const size_t rawSize = static_cast<size_t>(tlsDir->EndAddressOfRawData - tlsDir->StartAddressOfRawData);
+    const size_t zeroSize = tlsDir->SizeOfZeroFill;
+    const size_t totalSize = (rawSize + zeroSize) > 0 ? (rawSize + zeroSize) : 16;
+
+    const DWORD slot = TlsAlloc();
+    if (slot == TLS_OUT_OF_INDEXES) return FALSE;
+
+    void* block = std::calloc(1, totalSize);
+    if (!block) {
+        TlsFree(slot);
+        return FALSE;
+    }
+    if (rawSize > 0 && tlsDir->StartAddressOfRawData != 0) {
+        std::memcpy(block, reinterpret_cast<const void*>(tlsDir->StartAddressOfRawData), rawSize);
+    }
+    if (!TlsSetValue(slot, block)) {
+        std::free(block);
+        TlsFree(slot);
+        return FALSE;
+    }
+    if (tlsDir->AddressOfIndex != 0) {
+        *reinterpret_cast<uint32_t*>(tlsDir->AddressOfIndex) = slot;
+    }
+
+    uint32_t ran = 0;
+    if (tlsDir->AddressOfCallBacks != 0) {
+        const auto* cbs = reinterpret_cast<const PIMAGE_TLS_CALLBACK*>(tlsDir->AddressOfCallBacks);
+        while (ran < 256 && cbs[ran] != nullptr) {
+            cbs[ran](moduleHandle, DLL_PROCESS_ATTACH, nullptr);
+            ++ran;
+        }
+    }
+
+    *outTlsBlock = block;
+    *outTlsIndex = slot;
+    if (outCallbacksRun) *outCallbacksRun = ran;
+    return TRUE;
+}
+
+extern "C" __declspec(dllexport) void WINAPI ScarlettHookFreeImplicitTls(
+    const IMAGE_TLS_DIRECTORY64* tlsDir,
+    HMODULE moduleHandle,
+    void* tlsBlock,
+    uint32_t tlsIndex) {
+    if (tlsDir && tlsDir->AddressOfCallBacks != 0) {
+        const auto* cbs = reinterpret_cast<const PIMAGE_TLS_CALLBACK*>(tlsDir->AddressOfCallBacks);
+        for (uint32_t i = 0; i < 256 && cbs[i] != nullptr; ++i) {
+            cbs[i](moduleHandle, DLL_PROCESS_DETACH, nullptr);
+        }
+    }
+    if (tlsIndex != TLS_OUT_OF_INDEXES) {
+        TlsSetValue(tlsIndex, nullptr);
+        TlsFree(tlsIndex);
+    }
+    if (tlsBlock) {
+        std::free(tlsBlock);
+    }
 }
