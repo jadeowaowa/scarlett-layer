@@ -1,4 +1,5 @@
 #include "d3d12_xs_internal.hpp"
+#include "common/stub.hpp"
 
 #include <atomic>
 
@@ -152,6 +153,20 @@ public:
     }
     ID3D12GraphicsCommandList* STDMETHODCALLTYPE GetNativeCommandList() override {
         return m_cmdList.Get();
+    }
+    void STDMETHODCALLTYPE Barrier(
+        UINT32 NumBarrierGroups,
+        const D3D12_BARRIER_GROUP* pBarrierGroups) override {
+        if (!m_cmdList || NumBarrierGroups == 0 || !pBarrierGroups) {
+            return;
+        }
+        Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7> cl7;
+        if (SUCCEEDED(m_cmdList.As(&cl7)) && cl7) {
+            cl7->Barrier(NumBarrierGroups, pBarrierGroups);
+        } else {
+            sc::log::Write(sc::log::Level::Warn, "d3d12_xs", "Barrier",
+                           "-> ID3D12GraphicsCommandList7 unavailable; Enhanced Barrier ignored");
+        }
     }
 
 private:

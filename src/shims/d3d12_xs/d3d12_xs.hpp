@@ -132,6 +132,9 @@ struct ID3D12GraphicsCommandListX : public IUnknown {
         const D3D12_TEXTURE_COPY_LOCATION* pSrc, const D3D12_BOX* pSrcBox) = 0;
     virtual void STDMETHODCALLTYPE InsertWaitOnPresent(UINT64 PresentToken) = 0;
     virtual ID3D12GraphicsCommandList* STDMETHODCALLTYPE GetNativeCommandList() = 0;
+    virtual void STDMETHODCALLTYPE Barrier(
+        UINT32 NumBarrierGroups,
+        const D3D12_BARRIER_GROUP* pBarrierGroups) = 0;
 };
 
 struct ID3D12DeviceX : public IUnknown {
@@ -226,6 +229,10 @@ struct ID3D12DeviceX : public IUnknown {
         DWORD TimeoutInMilliseconds,
         HANDLE hEvent,
         D3D12XBOX_FRAME_PIPELINE_TOKEN* pToken) = 0;
+    virtual HRESULT STDMETHODCALLTYPE CheckFeatureSupport(
+        D3D12_FEATURE Feature,
+        void* pFeatureSupportData,
+        UINT FeatureSupportDataSize) = 0;
 };
 
 extern "C" {

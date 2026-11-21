@@ -1,4 +1,5 @@
 #include "test_harness.hpp"
+#include "../../shims/d3d12_xs/shader_stripper.hpp"
 
 using Microsoft::WRL::ComPtr;
 
@@ -1654,5 +1655,216 @@ bool TestPresentXDescriptorAudit() {
     rtvHeap->Release();
     queue->Release();
     dev->Release();
+    return true;
+}
+
+namespace {
+
+std::vector<uint8_t> AppendSyntheticXboxChunks(
+    const void* cleanDxbc,
+    size_t cleanSize,
+    const char* fourcc,
+    size_t extraPayloadBytes) {
+    const auto* src = static_cast<const uint8_t*>(cleanDxbc);
+    sc::d3d12::DxbcHeader hdr{};
+    std::memcpy(&hdr, src, sizeof(hdr));
+
+    const uint32_t oldCount = hdr.partCount;
+    const uint32_t newCount = oldCount + 1u;
+    const uint32_t shift = sizeof(uint32_t); // 1 extra entry in part offset table
+
+    const size_t newChunkOff = (cleanSize + shift + 3u) & ~size_t{3u};
+    const size_t totalSize = (newChunkOff + sizeof(sc::d3d12::DxbcPartHeader) + extraPayloadBytes + 3u) & ~size_t{3u};
+
+    std::vector<uint8_t> out(totalSize, 0);
+    sc::d3d12::DxbcHeader newHdr = hdr;
+    newHdr.fileSize  = static_cast<uint32_t>(totalSize);
+    newHdr.partCount = newCount;
+    std::memcpy(out.data(), &newHdr, sizeof(newHdr));
+
+    // Shift existing part offsets by +4 bytes
+    for (uint32_t i = 0; i < oldCount; ++i) {
+        uint32_t off = 0;
+        std::memcpy(&off, src + sizeof(sc::d3d12::DxbcHeader) + static_cast<size_t>(i) * 4u, 4u);
+        off += shift;
+        std::memcpy(out.data() + sizeof(sc::d3d12::DxbcHeader) + static_cast<size_t>(i) * 4u, &off, 4u);
+    }
+    const uint32_t newChunkOff32 = static_cast<uint32_t>(newChunkOff);
+    std::memcpy(out.data() + sizeof(sc::d3d12::DxbcHeader) + static_cast<size_t>(oldCount) * 4u, &newChunkOff32, 4u);
+
+    // Copy original part bodies right after the expanded offset table
+    const size_t oldTableEnd = sizeof(sc::d3d12::DxbcHeader) + static_cast<size_t>(oldCount) * 4u;
+    std::memcpy(out.data() + oldTableEnd + shift, src + oldTableEnd, cleanSize - oldTableEnd);
+
+    // Append synthetic Xbox proprietary chunk
+    sc::d3d12::DxbcPartHeader xPart{};
+    std::memcpy(xPart.fourcc, fourcc, 4);
+    xPart.size = static_cast<uint32_t>(extraPayloadBytes);
+    std::memcpy(out.data() + newChunkOff, &xPart, sizeof(xPart));
+    for (size_t i = 0; i < extraPayloadBytes; ++i) {
+        out[newChunkOff + sizeof(xPart) + i] = static_cast<uint8_t>((i * 37u) ^ 0xA5u);
+    }
+
+    uint8_t digest[16]{};
+    sc::d3d12::ComputeDxbcDigest(out.data() + 20, out.size() - 20, digest);
+    std::memcpy(out.data() + 4, digest, sizeof(digest));
+    return out;
+}
+
+} // namespace
+
+bool TestDxbcDigestAndXboxChunkStripperE2E() {
+    using Microsoft::WRL::ComPtr;
+
+    const char* vsSrc = R"(
+        float4 main(uint vid : SV_VertexID) : SV_Position {
+            float2 p[3] = { float2(0.0, 0.5), float2(0.5, -0.5), float2(-0.5, -0.5) };
+            return float4(p[vid], 0.0, 1.0);
+        }
+    )";
+    const char* psSrc = R"(
+        float4 main() : SV_Target { return float4(0.1, 0.8, 0.3, 1.0); }
+    )";
+
+    ComPtr<ID3DBlob> vsBlob, psBlob, errBlob;
+    SC_EXPECT(SUCCEEDED(D3DCompile(vsSrc, std::strlen(vsSrc), nullptr, nullptr, nullptr, "main", "vs_5_0", 0, 0, &vsBlob, &errBlob)));
+    SC_EXPECT(SUCCEEDED(D3DCompile(psSrc, std::strlen(psSrc), nullptr, nullptr, nullptr, "main", "ps_5_0", 0, 0, &psBlob, &errBlob)));
+
+    // 1. Verify our clean-room DXBC modified-MD5 matches Microsoft D3DCompile digest byte-for-byte
+    auto verifyDigest = [](ID3DBlob* blob) -> bool {
+        const auto* bytes = static_cast<const uint8_t*>(blob->GetBufferPointer());
+        const size_t len  = blob->GetBufferSize();
+        uint8_t computed[16]{};
+        sc::d3d12::ComputeDxbcDigest(bytes + 20, len - 20, computed);
+        return std::memcmp(bytes + 4, computed, 16) == 0;
+    };
+    SC_EXPECT(verifyDigest(vsBlob.Get()));
+    SC_EXPECT(verifyDigest(psBlob.Get()));
+    SC_EXPECT(!sc::d3d12::HasNonPcDxbcChunks(vsBlob->GetBufferPointer(), vsBlob->GetBufferSize()));
+
+    // 2. Inject synthetic Xbox chunks ('XBOX' on VS, 'XSHD' on PS) and verify stripping + digest
+    const auto xboxVs = AppendSyntheticXboxChunks(vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), "XBOX", 32);
+    const auto xboxPs = AppendSyntheticXboxChunks(psBlob->GetBufferPointer(), psBlob->GetBufferSize(), "XSHD", 60);
+    SC_EXPECT(sc::d3d12::HasNonPcDxbcChunks(xboxVs.data(), xboxVs.size()));
+    SC_EXPECT(sc::d3d12::HasNonPcDxbcChunks(xboxPs.data(), xboxPs.size()));
+
+    sc::d3d12::DxbcStripResult stripCheck{};
+    SC_EXPECT(sc::d3d12::StripXboxDxbcChunks(xboxVs.data(), xboxVs.size(), stripCheck));
+    SC_EXPECT(stripCheck.wasStripped && stripCheck.hasExecutableShader);
+    SC_EXPECT(stripCheck.strippedCount == 1u && stripCheck.strippedChunkNames == "XBOX");
+    SC_EXPECT(!sc::d3d12::HasNonPcDxbcChunks(stripCheck.bytecode.data(), stripCheck.bytecode.size()));
+
+    // 3. Feed Xbox-tainted VS + PS directly into ID3D12DeviceX::CreateGraphicsPipelineState on live GPU
+    D3D12XBOX_CREATE_DEVICE_PARAMETERS devParams{};
+    devParams.Version = 1;
+    ComPtr<ID3D12DeviceX> devX;
+    SC_EXPECT(SUCCEEDED(D3D12XboxCreateDevice(nullptr, &devParams, IID_ID3D12DeviceX,
+        reinterpret_cast<void**>(devX.GetAddressOf()))));
+
+    D3D12_ROOT_SIGNATURE_DESC rsDesc{};
+    rsDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
+    ComPtr<ID3DBlob> rsBlob;
+    SC_EXPECT(SUCCEEDED(D3D12SerializeRootSignature(&rsDesc, D3D_ROOT_SIGNATURE_VERSION_1, &rsBlob, &errBlob)));
+    ComPtr<ID3D12RootSignature> rootSig;
+    SC_EXPECT(SUCCEEDED(devX->CreateRootSignature(0, rsBlob->GetBufferPointer(), rsBlob->GetBufferSize(), IID_PPV_ARGS(&rootSig))));
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc{};
+    psoDesc.pRootSignature = rootSig.Get();
+    psoDesc.VS = { xboxVs.data(), xboxVs.size() };
+    psoDesc.PS = { xboxPs.data(), xboxPs.size() };
+    psoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
+    psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+    psoDesc.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+    psoDesc.SampleMask = UINT_MAX;
+    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    psoDesc.NumRenderTargets = 1;
+    psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+    psoDesc.SampleDesc.Count = 1;
+
+    ComPtr<ID3D12PipelineState> pso1, pso2;
+    SC_EXPECT(SUCCEEDED(devX->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pso1))));
+    SC_EXPECT(pso1 != nullptr);
+    // Second creation hits the translation + PSO cache cleanly
+    SC_EXPECT(SUCCEEDED(devX->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pso2))));
+    SC_EXPECT(pso2 != nullptr);
+    return true;
+}
+
+bool TestD3D12XsEnhancedBarriersE2E() {
+    using Microsoft::WRL::ComPtr;
+
+    D3D12XBOX_CREATE_DEVICE_PARAMETERS devParams{};
+    devParams.Version = 1;
+    ComPtr<ID3D12DeviceX> devX;
+    SC_EXPECT(SUCCEEDED(D3D12XboxCreateDevice(nullptr, &devParams, IID_ID3D12DeviceX,
+        reinterpret_cast<void**>(devX.GetAddressOf()))));
+
+    D3D12_FEATURE_DATA_D3D12_OPTIONS12 opts12{};
+    SC_EXPECT(SUCCEEDED(devX->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS12, &opts12, sizeof(opts12))));
+
+    D3D12_COMMAND_QUEUE_DESC qd{};
+    qd.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+    ComPtr<ID3D12CommandQueueX> queueX;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommandQueueX(&qd, queueX.GetAddressOf())));
+
+    ComPtr<ID3D12CommandAllocator> alloc;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&alloc))));
+
+    ComPtr<ID3D12GraphicsCommandListX> clX;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, alloc.Get(), nullptr,
+        IID_ID3D12GraphicsCommandListX, reinterpret_cast<void**>(clX.GetAddressOf()))));
+
+    if (opts12.EnhancedBarriersSupported) {
+        D3D12_GLOBAL_BARRIER gb{};
+        gb.SyncBefore   = D3D12_BARRIER_SYNC_COMPUTE_SHADING;
+        gb.SyncAfter    = D3D12_BARRIER_SYNC_ALL_SHADING;
+        gb.AccessBefore = D3D12_BARRIER_ACCESS_UNORDERED_ACCESS;
+        gb.AccessAfter  = D3D12_BARRIER_ACCESS_SHADER_RESOURCE;
+
+        D3D12_BARRIER_GROUP group{};
+        group.Type            = D3D12_BARRIER_TYPE_GLOBAL;
+        group.NumBarriers     = 1;
+        group.pGlobalBarriers = &gb;
+
+        clX->Barrier(1, &group);
+    }
+
+    SC_EXPECT(SUCCEEDED(clX->Close()));
+    ID3D12CommandList* lists[] = { clX->GetNativeCommandList() };
+    queueX->ExecuteCommandLists(1, lists);
+
+    ComPtr<ID3D12Fence> fence;
+    SC_EXPECT(SUCCEEDED(devX->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence))));
+    HANDLE evt = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    SC_EXPECT(evt != nullptr);
+    SC_EXPECT(SUCCEEDED(queueX->Signal(fence.Get(), 1)));
+    SC_EXPECT(SUCCEEDED(fence->SetEventOnCompletion(1, evt)));
+    SC_EXPECT(WaitForSingleObject(evt, 5000) == WAIT_OBJECT_0);
+    CloseHandle(evt);
+    return true;
+}
+
+bool TestD3D12XsFeatureCapsQueryE2E() {
+    using Microsoft::WRL::ComPtr;
+
+    D3D12XBOX_CREATE_DEVICE_PARAMETERS devParams{};
+    devParams.Version = 1;
+    ComPtr<ID3D12DeviceX> devX;
+    SC_EXPECT(SUCCEEDED(D3D12XboxCreateDevice(nullptr, &devParams, IID_ID3D12DeviceX,
+        reinterpret_cast<void**>(devX.GetAddressOf()))));
+
+    D3D12_FEATURE_DATA_SHADER_MODEL sm{};
+    sm.HighestShaderModel = D3D_SHADER_MODEL_6_8;
+    SC_EXPECT(SUCCEEDED(devX->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL, &sm, sizeof(sm))));
+    SC_EXPECT(sm.HighestShaderModel >= D3D_SHADER_MODEL_6_0);
+
+    D3D12_FEATURE_DATA_D3D12_OPTIONS7 opts7{};
+    SC_EXPECT(SUCCEEDED(devX->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS7, &opts7, sizeof(opts7))));
+
+    D3D12_FEATURE_DATA_D3D12_OPTIONS12 opts12{};
+    SC_EXPECT(SUCCEEDED(devX->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS12, &opts12, sizeof(opts12))));
+
+    // Invalid arg contract check
+    SC_EXPECT(FAILED(devX->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS7, nullptr, sizeof(opts7))));
     return true;
 }

@@ -1,5 +1,7 @@
 #include "d3d12_xs_internal.hpp"
 #include "shader_inspector.hpp"
+#include "shader_stripper.hpp"
+#include "shader_stripper.hpp"
 #include "shader_translator.hpp"
 #include "common/stub.hpp"
 
@@ -459,6 +461,16 @@ public:
         return S_OK;
     }
 
+    HRESULT STDMETHODCALLTYPE CheckFeatureSupport(
+        D3D12_FEATURE Feature,
+        void* pFeatureSupportData,
+        UINT FeatureSupportDataSize) override {
+        if (!pFeatureSupportData || FeatureSupportDataSize == 0) {
+            return E_INVALIDARG;
+        }
+        return m_device->CheckFeatureSupport(Feature, pFeatureSupportData, FeatureSupportDataSize);
+    }
+
 private:
     HRESULT TranslateStage(
         D3D12_SHADER_BYTECODE& stageBc,
@@ -471,8 +483,12 @@ private:
             return S_OK;
         }
 
-        // Fast-path passthrough for native DXBC/DXIL without hashing/caching overhead
-        if (stageBc.BytecodeLength >= 4 && std::memcmp(stageBc.pShaderBytecode, "DXBC", 4) == 0) {
+        // Fast-path passthrough for clean PC DXBC/DXIL; strip Xbox-specific chunks if present
+        const bool isDxbc = stageBc.BytecodeLength >= 4 &&
+                            std::memcmp(stageBc.pShaderBytecode, "DXBC", 4) == 0;
+        const bool needsXboxStrip = isDxbc &&
+            sc::d3d12::HasNonPcDxbcChunks(stageBc.pShaderBytecode, stageBc.BytecodeLength);
+        if (isDxbc && !needsXboxStrip) {
             return S_OK;
         }
 
@@ -496,9 +512,27 @@ private:
         }
 
         auto result = std::make_shared<sc::d3d12::TranslatedShader>();
-        HRESULT hr = m_translators.Translate(stageBc, *result, outError);
-        if (FAILED(hr)) {
-            return hr;
+        if (needsXboxStrip) {
+            sc::d3d12::DxbcStripResult stripped{};
+            if (!sc::d3d12::StripXboxDxbcChunks(stageBc.pShaderBytecode, stageBc.BytecodeLength, stripped) ||
+                !stripped.hasExecutableShader) {
+                outError = "Xbox DXBC container missing executable DXIL/SHDR/SHEX chunk after stripping";
+                return E_INVALIDARG;
+            }
+            result->wasTranslated = true;
+            result->bytecode      = std::move(stripped.bytecode);
+            result->sourceTag     = "[stripped:" + stripped.strippedChunkNames + "] ";
+            char stripMsg[192];
+            std::snprintf(stripMsg, sizeof(stripMsg),
+                          "-> stripped %u Xbox DXBC chunk(s) [%s], kept %u PC chunk(s) (%zu -> %zu B)",
+                          stripped.strippedCount, stripped.strippedChunkNames.c_str(),
+                          stripped.keptCount, stageBc.BytecodeLength, result->bytecode.size());
+            sc::log::Write(sc::log::Level::Info, "d3d12_xs", "StripXboxDxbcChunks", stripMsg);
+        } else {
+            HRESULT hr = m_translators.Translate(stageBc, *result, outError);
+            if (FAILED(hr)) {
+                return hr;
+            }
         }
 
         {

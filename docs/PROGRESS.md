@@ -267,3 +267,9 @@
 - Exported `XAudio2CreateWithVersionInfo` and ordinal `@1` (`XAudio2Create`) from `src/shims/xaudio2_9/` after the auto-stub engine immediately surfaced the `<xaudio2.h>` inline lookup gap.
 - Added PE64 export-table parsing and symbol-level coverage classification (`sc::loader::InspectPeSymbolCoverage`) in `src/loader/pe_inspector.hpp` and upgraded `loader.exe --inspect` / `inspect` in `src/loader/main.cpp` to print `.tls` metadata and exact implemented vs. auto-stubbed symbol coverage.
 - Added `.gitignore` rule for `docs/internal/` and 2 new CTests (`AutoStubThunkSurvivalE2E`, `LoaderSymbolCoverageAuditE2E`) -> `61 passed, 0 failed`, zero `/W4` warnings, zero `d3d12_debug` output.
+
+## Sprint 65: DXIL/DXBC Xbox-Chunk Stripper, Enhanced Barriers & Hardware Feature Caps
+- Added `src/shims/d3d12_xs/shader_stripper.hpp` with clean-room DXBC modified-MD5 digest calculation (`ComputeDxbcDigest`), PC chunk whitelist validation (`HasNonPcDxbcChunks`), and Xbox-chunk stripping + container rebuilding (`StripXboxDxbcChunks`).
+- Integrated automatic Xbox-chunk stripping into `ScarlettDeviceX::TranslateStage` (`src/shims/d3d12_xs/device_x.cpp`) with zero-overhead passthrough for clean PC DXBC/DXIL and FNV-1a cache memoization for stripped containers.
+- Appended `ID3D12GraphicsCommandListX::Barrier()` (forwarding to `ID3D12GraphicsCommandList7::Barrier` for Enhanced Barriers) and `ID3D12DeviceX::CheckFeatureSupport()` (Mesh Shaders / Sampler Feedback / Enhanced Barriers / Shader Model queries) while preserving all existing COM vtable slots.
+- Added `DxbcDigestAndXboxChunkStripperE2E`, `D3D12XsEnhancedBarriersE2E`, and `D3D12XsFeatureCapsQueryE2E` (`64 passed, 0 failed`, zero `/W4` warnings).
