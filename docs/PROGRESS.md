@@ -117,3 +117,7 @@
 - Added GFX10.3 MIMG `IMAGE_SAMPLE` (`0x3C` / opcode `0x20`) encoding (`AppendMimgImageSample`) and binary decoding in `src/shims/d3d12_xs/rdna2_isa.hpp`.
 - Extended `LiftPixelShaderToHlsl` to emit `Texture2D<float4> gTex0 : register(t0)` and `SamplerState gSamp0 : register(s0)` declarations and lower MIMG `IMAGE_SAMPLE` into `gTex0.Sample(gSamp0, float2(...))` with `dmask` channel routing.
 - Added CTest #27 (`Rdna2ImageSampleShader`) verifying binary decode, HLSL lifting, and `D3DCompile` (`ps_5_0`) bytecode compilation (`27 passed, 0 failed`).
+
+## Sprint 29: PresentX & Descriptor-Handle Audit
+- Hardened `PresentX` in `src/shims/d3d12_xs/d3d12_xs.cpp` with `Texture2D` dimension/size validation and a clamped `CopyTextureRegion` fallback when source and swapchain backbuffer dimensions or formats differ.
+- Added CTest #28 (`PresentXDescriptorAudit`) verifying all 4 `GetDescriptorHandleIncrementSize` strides, `CreateRenderTargetView` -> `OMSetRenderTargets` -> `ClearRenderTargetView` -> `PresentX` submission, and non-white RGBA GPU readback (`28 passed, 0 failed`).

@@ -1,7 +1,7 @@
 # Scarlett Layer â€” AI Context Snapshot
 
-**Commit:** `90804f6` (#34) | **Generated:** 2026-11-21 00:19 UTC  
-**Totals:** 60 files (16,143 LOC) | 12 shims | 27 CTest checks
+**Commit:** `5dc706f` (#36) | **Generated:** 2026-11-21 00:24 UTC  
+**Totals:** 60 files (16,327 LOC) | 12 shims | 28 CTest checks
 
 ---
 
@@ -77,7 +77,7 @@
   105  src/shims/acphal/acphal.cpp
     7  src/shims/acphal/acphal.def
    33  src/shims/acphal/acphal.hpp
- 1123  src/shims/d3d12_xs/d3d12_xs.cpp
+ 1151  src/shims/d3d12_xs/d3d12_xs.cpp
     4  src/shims/d3d12_xs/d3d12_xs.def
   166  src/shims/d3d12_xs/d3d12_xs.hpp
  1170  src/shims/d3d12_xs/rdna2_isa.hpp
@@ -120,7 +120,7 @@
  1651  src/tests/dummy_title/main.cpp
    59  src/tests/engine_plugin/engine_plugin.cpp
     3  src/tests/engine_plugin/engine_plugin.def
- 2981  src/tests/scarlett_tests/main.cpp
+ 3137  src/tests/scarlett_tests/main.cpp
   242  tools/audit_imports.py
   505  tools/build_wiki.py
   108  tools/test_brief.py
@@ -141,7 +141,7 @@
 - `HRESULT WINAPI ApuFree(void* virtualAddress)`
 
 ## `d3d12_xs.dll`
-**Files:** `src/shims/d3d12_xs/d3d12_xs.cpp` (1123 L), `src/shims/d3d12_xs/d3d12_xs.def` (4 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (166 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1170 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_translator.hpp` (364 L)
+**Files:** `src/shims/d3d12_xs/d3d12_xs.cpp` (1151 L), `src/shims/d3d12_xs/d3d12_xs.def` (4 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (166 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1170 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_translator.hpp` (364 L)
 
 **DLL Exports (`.def`):** `D3D12XboxCreateDevice`, `D3D12SerializeRootSignature = ScarlettSerializeRootSignature`
 
@@ -344,7 +344,7 @@
 - `MimgOp`: kMimgImageSample = 0x20u
 - `InstFormat`: Sopp, Vop1, Vop2, Vop3, Exp, Mubuf, Smem, Vintrp, Mimg
 
-## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 27 total)
+## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 28 total)
 ```cpp
     RunTest("VfsPathTranslation",         TestVfsPathTranslation);
     RunTest("RuntimeAndXUser",            TestRuntimeAndXUser);
@@ -373,9 +373,12 @@
     RunTest("RetailBringUpShims",                TestRetailBringUpShims);
     RunTest("LoaderInspectAndXvdMount",          TestLoaderInspectAndXvdMount);
     RunTest("Rdna2ImageSampleShader",            TestRdna2ImageSampleShader);
+    RunTest("PresentXDescriptorAudit",           TestPresentXDescriptorAudit);
 ```
 
 ## 6. Recent Git History
+- `5dc706f Merge Sprint 28: RDNA2 IMAGE_SAMPLE texture sampling`
+- `e5717e5 Sprint 28: RDNA2 MIMG IMAGE_SAMPLE decoder + PS HLSL lifter + CTest #27`
 - `90804f6 Merge Sprint 27: Loader PE inspector & XVD container`
 - `1e3654f Sprint 27: Loader --inspect PE auditor + unencrypted XVD container + CTest #26`
 - `ead135e Merge Sprint 26: Retail bring-up shims`
@@ -384,5 +387,3 @@
 - `fc60b8d Sprint 25: d3d12_xs <-> dstorage_xs bridge, mip-chain streaming + CTest #24`
 - `4c41efe Sprint 24: DirectStorage direct-to-VRAM GPU texture streaming + CTest #23`
 - `2c95bab Sprint 23: DirectStorage direct-to-VRAM GPU buffer streaming + CTest #22`
-- `9ab0d99 Tools: add directory-safe build.bat wrapper for Hermes Desktop`
-- `c4b8cc0 Sprint 22: xg_xs RDNA2 64KB_S swizzling and BC1/BC3/BC7 block compression`
