@@ -1,7 +1,7 @@
 # Scarlett Layer â€” AI Context Snapshot
 
-**Commit:** `b037f35` (#101) | **Generated:** 2026-11-21 09:48 UTC  
-**Totals:** 67 files (21,020 LOC) | 12 shims | 57 CTest checks
+**Commit:** `d5f5fb0` (#103) | **Generated:** 2026-11-21 09:53 UTC  
+**Totals:** 73 files (21,154 LOC) | 12 shims | 0 CTest checks
 
 ---
 
@@ -64,7 +64,7 @@
 
 ## 2. File Inventory
 ```text
-  196  CMakeLists.txt
+  201  CMakeLists.txt
   343  src/common/codecs.hpp
    43  src/common/stub.hpp
    76  src/common/vfs.hpp
@@ -127,7 +127,13 @@
    59  src/tests/engine_plugin/engine_plugin.cpp
     3  src/tests/engine_plugin/engine_plugin.def
   328  src/tests/scarlett_3d_demo/main.cpp
- 6534  src/tests/scarlett_tests/main.cpp
+  136  src/tests/scarlett_tests/main.cpp
+  166  src/tests/scarlett_tests/test_harness.hpp
+ 1312  src/tests/scarlett_tests/tests_d3d12_core.cpp
+ 1658  src/tests/scarlett_tests/tests_d3d12_shaders_present.cpp
+ 1024  src/tests/scarlett_tests/tests_loader_e2e.cpp
+  876  src/tests/scarlett_tests/tests_runtime_io.cpp
+ 1491  src/tests/scarlett_tests/tests_storage_swizzle.cpp
   242  tools/audit_imports.py
   505  tools/build_wiki.py
   108  tools/test_brief.py
@@ -387,68 +393,13 @@
 - `MimgOp`: kMimgImageSample = 0x20u
 - `InstFormat`: Sopp, Vop1, Vop2, Vop3, Exp, Mubuf, Smem, Vintrp, Mimg
 
-## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 57 total)
+## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 0 total)
 ```cpp
-    RunTest("VfsPathTranslation",         TestVfsPathTranslation);
-    RunTest("RuntimeAndXUser",            TestRuntimeAndXUser);
-    RunTest("XGameSaveEdgeCases",         TestXGameSaveEdgeCases);
-    RunTest("XgXsMultiMipAndNpotSwizzle", TestXgXsMultiMipAndNpotSwizzle);
-    RunTest("DStorageVfsAndErrorRecord",  TestDStorageVfsAndErrorRecord);
-    RunTest("XAudio2Xma2Rejection",       TestXAudio2Xma2Rejection);
-    RunTest("XMemAlignmentAndInvariants", TestXMemAlignmentAndInvariants);
-    RunTest("DynamicAndMultiModuleHooks", TestDynamicAndMultiModuleHooks);
-    RunTest("D3D12HeadlessDeviceAndPso",  TestD3D12HeadlessDeviceAndPso);
-    RunTest("KernelXMemoryAndTopology",   TestKernelXMemoryAndTopology);
-    RunTest("D3D12PlacedResourcesAndHeap", TestD3D12PlacedResourcesAndHeap);
-    RunTest("DxilSm6BitcodeInspector",    TestDxilSm6BitcodeInspector);
-    RunTest("ScxsTranslatorAndPsoCache",  TestScxsTranslatorAndPsoCache);
-    RunTest("DStorageLzDecompression",    TestDStorageLzDecompression);
-    RunTest("XAudio2ImaAdpcmDecodeBridge", TestXAudio2ImaAdpcmDecodeBridge);
-    RunTest("D3D12ComputePsoAndUavExecution", TestD3D12ComputePsoAndUavExecution);
-    RunTest("Rdna2IsaDecoderAndGpuExecution", TestRdna2IsaDecoderAndGpuExecution);
-    RunTest("D3D12AsyncComputeCrossQueueSync", TestD3D12AsyncComputeCrossQueueSync);
-    RunTest("Rdna2ComputeIsaExecution", TestRdna2ComputeIsaExecution);
-    RunTest("Rdna2VertexAndPixelPipelineWithCbv", TestRdna2VertexAndPixelPipelineWithCbv);
-    RunTest("XgXs64KbsAndBcnBlockSwizzle",       TestXgXs64KbsAndBcnBlockSwizzle);
-    RunTest("DStorageGpuBufferStreaming",        TestDStorageGpuBufferStreaming);
-    RunTest("DStorageGpuTextureStreaming",       TestDStorageGpuTextureStreaming);
-    RunTest("DStorageDeviceXBridgeAndMipChain",  TestDStorageDeviceXBridgeAndMipChain);
-    RunTest("RetailBringUpShims",                TestRetailBringUpShims);
-    RunTest("LoaderInspectAndXvdMount",          TestLoaderInspectAndXvdMount);
-    RunTest("Rdna2ImageSampleShader",            TestRdna2ImageSampleShader);
-    RunTest("PresentXDescriptorAudit",           TestPresentXDescriptorAudit);
-    RunTest("ScarlettXConformanceSuite",         TestScarlettXConformanceSuite);
-    RunTest("GameConfigBootParser",              TestGameConfigBootParser);
-    RunTest("Rdna2TexturedDrawE2E",              TestRdna2TexturedDrawE2E);
-    RunTest("GameInputLivePolling",              TestGameInputLivePolling);
-    RunTest("DynamicLoaderHooks",                TestDynamicLoaderHooks);
-    RunTest("DStorageGpuBufferAndFenceE2E",      TestDStorageGpuBufferAndFenceE2E);
-    RunTest("Rdna2ComputeDispatchE2E",           TestRdna2ComputeDispatchE2E);
-    RunTest("ShaderDiskCacheE2E",                TestShaderDiskCacheE2E);
-    RunTest("D3D12XsCommandListWrapperE2E",      TestD3D12XsCommandListWrapperE2E);
-    RunTest("D3D12XsCmdListRenderClearE2E",      TestD3D12XsCmdListRenderClearE2E);
-    RunTest("D3D12XsCmdListComputeDispatchE2E",  TestD3D12XsCmdListComputeDispatchE2E);
-    RunTest("XAudio2RuntimePlaybackE2E",         TestXAudio2RuntimePlaybackE2E);
-    RunTest("NetworkingShimsE2E",                TestNetworkingShimsE2E);
-    RunTest("XUserAndGameSaveProfileE2E",        TestXUserAndGameSaveProfileE2E);
-    RunTest("GameInputRuntimePollingE2E",        TestGameInputRuntimePollingE2E);
-    RunTest("ScarlettTitleBringUpE2E",           TestScarlettTitleBringUpE2E);
-    RunTest("KernelXAndPixEvtE2E",               TestKernelXAndPixEvtE2E);
-    RunTest("XMemAndXgXsSwizzleE2E",             TestXMemAndXgXsSwizzleE2E);
-    RunTest("DStorageVelocityDynamicE2E",        TestDStorageVelocityDynamicE2E);
-    RunTest("LoaderXvdAndGameConfigE2E",         TestLoaderXvdAndGameConfigE2E);
-    RunTest("ScarlettFullStack50SprintCapstoneE2E", TestScarlettFullStack50SprintCapstoneE2E);
-    RunTest("PeDelayLoadAndOrdinalAuditE2E",     TestPeDelayLoadAndOrdinalAuditE2E);
-    RunTest("RuntimeDelayLoadAndOrdinalHookE2E", TestRuntimeDelayLoadAndOrdinalHookE2E);
-    RunTest("D3D12Xs3DPerspectiveDepthRenderE2E", TestD3D12Xs3DPerspectiveDepthRenderE2E);
-    RunTest("D3D12XsComVtableAbiConformanceE2E",  TestD3D12XsComVtableAbiConformanceE2E);
-    RunTest("D3D12XsPresentXSwapChainE2E",        TestD3D12XsPresentXSwapChainE2E);
-    RunTest("D3D12XsFramePacingTokensE2E",        TestD3D12XsFramePacingTokensE2E);
-    RunTest("D3D12XsHeadlessPresentXModeE2E",     TestD3D12XsHeadlessPresentXModeE2E);
-    RunTest("D3D12XsAsyncComputeCrossQueueSyncE2E", TestD3D12XsAsyncComputeCrossQueueSyncE2E);
 ```
 
 ## 6. Recent Git History
+- `d5f5fb0 Merge Sprint 60: Modularize d3d12_xs shim (57/57 CTests)`
+- `6e5f1ef Sprint 60: Decompose d3d12_xs.cpp monolith into modular translation units`
 - `b037f35 Merge Sprint 59: Zero-warning D3D12 validation (57/57 CTests)`
 - `ab98a72 Sprint 59: Zero-warning D3D12 validation + SCARLETT_STRICT_D3D12=1`
 - `be8b006 Merge Sprint 58: Async compute & cross-queue fence sync (57/57 CTests)`
@@ -457,5 +408,3 @@
 - `dffe91f Sprint 57: Headless PresentX mode (SCARLETT_HEADLESS=1) & E2E (CTest #56)`
 - `2d78b03 Merge Sprint 55: Zero-readback GPU PresentX & DXGI SwapChain E2E (54/54 CTests)`
 - `12ccf0c Sprint 55: Zero-readback GPU PresentX demo & DXGI SwapChain E2E (CTest #54)`
-- `47a919c Merge Sprint 54: COM vtable ABI conformance (53/53 CTests)`
-- `e1f56ac Sprint 54: COM vtable ABI conformance & raw slot invocation E2E (CTest #53)`

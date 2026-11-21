@@ -244,3 +244,8 @@
 - Decomposed the 1,440-line `src/shims/d3d12_xs/d3d12_xs.cpp` monolith into focused translation units behind `d3d12_xs_internal.hpp`: `d3d12_xs_utils.cpp` (93 lines), `command_list_x.cpp` (172 lines), `command_queue_x.cpp` (443 lines), `device_x.cpp` (665 lines), and a thin `d3d12_xs.cpp` export shell (109 lines).
 - Cleared the final `ClearRenderTargetView` optimized-clear-value warning in `src/tests/scarlett_tests/main.cpp`.
 - Updated `CMakeLists.txt` target sources and verified `57 passed, 0 failed` with zero `d3d12_debug` errors or warnings under `SCARLETT_STRICT_D3D12=1`.
+
+## Sprint 61: Modularize `scarlett_tests` Verification Suite
+- Split the 6,500-line `src/tests/scarlett_tests/main.cpp` monolith into `test_harness.hpp` and five subsystem suites: `tests_d3d12_core.cpp` (13 tests), `tests_d3d12_shaders_present.cpp` (11 tests), `tests_storage_swizzle.cpp` (12 tests), `tests_runtime_io.cpp` (12 tests), and `tests_loader_e2e.cpp` (9 tests).
+- Collapsed duplicate curl write callbacks (`TestXCurlWriteCb` / `CurlTestWriteCb`) into a single shared `CurlStringWriteCb` helper in `test_harness.hpp`.
+- Replaced `main.cpp` with a 125-line table-driven test runner supporting `--list` and `--filter <substring>` CLI flags, verified `57 passed, 0 failed` with zero `d3d12_debug` output under `SCARLETT_STRICT_D3D12=1`.
