@@ -2364,6 +2364,142 @@ static size_t TestXCurlWriteCb(char* ptr, size_t size, size_t nmemb, void* userd
     return size * nmemb;
 }
 
+bool TestD3D12XsCmdListRenderClearE2E() {
+    using Microsoft::WRL::ComPtr;
+
+    D3D12XBOX_CREATE_DEVICE_PARAMETERS params{};
+    params.Version = 1;
+    ComPtr<ID3D12DeviceX> devX;
+    SC_EXPECT(SUCCEEDED(D3D12XboxCreateDevice(
+        nullptr, &params, IID_ID3D12DeviceX, reinterpret_cast<void**>(devX.GetAddressOf()))));
+
+    ComPtr<ID3D12Device> nativeDev;
+    SC_EXPECT(SUCCEEDED(devX->QueryInterface(IID_ScarlettNativeD3D12Device,
+                                             reinterpret_cast<void**>(nativeDev.GetAddressOf()))));
+
+    D3D12_COMMAND_QUEUE_DESC qd{};
+    qd.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+    ComPtr<ID3D12CommandQueueX> queueX;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommandQueueX(&qd, queueX.GetAddressOf())));
+
+    ComPtr<ID3D12CommandAllocator> alloc;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&alloc))));
+
+    ComPtr<ID3D12GraphicsCommandListX> clX;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommandList(
+        0, D3D12_COMMAND_LIST_TYPE_DIRECT, alloc.Get(), nullptr,
+        IID_ID3D12GraphicsCommandListX, reinterpret_cast<void**>(clX.GetAddressOf()))));
+
+    D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc{};
+    rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+    rtvHeapDesc.NumDescriptors = 1;
+    ComPtr<ID3D12DescriptorHeap> rtvHeap;
+    SC_EXPECT(SUCCEEDED(devX->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&rtvHeap))));
+
+    D3D12_HEAP_PROPERTIES defaultHeap{ D3D12_HEAP_TYPE_DEFAULT };
+    D3D12_HEAP_PROPERTIES readbackHeap{ D3D12_HEAP_TYPE_READBACK };
+
+    D3D12_RESOURCE_DESC rtDesc{};
+    rtDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    rtDesc.Width = 4;
+    rtDesc.Height = 4;
+    rtDesc.DepthOrArraySize = 1;
+    rtDesc.MipLevels = 1;
+    rtDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    rtDesc.SampleDesc.Count = 1;
+    rtDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+    rtDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+
+    D3D12_CLEAR_VALUE clearVal{};
+    clearVal.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    clearVal.Color[0] = 1.0f; clearVal.Color[1] = 0.0f;
+    clearVal.Color[2] = 1.0f; clearVal.Color[3] = 1.0f;
+
+    ComPtr<ID3D12Resource> rtTex;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommittedResource(
+        &defaultHeap, D3D12_HEAP_FLAG_NONE, &rtDesc,
+        D3D12_RESOURCE_STATE_RENDER_TARGET, &clearVal, IID_PPV_ARGS(&rtTex))));
+
+    D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = rtvHeap->GetCPUDescriptorHandleForHeapStart();
+    nativeDev->CreateRenderTargetView(rtTex.Get(), nullptr, rtvHandle);
+
+    D3D12_RESOURCE_DESC rbDesc{};
+    rbDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    rbDesc.Width = 256 * 4;
+    rbDesc.Height = 1;
+    rbDesc.DepthOrArraySize = 1;
+    rbDesc.MipLevels = 1;
+    rbDesc.SampleDesc.Count = 1;
+    rbDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+    ComPtr<ID3D12Resource> rbBuf;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommittedResource(
+        &readbackHeap, D3D12_HEAP_FLAG_NONE, &rbDesc,
+        D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&rbBuf))));
+
+    D3D12_VIEWPORT vp{ 0.0f, 0.0f, 4.0f, 4.0f, 0.0f, 1.0f };
+    D3D12_RECT scissor{ 0, 0, 4, 4 };
+    clX->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    clX->RSSetViewports(1, &vp);
+    clX->RSSetScissorRects(1, &scissor);
+    clX->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+    clX->ClearRenderTargetView(rtvHandle, clearVal.Color, 0, nullptr);
+
+    D3D12_RESOURCE_BARRIER barrier{};
+    barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    barrier.Transition.pResource = rtTex.Get();
+    barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+    barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
+    barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    clX->ResourceBarrier(1, &barrier);
+
+    D3D12_TEXTURE_COPY_LOCATION srcLoc{};
+    srcLoc.pResource = rtTex.Get();
+    srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    srcLoc.SubresourceIndex = 0;
+
+    D3D12_TEXTURE_COPY_LOCATION dstLoc{};
+    dstLoc.pResource = rbBuf.Get();
+    dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    dstLoc.PlacedFootprint.Offset = 0;
+    dstLoc.PlacedFootprint.Footprint.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    dstLoc.PlacedFootprint.Footprint.Width = 4;
+    dstLoc.PlacedFootprint.Footprint.Height = 4;
+    dstLoc.PlacedFootprint.Footprint.Depth = 1;
+    dstLoc.PlacedFootprint.Footprint.RowPitch = 256;
+
+    clX->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
+    SC_EXPECT(SUCCEEDED(clX->Close()));
+
+    ComPtr<ID3D12Fence> fence;
+    SC_EXPECT(SUCCEEDED(nativeDev->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence))));
+    HANDLE ev = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    SC_EXPECT(ev != nullptr);
+
+    ID3D12CommandList* lists[] = { clX->GetNativeCommandList() };
+    queueX->ExecuteCommandLists(1, lists);
+    SC_EXPECT(SUCCEEDED(queueX->Signal(fence.Get(), 1)));
+    SC_EXPECT(SUCCEEDED(fence->SetEventOnCompletion(1, ev)));
+    SC_EXPECT(WaitForSingleObject(ev, 5000) == WAIT_OBJECT_0);
+    CloseHandle(ev);
+
+    uint8_t* pRb = nullptr;
+    SC_EXPECT(SUCCEEDED(rbBuf->Map(0, nullptr, reinterpret_cast<void**>(&pRb))));
+    bool ok = true;
+    for (int y = 0; y < 4 && ok; ++y) {
+        for (int x = 0; x < 4; ++x) {
+            const uint8_t* px = pRb + y * 256 + x * 4;
+            if (px[0] != 255 || px[1] != 0 || px[2] != 255 || px[3] != 255) {
+                ok = false;
+                break;
+            }
+        }
+    }
+    rbBuf->Unmap(0, nullptr);
+    SC_EXPECT(ok);
+    return true;
+}
+
 bool TestD3D12XsCommandListWrapperE2E() {
     using Microsoft::WRL::ComPtr;
 
@@ -4010,6 +4146,7 @@ int main() {
     RunTest("Rdna2ComputeDispatchE2E",           TestRdna2ComputeDispatchE2E);
     RunTest("ShaderDiskCacheE2E",                TestShaderDiskCacheE2E);
     RunTest("D3D12XsCommandListWrapperE2E",      TestD3D12XsCommandListWrapperE2E);
+    RunTest("D3D12XsCmdListRenderClearE2E",      TestD3D12XsCmdListRenderClearE2E);
 
     XGameRuntimeUninitialize();
 

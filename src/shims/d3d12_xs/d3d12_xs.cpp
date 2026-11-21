@@ -551,6 +551,54 @@ public:
     void STDMETHODCALLTYPE SetMarker(UINT Metadata, const void* pData, UINT Size) override {
         m_cmdList->SetMarker(Metadata, pData, Size);
     }
+    void STDMETHODCALLTYPE IASetPrimitiveTopology(D3D12_PRIMITIVE_TOPOLOGY PrimitiveTopology) override {
+        m_cmdList->IASetPrimitiveTopology(PrimitiveTopology);
+    }
+    void STDMETHODCALLTYPE RSSetViewports(UINT NumViewports, const D3D12_VIEWPORT* pViewports) override {
+        m_cmdList->RSSetViewports(NumViewports, pViewports);
+    }
+    void STDMETHODCALLTYPE RSSetScissorRects(UINT NumRects, const D3D12_RECT* pRects) override {
+        m_cmdList->RSSetScissorRects(NumRects, pRects);
+    }
+    void STDMETHODCALLTYPE OMSetRenderTargets(
+        UINT NumRenderTargetDescriptors,
+        const D3D12_CPU_DESCRIPTOR_HANDLE* pRenderTargetDescriptors,
+        BOOL RTsSingleHandleToDescriptorRange,
+        const D3D12_CPU_DESCRIPTOR_HANDLE* pDepthStencilDescriptor) override {
+        m_cmdList->OMSetRenderTargets(
+            NumRenderTargetDescriptors, pRenderTargetDescriptors,
+            RTsSingleHandleToDescriptorRange, pDepthStencilDescriptor);
+    }
+    void STDMETHODCALLTYPE ClearRenderTargetView(
+        D3D12_CPU_DESCRIPTOR_HANDLE RenderTargetView,
+        const FLOAT ColorRGBA[4], UINT NumRects, const D3D12_RECT* pRects) override {
+        m_cmdList->ClearRenderTargetView(RenderTargetView, ColorRGBA, NumRects, pRects);
+    }
+    void STDMETHODCALLTYPE SetDescriptorHeaps(
+        UINT NumDescriptorHeaps, ID3D12DescriptorHeap* const* ppDescriptorHeaps) override {
+        m_cmdList->SetDescriptorHeaps(NumDescriptorHeaps, ppDescriptorHeaps);
+    }
+    void STDMETHODCALLTYPE SetGraphicsRootDescriptorTable(
+        UINT RootParameterIndex, D3D12_GPU_DESCRIPTOR_HANDLE BaseDescriptor) override {
+        m_cmdList->SetGraphicsRootDescriptorTable(RootParameterIndex, BaseDescriptor);
+    }
+    void STDMETHODCALLTYPE SetComputeRootDescriptorTable(
+        UINT RootParameterIndex, D3D12_GPU_DESCRIPTOR_HANDLE BaseDescriptor) override {
+        m_cmdList->SetComputeRootDescriptorTable(RootParameterIndex, BaseDescriptor);
+    }
+    void STDMETHODCALLTYPE SetGraphicsRootConstantBufferView(
+        UINT RootParameterIndex, D3D12_GPU_VIRTUAL_ADDRESS BufferLocation) override {
+        m_cmdList->SetGraphicsRootConstantBufferView(RootParameterIndex, BufferLocation);
+    }
+    void STDMETHODCALLTYPE SetComputeRootConstantBufferView(
+        UINT RootParameterIndex, D3D12_GPU_VIRTUAL_ADDRESS BufferLocation) override {
+        m_cmdList->SetComputeRootConstantBufferView(RootParameterIndex, BufferLocation);
+    }
+    void STDMETHODCALLTYPE CopyTextureRegion(
+        const D3D12_TEXTURE_COPY_LOCATION* pDst, UINT DstX, UINT DstY, UINT DstZ,
+        const D3D12_TEXTURE_COPY_LOCATION* pSrc, const D3D12_BOX* pSrcBox) override {
+        m_cmdList->CopyTextureRegion(pDst, DstX, DstY, DstZ, pSrc, pSrcBox);
+    }
     void STDMETHODCALLTYPE InsertWaitOnPresent(UINT64 /*PresentToken*/) override {
         // Scarlett flip-queue wait; host PresentX synchronizes via DXGI swapchain
     }

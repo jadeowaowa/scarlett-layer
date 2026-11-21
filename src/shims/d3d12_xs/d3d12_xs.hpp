@@ -91,6 +91,30 @@ struct ID3D12GraphicsCommandListX : public IUnknown {
     virtual void STDMETHODCALLTYPE BeginEvent(UINT Metadata, const void* pData, UINT Size) = 0;
     virtual void STDMETHODCALLTYPE EndEvent() = 0;
     virtual void STDMETHODCALLTYPE SetMarker(UINT Metadata, const void* pData, UINT Size) = 0;
+    virtual void STDMETHODCALLTYPE IASetPrimitiveTopology(D3D12_PRIMITIVE_TOPOLOGY PrimitiveTopology) = 0;
+    virtual void STDMETHODCALLTYPE RSSetViewports(UINT NumViewports, const D3D12_VIEWPORT* pViewports) = 0;
+    virtual void STDMETHODCALLTYPE RSSetScissorRects(UINT NumRects, const D3D12_RECT* pRects) = 0;
+    virtual void STDMETHODCALLTYPE OMSetRenderTargets(
+        UINT NumRenderTargetDescriptors,
+        const D3D12_CPU_DESCRIPTOR_HANDLE* pRenderTargetDescriptors,
+        BOOL RTsSingleHandleToDescriptorRange,
+        const D3D12_CPU_DESCRIPTOR_HANDLE* pDepthStencilDescriptor) = 0;
+    virtual void STDMETHODCALLTYPE ClearRenderTargetView(
+        D3D12_CPU_DESCRIPTOR_HANDLE RenderTargetView,
+        const FLOAT ColorRGBA[4], UINT NumRects, const D3D12_RECT* pRects) = 0;
+    virtual void STDMETHODCALLTYPE SetDescriptorHeaps(
+        UINT NumDescriptorHeaps, ID3D12DescriptorHeap* const* ppDescriptorHeaps) = 0;
+    virtual void STDMETHODCALLTYPE SetGraphicsRootDescriptorTable(
+        UINT RootParameterIndex, D3D12_GPU_DESCRIPTOR_HANDLE BaseDescriptor) = 0;
+    virtual void STDMETHODCALLTYPE SetComputeRootDescriptorTable(
+        UINT RootParameterIndex, D3D12_GPU_DESCRIPTOR_HANDLE BaseDescriptor) = 0;
+    virtual void STDMETHODCALLTYPE SetGraphicsRootConstantBufferView(
+        UINT RootParameterIndex, D3D12_GPU_VIRTUAL_ADDRESS BufferLocation) = 0;
+    virtual void STDMETHODCALLTYPE SetComputeRootConstantBufferView(
+        UINT RootParameterIndex, D3D12_GPU_VIRTUAL_ADDRESS BufferLocation) = 0;
+    virtual void STDMETHODCALLTYPE CopyTextureRegion(
+        const D3D12_TEXTURE_COPY_LOCATION* pDst, UINT DstX, UINT DstY, UINT DstZ,
+        const D3D12_TEXTURE_COPY_LOCATION* pSrc, const D3D12_BOX* pSrcBox) = 0;
     virtual void STDMETHODCALLTYPE InsertWaitOnPresent(UINT64 PresentToken) = 0;
     virtual ID3D12GraphicsCommandList* STDMETHODCALLTYPE GetNativeCommandList() = 0;
 };
