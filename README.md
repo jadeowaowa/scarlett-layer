@@ -4,7 +4,7 @@ An experimental Windows / Direct3D 12 compatibility layer for running **unpacked
 
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-Windows%20x64%20%7C%20D3D12-blue?style=flat-square)
-![Tests](https://img.shields.io/badge/CTests-64%2F64-2ea44f?style=flat-square)
+![Tests](https://img.shields.io/badge/checks-64%2F64-2ea44f?style=flat-square)
 ![Status](https://img.shields.io/badge/status-experimental-orange?style=flat-square)
 
 > **Status: experimental.** The subsystems below are implemented and exercised by an automated test suite. `[TODO: confirm and edit this line]` No commercial title has been run end-to-end through the layer yet. See [Current status](#current-status).
@@ -56,15 +56,16 @@ Shared runtime flags live in `common/config.hpp`.
 
 What is demonstrated today:
 
-- All 64 CTests pass on the author's machine (NVIDIA RTX 5070), with a warning-free `/W4` build and no D3D12 debug-layer errors.
+- All 64 checks pass on the author's machine (NVIDIA RTX 5070), with a warning-free `/W4` build and no D3D12 debug-layer errors. The checks run as one CTest target (`scarlett_shim_suite`) that executes `scarlett_tests.exe` through `loader.exe`. Current baseline: Sprint 65.
 - The tests run real D3D12 work with GPU readback: a textured RDNA2 draw, a compute dispatch, 3D depth rendering, and cross-queue fence sync. They also cover import and ordinal rewriting, SCLZ streaming, and a boot-to-frame-to-save run (`ScarlettTitleBringUpE2E`).
 
 What is **not** demonstrated yet:
 
-- `[TODO: confirm]` Running an unmodified commercial title. The E2E tests use purpose-built test executables, not retail software.
+
+- Compatibility with real console data formats. `SCLZ` compression and `SCXS` shader containers are **project-defined** formats, and several console COM interfaces are modeled rather than matched to real vtables and GUIDs. Real titles will not use them. See `docs/ARCHITECTURE_PAPER.md` section 1.2.
 - Testing on GPUs other than the one above.
 
-Planned work (see [`docs/ROADMAP.md`](docs/ROADMAP.md)): implicit TLS for PE64 and 16-byte `XMem` alignment, chained `dstorage_xs` pipelines (Zlib, BCPack, swizzle), D3D12 Enhanced Barriers, DXR, software XMA2 decoding, RDNA2 FP16, and generated status matrices.
+Planned work (see [`docs/ROADMAP.md`](docs/ROADMAP.md)): chained `dstorage_xs` pipelines (Zlib, BCPack, swizzle), DXR acceleration structures, GameInput v2, software XMA2 decoding, RDNA2 FP16 and a differential shader test corpus, `EtwPlus`/`toolhelpx` shims, MSIXVC2 / `Chunkinfo.xml` handling, and generated status matrices. Already done as of Sprint 65: PE64 implicit TLS, `XMem` 16-byte alignment, auto-stub engine, Xbox-chunk stripping, Enhanced Barriers, and feature-caps queries.
 
 ## Requirements
 
@@ -83,6 +84,8 @@ $env:SCARLETT_STRICT_D3D12 = "1"
 ```
 
 `verify.bat` builds everything and runs the full CTest suite.
+
+> **Note:** `tools\build.bat` currently hard-codes a Visual Studio 18 Build Tools path (`C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\...`). Edit it to match your install until this is made portable.
 
 ### Runtime flags
 
