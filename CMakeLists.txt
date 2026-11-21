@@ -165,6 +165,11 @@ sc_set_runtime_dir(dummy_title "${SC_BIN_DIR}/titles/dummy_title")
 # Headless automated verification suite -> build/bin/titles/scarlett_tests/
 add_executable(scarlett_tests
     src/tests/scarlett_tests/main.cpp
+    src/tests/scarlett_tests/tests_d3d12_core.cpp
+    src/tests/scarlett_tests/tests_d3d12_shaders_present.cpp
+    src/tests/scarlett_tests/tests_storage_swizzle.cpp
+    src/tests/scarlett_tests/tests_runtime_io.cpp
+    src/tests/scarlett_tests/tests_loader_e2e.cpp
 )
 target_link_libraries(scarlett_tests PRIVATE sc_common xgameruntime d3d12_xs gameinput xg_xs dstorage_xs xaudio2_9 xmem kernelx acphal libhttpclient xcurl d3dcompiler)
 add_dependencies(scarlett_tests pixevt engine_plugin)
