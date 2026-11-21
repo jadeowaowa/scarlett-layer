@@ -7,6 +7,9 @@
 #include "shims/gameinput/gameinput.hpp"
 #include "shims/xg_xs/xg_xs.hpp"
 #include "shims/dstorage_xs/dstorage_xs.hpp"
+#include "shims/acphal/acphal.hpp"
+#include "shims/libhttpclient/libhttpclient.hpp"
+#include "shims/xcurl/xcurl.hpp"
 #include "shims/pixevt/pixevt.hpp"
 #include "shims/xmem/xmem.hpp"
 #include "shims/kernelx/kernelx.hpp"
@@ -2352,6 +2355,80 @@ bool TestDStorageGpuBufferStreaming() {
     return true;
 }
 
+static size_t TestXCurlWriteCb(char* ptr, size_t size, size_t nmemb, void* userdata) {
+    auto* out = static_cast<std::string*>(userdata);
+    out->append(ptr, size * nmemb);
+    return size * nmemb;
+}
+
+bool TestRetailBringUpShims() {
+    // 1. GameInput.dll ordinal #1 export check
+    HMODULE hGi = LoadLibraryW(L"gameinput.dll");
+    SC_EXPECT(hGi != nullptr);
+    FARPROC ord1 = GetProcAddress(hGi, MAKEINTRESOURCEA(1));
+    FARPROC byName = GetProcAddress(hGi, "GameInputCreate");
+    SC_EXPECT(ord1 != nullptr && ord1 == byName);
+    FreeLibrary(hGi);
+
+    // 2. AcpHal.dll vtable lifecycle + ApuAlloc alignment
+    void* rawAcp = nullptr;
+    SC_EXPECT(SUCCEEDED(AcpHalCreate(&rawAcp)) && rawAcp != nullptr);
+    auto* acp = static_cast<IAcpHal*>(rawAcp);
+    SC_EXPECT(SUCCEEDED(acp->lpVtbl->Connect(acp, 64, 64)));
+    SC_EXPECT(SUCCEEDED(acp->lpVtbl->SubmitCommand(acp, 1, 1, 0, nullptr, 0)));
+    uint8_t msg[16]{};
+    SC_EXPECT(acp->lpVtbl->PopMessage(acp, msg) == 0);
+    SC_EXPECT(SUCCEEDED(acp->lpVtbl->Disconnect(acp)));
+    SC_EXPECT(acp->lpVtbl->PopMessage(acp, msg) == 1);
+    SC_EXPECT(msg[0] == 0x80u);
+
+    ACP_SHAPE_CONTEXT_COUNTS counts{ 4, 2, 2, 2, 4, 2 };
+    SC_EXPECT(SUCCEEDED(AcpHalAllocateShapeContexts(&counts)));
+    SC_EXPECT(SUCCEEDED(AcpHalReleaseShapeContexts()));
+
+    void* apuPtr = nullptr;
+    uint64_t apuPhys = 0;
+    SC_EXPECT(SUCCEEDED(ApuAlloc(&apuPtr, &apuPhys, 4096, 256)));
+    SC_EXPECT(apuPtr != nullptr && (reinterpret_cast<uintptr_t>(apuPtr) % 256u) == 0u);
+    SC_EXPECT(apuPhys == reinterpret_cast<uint64_t>(apuPtr));
+    SC_EXPECT(SUCCEEDED(ApuFree(apuPtr)));
+
+    // 3. libHttpClient.GDK.dll offline mock round-trip
+    SC_EXPECT(SUCCEEDED(HCInitialize(nullptr)));
+    SC_EXPECT(HCIsInitialized() == 1u);
+    SC_EXPECT(SUCCEEDED(HCHttpCallRegisterMock("GET", "https://xbox.local/status", 200u, "{\"ok\":true}")));
+
+    HCCallHandle hc = nullptr;
+    SC_EXPECT(SUCCEEDED(HCHttpCallCreate(&hc)) && hc != nullptr);
+    SC_EXPECT(SUCCEEDED(HCHttpCallRequestSetUrl(hc, "GET", "https://xbox.local/status")));
+    SC_EXPECT(SUCCEEDED(HCHttpCallPerformAsync(hc, nullptr)));
+
+    uint32_t hcStatus = 0;
+    const char* hcBody = nullptr;
+    SC_EXPECT(SUCCEEDED(HCHttpCallResponseGetStatusCode(hc, &hcStatus)) && hcStatus == 200u);
+    SC_EXPECT(SUCCEEDED(HCHttpCallResponseGetResponseString(hc, &hcBody)) && std::strcmp(hcBody, "{\"ok\":true}") == 0);
+    SC_EXPECT(SUCCEEDED(HCHttpCallCloseHandle(hc)));
+    HCCleanup();
+
+    // 4. XCurl.dll offline mock round-trip
+    SC_EXPECT(curl_global_init(0) == CURLE_OK);
+    SC_EXPECT(xcurl_register_mock_response("https://cdn.local/patch", 200, "scarlett-ok") == CURLE_OK);
+    CURL* curl = curl_easy_init();
+    SC_EXPECT(curl != nullptr);
+    std::string captured;
+    SC_EXPECT(curl_easy_setopt(curl, CURLOPT_URL, "https://cdn.local/patch") == CURLE_OK);
+    SC_EXPECT(curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, &TestXCurlWriteCb) == CURLE_OK);
+    SC_EXPECT(curl_easy_setopt(curl, CURLOPT_WRITEDATA, &captured) == CURLE_OK);
+    SC_EXPECT(curl_easy_perform(curl) == CURLE_OK);
+    long httpCode = 0;
+    SC_EXPECT(curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode) == CURLE_OK && httpCode == 200);
+    SC_EXPECT(captured == "scarlett-ok");
+    curl_easy_cleanup(curl);
+    curl_global_cleanup();
+
+    return true;
+}
+
 bool TestDStorageDeviceXBridgeAndMipChain() {
     D3D12XBOX_CREATE_DEVICE_PARAMETERS devParams{};
     devParams.Version = 1;
@@ -2782,6 +2859,7 @@ int main() {
     RunTest("DStorageGpuBufferStreaming",        TestDStorageGpuBufferStreaming);
     RunTest("DStorageGpuTextureStreaming",       TestDStorageGpuTextureStreaming);
     RunTest("DStorageDeviceXBridgeAndMipChain",  TestDStorageDeviceXBridgeAndMipChain);
+    RunTest("RetailBringUpShims",                TestRetailBringUpShims);
 
     XGameRuntimeUninitialize();
 

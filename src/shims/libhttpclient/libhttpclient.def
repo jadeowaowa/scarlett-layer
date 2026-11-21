@@ -1,0 +1,21 @@
+LIBRARY "libHttpClient.GDK.dll"
+EXPORTS
+    HCInitialize
+    HCCleanup
+    HCIsInitialized
+    HCGetLibVersion
+    HCHttpCallCreate
+    HCHttpCallCloseHandle
+    HCHttpCallRequestSetUrl
+    HCHttpCallRequestSetHeader
+    HCHttpCallRequestSetRequestBodyBytes
+    HCHttpCallRequestSetTimeout
+    HCHttpCallPerformAsync
+    HCHttpCallResponseGetStatusCode
+    HCHttpCallResponseGetNetworkErrorCode
+    HCHttpCallResponseGetResponseString
+    HCHttpCallResponseGetResponseBodyBytesSize
+    HCHttpCallResponseGetResponseBodyBytes
+    HCHttpCallResponseGetHeader
+    HCHttpCallRegisterMock
+    HCHttpCallClearMocks

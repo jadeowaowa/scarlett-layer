@@ -45,7 +45,7 @@
 ## `gameinput.dll`
 **Files:** `src/shims/gameinput/gameinput.cpp` (277 L), `src/shims/gameinput/gameinput.def` (3 L), `src/shims/gameinput/gameinput.hpp` (82 L)
 
-**DLL Exports (`.def`):** `GameInputCreate`
+**DLL Exports (`.def`):** `GameInputCreate @1`
 
 **C Entrypoints:**
 - `HRESULT WINAPI GameInputCreate(IGameInput** gameInput)`

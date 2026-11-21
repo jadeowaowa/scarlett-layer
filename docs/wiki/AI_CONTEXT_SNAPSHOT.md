@@ -1,7 +1,7 @@
 # Scarlett Layer â€” AI Context Snapshot
 
-**Commit:** `4c41efe` (#28) | **Generated:** 2026-11-20 19:55 UTC  
-**Totals:** 49 files (14,772 LOC) | 9 shims | 24 CTest checks
+**Commit:** `e998915` (#30) | **Generated:** 2026-11-21 00:10 UTC  
+**Totals:** 58 files (15,569 LOC) | 12 shims | 25 CTest checks
 
 ---
 
@@ -64,7 +64,7 @@
 
 ## 2. File Inventory
 ```text
-  155  CMakeLists.txt
+  182  CMakeLists.txt
   343  src/common/codecs.hpp
    43  src/common/stub.hpp
    76  src/common/vfs.hpp
@@ -72,6 +72,9 @@
   396  src/loader/pe_patcher.cpp
    19  src/loader/pe_patcher.hpp
   401  src/loader/scarlett_hook.cpp
+  105  src/shims/acphal/acphal.cpp
+    7  src/shims/acphal/acphal.def
+   33  src/shims/acphal/acphal.hpp
  1123  src/shims/d3d12_xs/d3d12_xs.cpp
     4  src/shims/d3d12_xs/d3d12_xs.def
   166  src/shims/d3d12_xs/d3d12_xs.hpp
@@ -87,11 +90,17 @@
   212  src/shims/kernelx/kernelx.cpp
     7  src/shims/kernelx/kernelx.def
    40  src/shims/kernelx/kernelx.hpp
+  220  src/shims/libhttpclient/libhttpclient.cpp
+   21  src/shims/libhttpclient/libhttpclient.def
+   33  src/shims/libhttpclient/libhttpclient.hpp
    58  src/shims/pixevt/pixevt.cpp
     5  src/shims/pixevt/pixevt.def
    14  src/shims/pixevt/pixevt.hpp
   652  src/shims/xaudio2_9/xaudio2_9.cpp
     3  src/shims/xaudio2_9/xaudio2_9.def
+  206  src/shims/xcurl/xcurl.cpp
+   16  src/shims/xcurl/xcurl.def
+   51  src/shims/xcurl/xcurl.hpp
   325  src/shims/xg_xs/xg_64kbs.hpp
   304  src/shims/xg_xs/xg_xs.cpp
     4  src/shims/xg_xs/xg_xs.def
@@ -109,13 +118,25 @@
  1651  src/tests/dummy_title/main.cpp
    59  src/tests/engine_plugin/engine_plugin.cpp
     3  src/tests/engine_plugin/engine_plugin.def
- 2790  src/tests/scarlett_tests/main.cpp
+ 2868  src/tests/scarlett_tests/main.cpp
   242  tools/audit_imports.py
   505  tools/build_wiki.py
   108  tools/test_brief.py
 ```
 
 ## 3. Shim Exports & COM VTable Layouts
+
+## `acphal.dll`
+**Files:** `src/shims/acphal/acphal.cpp` (105 L), `src/shims/acphal/acphal.def` (7 L), `src/shims/acphal/acphal.hpp` (33 L)
+
+**DLL Exports (`.def`):** `AcpHalCreate`, `AcpHalAllocateShapeContexts`, `AcpHalReleaseShapeContexts`, `ApuAlloc`, `ApuFree`
+
+**C Entrypoints:**
+- `HRESULT WINAPI AcpHalCreate(void** acpHal)`
+- `HRESULT WINAPI AcpHalAllocateShapeContexts(ACP_SHAPE_CONTEXT_COUNTS* ctx)`
+- `HRESULT WINAPI AcpHalReleaseShapeContexts(void)`
+- `HRESULT WINAPI ApuAlloc(void** virtualAddress, void* physicalAddress, uint32_t sizeInBytes, uint32_t alignmentInBytes)`
+- `HRESULT WINAPI ApuFree(void* virtualAddress)`
 
 ## `d3d12_xs.dll`
 **Files:** `src/shims/d3d12_xs/d3d12_xs.cpp` (1123 L), `src/shims/d3d12_xs/d3d12_xs.def` (4 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (166 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1085 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_translator.hpp` (364 L)
@@ -187,7 +208,7 @@
 ## `gameinput.dll`
 **Files:** `src/shims/gameinput/gameinput.cpp` (277 L), `src/shims/gameinput/gameinput.def` (3 L), `src/shims/gameinput/gameinput.hpp` (82 L)
 
-**DLL Exports (`.def`):** `GameInputCreate`
+**DLL Exports (`.def`):** `GameInputCreate @1`
 
 **C Entrypoints:**
 - `HRESULT WINAPI GameInputCreate(IGameInput** gameInput)`
@@ -215,6 +236,32 @@
 - `BOOL WINAPI GetConsoleProcessorInfo(SCARLETT_PROCESSOR_INFO* lpInfo)`
 - `DWORD_PTR WINAPI SetThreadAffinityMaskX(HANDLE hThread, DWORD_PTR dwThreadAffinityMask)`
 
+## `libhttpclient.dll`
+**Files:** `src/shims/libhttpclient/libhttpclient.cpp` (220 L), `src/shims/libhttpclient/libhttpclient.def` (21 L), `src/shims/libhttpclient/libhttpclient.hpp` (33 L)
+
+**DLL Exports (`.def`):** `HCInitialize`, `HCCleanup`, `HCIsInitialized`, `HCGetLibVersion`, `HCHttpCallCreate`, `HCHttpCallCloseHandle`, `HCHttpCallRequestSetUrl`, `HCHttpCallRequestSetHeader`, `HCHttpCallRequestSetRequestBodyBytes`, `HCHttpCallRequestSetTimeout`, `HCHttpCallPerformAsync`, `HCHttpCallResponseGetStatusCode`, `HCHttpCallResponseGetNetworkErrorCode`, `HCHttpCallResponseGetResponseString`, `HCHttpCallResponseGetResponseBodyBytesSize`, `HCHttpCallResponseGetResponseBodyBytes`, `HCHttpCallResponseGetHeader`, `HCHttpCallRegisterMock`, `HCHttpCallClearMocks`
+
+**C Entrypoints:**
+- `HRESULT WINAPI HCInitialize(void* args)`
+- `void WINAPI HCCleanup(void)`
+- `uint32_t WINAPI HCIsInitialized(void)`
+- `HRESULT WINAPI HCGetLibVersion(const char** version)`
+- `HRESULT WINAPI HCHttpCallCreate(HCCallHandle* call)`
+- `HRESULT WINAPI HCHttpCallCloseHandle(HCCallHandle call)`
+- `HRESULT WINAPI HCHttpCallRequestSetUrl(HCCallHandle call, const char* method, const char* url)`
+- `HRESULT WINAPI HCHttpCallRequestSetHeader(HCCallHandle call, const char* name, const char* value, uint32_t allowTracing)`
+- `HRESULT WINAPI HCHttpCallRequestSetRequestBodyBytes(HCCallHandle call, const uint8_t* bodyBytes, uint32_t bodySize)`
+- `HRESULT WINAPI HCHttpCallRequestSetTimeout(HCCallHandle call, uint32_t timeoutInSeconds)`
+- `HRESULT WINAPI HCHttpCallPerformAsync(HCCallHandle call, void* asyncBlock)`
+- `HRESULT WINAPI HCHttpCallResponseGetStatusCode(HCCallHandle call, uint32_t* statusCode)`
+- `HRESULT WINAPI HCHttpCallResponseGetNetworkErrorCode(HCCallHandle call, HRESULT* networkErrorCode, uint32_t* platformErrorCode)`
+- `HRESULT WINAPI HCHttpCallResponseGetResponseString(HCCallHandle call, const char** responseString)`
+- `HRESULT WINAPI HCHttpCallResponseGetResponseBodyBytesSize(HCCallHandle call, size_t* bufferSize)`
+- `HRESULT WINAPI HCHttpCallResponseGetResponseBodyBytes(HCCallHandle call, size_t bufferSize, uint8_t* buffer, size_t* bufferUsed)`
+- `HRESULT WINAPI HCHttpCallResponseGetHeader(HCCallHandle call, const char* headerName, const char** headerValue)`
+- `HRESULT WINAPI HCHttpCallRegisterMock(const char* method, const char* urlPrefix, uint32_t statusCode, const char* responseBody)`
+- `void WINAPI HCHttpCallClearMocks(void)`
+
 ## `pixevt.dll`
 **Files:** `src/shims/pixevt/pixevt.cpp` (58 L), `src/shims/pixevt/pixevt.def` (5 L), `src/shims/pixevt/pixevt.hpp` (14 L)
 
@@ -229,6 +276,27 @@
 **Files:** `src/shims/xaudio2_9/xaudio2_9.cpp` (652 L), `src/shims/xaudio2_9/xaudio2_9.def` (3 L)
 
 **DLL Exports (`.def`):** `XAudio2Create = ScarlettXAudio2Create`
+
+## `xcurl.dll`
+**Files:** `src/shims/xcurl/xcurl.cpp` (206 L), `src/shims/xcurl/xcurl.def` (16 L), `src/shims/xcurl/xcurl.hpp` (51 L)
+
+**DLL Exports (`.def`):** `curl_global_init`, `curl_global_cleanup`, `curl_easy_init`, `curl_easy_cleanup`, `curl_easy_reset`, `curl_easy_setopt`, `curl_easy_perform`, `curl_easy_getinfo`, `curl_easy_strerror`, `curl_slist_append`, `curl_slist_free_all`, `curl_version`, `xcurl_register_mock_response`, `xcurl_clear_mocks`
+
+**C Entrypoints:**
+- `CURLcode curl_global_init(int64_t flags)`
+- `void curl_global_cleanup(void)`
+- `CURL* curl_easy_init(void)`
+- `void curl_easy_cleanup(CURL* curl)`
+- `void curl_easy_reset(CURL* curl)`
+- `CURLcode curl_easy_setopt(CURL* curl, CURLoption option, ...)`
+- `CURLcode curl_easy_perform(CURL* curl)`
+- `CURLcode curl_easy_getinfo(CURL* curl, CURLINFO info, ...)`
+- `const char* curl_easy_strerror(CURLcode code)`
+- `curl_slist* curl_slist_append(curl_slist* list, const char* string)`
+- `void curl_slist_free_all(curl_slist* list)`
+- `const char* curl_version(void)`
+- `CURLcode xcurl_register_mock_response(const char* urlPrefix, long statusCode, const char* body)`
+- `void xcurl_clear_mocks(void)`
 
 ## `xg_xs.dll`
 **Files:** `src/shims/xg_xs/xg_64kbs.hpp` (325 L), `src/shims/xg_xs/xg_xs.cpp` (304 L), `src/shims/xg_xs/xg_xs.def` (4 L), `src/shims/xg_xs/xg_xs.hpp` (75 L)
@@ -273,7 +341,7 @@
 - `VintrpOp`: kVintrpP1F32 = 0x00u, kVintrpP2F32 = 0x01u, kVintrpMovF32 = 0x02u
 - `InstFormat`: Sopp, Vop1, Vop2, Vop3, Exp, Mubuf, Smem, Vintrp
 
-## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 24 total)
+## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 25 total)
 ```cpp
     RunTest("VfsPathTranslation",         TestVfsPathTranslation);
     RunTest("RuntimeAndXUser",            TestRuntimeAndXUser);
@@ -299,9 +367,12 @@
     RunTest("DStorageGpuBufferStreaming",        TestDStorageGpuBufferStreaming);
     RunTest("DStorageGpuTextureStreaming",       TestDStorageGpuTextureStreaming);
     RunTest("DStorageDeviceXBridgeAndMipChain",  TestDStorageDeviceXBridgeAndMipChain);
+    RunTest("RetailBringUpShims",                TestRetailBringUpShims);
 ```
 
 ## 6. Recent Git History
+- `e998915 tools: add VS BuildTools ctest fallback to verify.bat`
+- `fc60b8d Sprint 25: d3d12_xs <-> dstorage_xs bridge, mip-chain streaming + CTest #24`
 - `4c41efe Sprint 24: DirectStorage direct-to-VRAM GPU texture streaming + CTest #23`
 - `2c95bab Sprint 23: DirectStorage direct-to-VRAM GPU buffer streaming + CTest #22`
 - `9ab0d99 Tools: add directory-safe build.bat wrapper for Hermes Desktop`
@@ -310,5 +381,3 @@
 - `116f183 Tools: add zero-dependency wiki generator (build_wiki.py), INVARIANTS.md, and AI context snapshot`
 - `a72f224 Docs: Sprint 21 technical architecture paper revision (Sprints 17-21)`
 - `5eff0aa Sprint 21: binary RDNA2 VS lifter (SMEM CBVs, VINTRP, EXP pos0/param0) and full VS+PS pipeline`
-- `62d8374 Sprint 20: binary RDNA2 compute shader lifter (MUBUF + integer ALU) on async COMPUTE queue`
-- `d878d33 Sprint 19: d3d12_xs async COMPUTE command queues and cross-queue GPU sync`
