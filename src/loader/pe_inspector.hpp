@@ -20,7 +20,9 @@ struct PeImportAuditResult {
     std::vector<std::string> shimmedImports;
     std::vector<std::string> systemImports;
     std::vector<std::string> missingImports;
+    std::vector<std::string> delayLoadImports;
     size_t                   totalImportedSymbols{0};
+    size_t                   ordinalImportCount{0};
 };
 
 namespace detail {
@@ -119,56 +121,85 @@ inline PeImportAuditResult InspectPeImports(
         }
     }
 
-    const auto& impDir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
-    if (impDir.VirtualAddress == 0 || impDir.Size == 0) {
-        return res;
-    }
-
     const auto* sections = IMAGE_FIRST_SECTION(nt);
     const uint16_t numSections = nt->FileHeader.NumberOfSections;
 
-    size_t descOff = 0;
-    if (!detail::RvaToFileOffset(impDir.VirtualAddress, sections, numSections, fileSize, descOff)) {
-        res.error = "Import directory RVA out of bounds";
-        return res;
+    auto classifyDll = [&](uint32_t nameRva, bool isDelayLoad) {
+        size_t nameOff = 0;
+        if (!detail::RvaToFileOffset(nameRva, sections, numSections, fileSize, nameOff)) {
+            return;
+        }
+        const char* rawName = reinterpret_cast<const char*>(buf.data() + nameOff);
+        const size_t maxLen = fileSize - nameOff;
+        const size_t len = strnlen(rawName, maxLen);
+        std::string dllName(rawName, len);
+        std::string lower = detail::ToLowerAscii(dllName);
+
+        if (isDelayLoad) {
+            res.delayLoadImports.push_back(dllName);
+        }
+        if (shims.contains(lower)) {
+            res.shimmedImports.push_back(dllName);
+        } else if (detail::IsHostSystemDll(lower)) {
+            res.systemImports.push_back(dllName);
+        } else {
+            res.missingImports.push_back(dllName);
+        }
+    };
+
+    auto countThunks = [&](uint32_t thunkRva) {
+        size_t thunkOff = 0;
+        if (thunkRva == 0 || !detail::RvaToFileOffset(thunkRva, sections, numSections, fileSize, thunkOff)) {
+            return;
+        }
+        while (thunkOff + sizeof(uint64_t) <= fileSize) {
+            uint64_t val = 0;
+            std::memcpy(&val, buf.data() + thunkOff, sizeof(val));
+            if (val == 0) break;
+            ++res.totalImportedSymbols;
+            if ((val & IMAGE_ORDINAL_FLAG64) != 0) {
+                ++res.ordinalImportCount;
+            }
+            thunkOff += sizeof(uint64_t);
+        }
+    };
+
+    // 1. Standard IAT (IMAGE_DIRECTORY_ENTRY_IMPORT)
+    const auto& impDir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+    if (impDir.VirtualAddress != 0 && impDir.Size != 0) {
+        size_t descOff = 0;
+        if (!detail::RvaToFileOffset(impDir.VirtualAddress, sections, numSections, fileSize, descOff)) {
+            res.error = "Import directory RVA out of bounds";
+            return res;
+        }
+        while (descOff + sizeof(IMAGE_IMPORT_DESCRIPTOR) <= fileSize) {
+            const auto* desc = reinterpret_cast<const IMAGE_IMPORT_DESCRIPTOR*>(buf.data() + descOff);
+            if (desc->Name == 0 && desc->FirstThunk == 0) {
+                break;
+            }
+            classifyDll(desc->Name, false);
+            const uint32_t thunkRva = desc->OriginalFirstThunk ? desc->OriginalFirstThunk : desc->FirstThunk;
+            countThunks(thunkRva);
+            descOff += sizeof(IMAGE_IMPORT_DESCRIPTOR);
+        }
     }
 
-    while (descOff + sizeof(IMAGE_IMPORT_DESCRIPTOR) <= fileSize) {
-        const auto* desc = reinterpret_cast<const IMAGE_IMPORT_DESCRIPTOR*>(buf.data() + descOff);
-        if (desc->Name == 0 && desc->FirstThunk == 0) {
-            break;
-        }
-
-        size_t nameOff = 0;
-        if (detail::RvaToFileOffset(desc->Name, sections, numSections, fileSize, nameOff)) {
-            const char* rawName = reinterpret_cast<const char*>(buf.data() + nameOff);
-            const size_t maxLen = fileSize - nameOff;
-            const size_t len = strnlen(rawName, maxLen);
-            std::string dllName(rawName, len);
-            std::string lower = detail::ToLowerAscii(dllName);
-
-            if (shims.contains(lower)) {
-                res.shimmedImports.push_back(dllName);
-            } else if (detail::IsHostSystemDll(lower)) {
-                res.systemImports.push_back(dllName);
-            } else {
-                res.missingImports.push_back(dllName);
+    // 2. Delay-Load Imports (IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT)
+    const auto& delayDir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT];
+    if (delayDir.VirtualAddress != 0 && delayDir.Size != 0) {
+        size_t delayOff = 0;
+        if (detail::RvaToFileOffset(delayDir.VirtualAddress, sections, numSections, fileSize, delayOff)) {
+            while (delayOff + sizeof(IMAGE_DELAYLOAD_DESCRIPTOR) <= fileSize) {
+                const auto* ddesc = reinterpret_cast<const IMAGE_DELAYLOAD_DESCRIPTOR*>(buf.data() + delayOff);
+                if (ddesc->DllNameRVA == 0 && ddesc->ImportAddressTableRVA == 0) {
+                    break;
+                }
+                classifyDll(ddesc->DllNameRVA, true);
+                const uint32_t thunkRva = ddesc->ImportNameTableRVA ? ddesc->ImportNameTableRVA : ddesc->ImportAddressTableRVA;
+                countThunks(thunkRva);
+                delayOff += sizeof(IMAGE_DELAYLOAD_DESCRIPTOR);
             }
         }
-
-        const uint32_t thunkRva = desc->OriginalFirstThunk ? desc->OriginalFirstThunk : desc->FirstThunk;
-        size_t thunkOff = 0;
-        if (thunkRva != 0 && detail::RvaToFileOffset(thunkRva, sections, numSections, fileSize, thunkOff)) {
-            while (thunkOff + sizeof(uint64_t) <= fileSize) {
-                uint64_t val = 0;
-                std::memcpy(&val, buf.data() + thunkOff, sizeof(val));
-                if (val == 0) break;
-                ++res.totalImportedSymbols;
-                thunkOff += sizeof(uint64_t);
-            }
-        }
-
-        descOff += sizeof(IMAGE_IMPORT_DESCRIPTOR);
     }
 
     return res;
