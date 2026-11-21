@@ -165,3 +165,7 @@
 - Added `IID_ID3D12GraphicsCommandListX` and `ID3D12GraphicsCommandListX` interface in `src/shims/d3d12_xs/d3d12_xs.hpp`.
 - Implemented `ScarlettGraphicsCommandListX` in `src/shims/d3d12_xs/d3d12_xs.cpp` and wired `ScarlettDeviceX::CreateCommandList` to return it when `IID_ID3D12GraphicsCommandListX` is requested.
 - Added CTest #37 (`D3D12XsCommandListWrapperE2E`) in `src/tests/scarlett_tests/main.cpp`, recording `BeginEvent`, `CopyBufferRegion` (4 KB), `SetMarker`, `InsertWaitOnPresent`, and `EndEvent`, executing via `ID3D12CommandQueueX`, and verifying exact 4096-byte GPU readback (`37 passed, 0 failed`).
+
+## Sprint 39: ID3D12GraphicsCommandListX Render & Descriptor Parity E2E
+- Extended `ID3D12GraphicsCommandListX` / `ScarlettGraphicsCommandListX` with `IASetPrimitiveTopology`, `RSSetViewports`, `RSSetScissorRects`, `OMSetRenderTargets`, `ClearRenderTargetView`, `SetDescriptorHeaps`, `SetGraphics/ComputeRootDescriptorTable`, `SetGraphics/ComputeRootConstantBufferView`, and `CopyTextureRegion`.
+- Added CTest #38 (`D3D12XsCmdListRenderClearE2E`) verifying a 4x4 `R8G8B8A8_UNORM` render-target clear and `CopyTextureRegion` GPU readback through `ID3D12GraphicsCommandListX` (`38 passed, 0 failed`).
