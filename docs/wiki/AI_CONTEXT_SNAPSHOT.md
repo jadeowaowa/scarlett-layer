@@ -1,7 +1,7 @@
 # Scarlett Layer â€” AI Context Snapshot
 
-**Commit:** `8338e20` (#47) | **Generated:** 2026-11-21 00:58 UTC  
-**Totals:** 61 files (17,113 LOC) | 12 shims | 33 CTest checks
+**Commit:** `9896241` (#49) | **Generated:** 2026-11-21 01:03 UTC  
+**Totals:** 61 files (17,240 LOC) | 12 shims | 34 CTest checks
 
 ---
 
@@ -121,7 +121,7 @@
  1651  src/tests/dummy_title/main.cpp
    59  src/tests/engine_plugin/engine_plugin.cpp
     3  src/tests/engine_plugin/engine_plugin.def
- 3607  src/tests/scarlett_tests/main.cpp
+ 3734  src/tests/scarlett_tests/main.cpp
   242  tools/audit_imports.py
   505  tools/build_wiki.py
   108  tools/test_brief.py
@@ -346,7 +346,7 @@
 - `MimgOp`: kMimgImageSample = 0x20u
 - `InstFormat`: Sopp, Vop1, Vop2, Vop3, Exp, Mubuf, Smem, Vintrp, Mimg
 
-## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 33 total)
+## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 34 total)
 ```cpp
     RunTest("VfsPathTranslation",         TestVfsPathTranslation);
     RunTest("RuntimeAndXUser",            TestRuntimeAndXUser);
@@ -381,9 +381,12 @@
     RunTest("Rdna2TexturedDrawE2E",              TestRdna2TexturedDrawE2E);
     RunTest("GameInputLivePolling",              TestGameInputLivePolling);
     RunTest("DynamicLoaderHooks",                TestDynamicLoaderHooks);
+    RunTest("DStorageGpuBufferAndFenceE2E",      TestDStorageGpuBufferAndFenceE2E);
 ```
 
 ## 6. Recent Git History
+- `9896241 Merge Sprint 34: dynamic GetModuleHandle* redirects`
+- `ee78b09 Sprint 34: GetModuleHandle* IAT hooks in scarlett_hook.dll + CTest #33`
 - `8338e20 Merge Sprint 33: live GameInput polling & keyboard fallback`
 - `ccf15f0 Sprint 33: live GameInput keyboard-to-gamepad fallback + synthetic override + CTest #32`
 - `9d2e1cf Merge Sprint 32: RDNA2 IMAGE_SAMPLE E2E GPU draw`
@@ -392,5 +395,3 @@
 - `99af35b Sprint 31: native MicrosoftGame.Config parser + loader --boot + CTest #30`
 - `1419e6a Docs: add GitHub README with architecture overview and Sprint 30 progress report`
 - `31b7b29 Merge Sprint 30: ScarlettX ABI conformance suite`
-- `57bc148 Sprint 30: ScarlettX ABI conformance suite + CTest #29`
-- `ea01f6d Merge Sprint 29: PresentX & descriptor-handle audit`

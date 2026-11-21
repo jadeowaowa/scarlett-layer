@@ -2364,6 +2364,132 @@ static size_t TestXCurlWriteCb(char* ptr, size_t size, size_t nmemb, void* userd
     return size * nmemb;
 }
 
+bool TestDStorageGpuBufferAndFenceE2E() {
+    using Microsoft::WRL::ComPtr;
+
+    // 1. Write a 4 KB deterministic payload to VFS T:\dstorage_gpu_stream.bin
+    const std::filesystem::path hostFile = sc::vfs::TranslatePath(L"T:\\dstorage_gpu_stream.bin");
+    std::filesystem::create_directories(hostFile.parent_path());
+    std::vector<uint8_t> payload(4096);
+    for (size_t i = 0; i < payload.size(); ++i) {
+        payload[i] = static_cast<uint8_t>((i * 37u + 13u) & 0xFFu);
+    }
+    {
+        std::ofstream ofs(hostFile, std::ios::binary | std::ios::trunc);
+        SC_EXPECT(ofs.good());
+        ofs.write(reinterpret_cast<const char*>(payload.data()), static_cast<std::streamsize>(payload.size()));
+    }
+
+    // 2. Create real D3D12 device, fence, default GPU buffer, and readback buffer
+    HMODULE d3d12Mod = LoadLibraryW(L"d3d12.dll");
+    SC_EXPECT(d3d12Mod != nullptr);
+    auto pD3D12CreateDevice = reinterpret_cast<PFN_D3D12_CREATE_DEVICE>(
+        GetProcAddress(d3d12Mod, "D3D12CreateDevice"));
+    SC_EXPECT(pD3D12CreateDevice != nullptr);
+
+    ComPtr<ID3D12Device> dev;
+    SC_EXPECT(SUCCEEDED(pD3D12CreateDevice(nullptr, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&dev))));
+
+    ComPtr<ID3D12Fence> fence;
+    SC_EXPECT(SUCCEEDED(dev->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence))));
+    HANDLE fenceEv = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    SC_EXPECT(fenceEv != nullptr);
+
+    D3D12_HEAP_PROPERTIES defaultHeap{ D3D12_HEAP_TYPE_DEFAULT };
+    D3D12_HEAP_PROPERTIES readbackHeap{ D3D12_HEAP_TYPE_READBACK };
+    D3D12_RESOURCE_DESC bufDesc{};
+    bufDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    bufDesc.Width = payload.size();
+    bufDesc.Height = 1;
+    bufDesc.DepthOrArraySize = 1;
+    bufDesc.MipLevels = 1;
+    bufDesc.SampleDesc.Count = 1;
+    bufDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+    ComPtr<ID3D12Resource> gpuBuf;
+    SC_EXPECT(SUCCEEDED(dev->CreateCommittedResource(
+        &defaultHeap, D3D12_HEAP_FLAG_NONE, &bufDesc,
+        D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&gpuBuf))));
+
+    // 3. Stream file -> D3D12 GPU buffer via dstorage_xs and signal fence=1
+    ComPtr<IDStorageFactoryX> factory;
+    SC_EXPECT(SUCCEEDED(DStorageGetFactory(IID_IDStorageFactoryX,
+                                           reinterpret_cast<void**>(factory.GetAddressOf()))));
+
+    DSTORAGE_QUEUE_DESC qd{};
+    qd.SourceType = DSTORAGE_REQUEST_SOURCE_FILE;
+    qd.Capacity = 16;
+    qd.Priority = DSTORAGE_PRIORITY_NORMAL;
+    qd.Name = "CTestGpuStreamQueue";
+    qd.Device = dev.Get();
+
+    ComPtr<IDStorageQueueX> queue;
+    ComPtr<IDStorageFileX> file;
+    SC_EXPECT(SUCCEEDED(factory->CreateQueue(&qd, IID_IDStorageQueueX,
+                                             reinterpret_cast<void**>(queue.GetAddressOf()))));
+    SC_EXPECT(SUCCEEDED(factory->OpenFile(L"T:\\dstorage_gpu_stream.bin", IID_IDStorageFileX,
+                                          reinterpret_cast<void**>(file.GetAddressOf()))));
+
+    DSTORAGE_REQUEST req{};
+    req.Options.CompressionFormat = DSTORAGE_COMPRESSION_FORMAT_NONE;
+    req.Options.SourceType = DSTORAGE_REQUEST_SOURCE_FILE;
+    req.Options.DestinationType = DSTORAGE_REQUEST_DESTINATION_BUFFER;
+    req.Source.File.Source = file.Get();
+    req.Source.File.Offset = 0;
+    req.Source.File.Size = static_cast<uint32_t>(payload.size());
+    req.Destination.Buffer.Resource = gpuBuf.Get();
+    req.Destination.Buffer.Offset = 0;
+    req.Destination.Buffer.Size = static_cast<uint32_t>(payload.size());
+    req.UncompressedSize = static_cast<uint32_t>(payload.size());
+    req.Name = "GpuBufferStream4KB";
+
+    queue->EnqueueRequest(&req);
+    queue->EnqueueSignal(fence.Get(), 1);
+    queue->Submit();
+
+    SC_EXPECT(SUCCEEDED(fence->SetEventOnCompletion(1, fenceEv)));
+    SC_EXPECT(WaitForSingleObject(fenceEv, 5000) == WAIT_OBJECT_0);
+    SC_EXPECT(fence->GetCompletedValue() >= 1);
+
+    DSTORAGE_ERROR_RECORD errRec{};
+    queue->RetrieveErrorRecord(&errRec);
+    SC_EXPECT(errRec.FailureCount == 0);
+
+    // 4. Copy GPU buffer -> readback buffer and verify all 4096 bytes
+    ComPtr<ID3D12Resource> rbBuf;
+    SC_EXPECT(SUCCEEDED(dev->CreateCommittedResource(
+        &readbackHeap, D3D12_HEAP_FLAG_NONE, &bufDesc,
+        D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&rbBuf))));
+
+    D3D12_COMMAND_QUEUE_DESC cqDesc{};
+    cqDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+    ComPtr<ID3D12CommandQueue> cq;
+    SC_EXPECT(SUCCEEDED(dev->CreateCommandQueue(&cqDesc, IID_PPV_ARGS(&cq))));
+    ComPtr<ID3D12CommandAllocator> ca;
+    SC_EXPECT(SUCCEEDED(dev->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&ca))));
+    ComPtr<ID3D12GraphicsCommandList> cl;
+    SC_EXPECT(SUCCEEDED(dev->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, ca.Get(), nullptr, IID_PPV_ARGS(&cl))));
+
+    cl->CopyBufferRegion(rbBuf.Get(), 0, gpuBuf.Get(), 0, payload.size());
+    SC_EXPECT(SUCCEEDED(cl->Close()));
+    ID3D12CommandList* lists[] = { cl.Get() };
+    cq->ExecuteCommandLists(1, lists);
+    SC_EXPECT(SUCCEEDED(cq->Signal(fence.Get(), 2)));
+    SC_EXPECT(SUCCEEDED(fence->SetEventOnCompletion(2, fenceEv)));
+    SC_EXPECT(WaitForSingleObject(fenceEv, 5000) == WAIT_OBJECT_0);
+    CloseHandle(fenceEv);
+
+    uint8_t* rbPtr = nullptr;
+    SC_EXPECT(SUCCEEDED(rbBuf->Map(0, nullptr, reinterpret_cast<void**>(&rbPtr))));
+    const bool bytesMatch = (std::memcmp(rbPtr, payload.data(), payload.size()) == 0);
+    rbBuf->Unmap(0, nullptr);
+    SC_EXPECT(bytesMatch);
+
+    std::error_code ec;
+    std::filesystem::remove(hostFile, ec);
+    return true;
+}
+
 bool TestDynamicLoaderHooks() {
     // 1. GetModuleHandleW / A redirect to loaded shim in shims dir
     HMODULE hXgW = GetModuleHandleW(L"xgameruntime.dll");
@@ -3599,6 +3725,7 @@ int main() {
     RunTest("Rdna2TexturedDrawE2E",              TestRdna2TexturedDrawE2E);
     RunTest("GameInputLivePolling",              TestGameInputLivePolling);
     RunTest("DynamicLoaderHooks",                TestDynamicLoaderHooks);
+    RunTest("DStorageGpuBufferAndFenceE2E",      TestDStorageGpuBufferAndFenceE2E);
 
     XGameRuntimeUninitialize();
 

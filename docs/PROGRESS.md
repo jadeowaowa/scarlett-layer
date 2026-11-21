@@ -147,3 +147,7 @@
 - Hooked `GetModuleHandleA`, `GetModuleHandleW`, `GetModuleHandleExA`, and `GetModuleHandleExW` in `src/loader/scarlett_hook.cpp` (with safe pass-through for `GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS` and `nullptr`).
 - Redirected runtime Scarlett DLL handle probes to the loaded `shims\` binaries alongside existing `LoadLibrary*` hooks.
 - Added CTest #33 (`DynamicLoaderHooks`) verifying `GetModuleHandle*`, `FROM_ADDRESS` pass-through, and dynamic `LoadLibraryW` + `GetProcAddress` resolution (`33 passed, 0 failed`).
+
+## Sprint 35: DirectStorage GPU Buffer Streaming & Fence Synchronization E2E
+- Added CTest #34 (`DStorageGpuBufferAndFenceE2E`) in `src/tests/scarlett_tests/main.cpp`.
+- Verified end-to-end async streaming from VFS (`T:\dstorage_gpu_stream.bin`) directly into a D3D12 `DEFAULT` heap GPU buffer via `IDStorageQueueX::EnqueueRequest` (`DSTORAGE_REQUEST_DESTINATION_BUFFER`) + `EnqueueSignal(ID3D12Fence*, 1)` with zero error records and exact 4096-byte GPU readback parity (`34 passed, 0 failed`).
