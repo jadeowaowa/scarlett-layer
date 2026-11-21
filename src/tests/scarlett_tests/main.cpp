@@ -2371,6 +2371,97 @@ static size_t CurlTestWriteCb(char* ptr, size_t size, size_t nmemb, void* userda
     return total;
 }
 
+bool TestDStorageVelocityDynamicE2E() {
+    HMODULE dsMod = LoadLibraryW(L"shims\\dstorage_xs.dll");
+    if (!dsMod) dsMod = LoadLibraryW(L"dstorage_xs.dll");
+    SC_EXPECT(dsMod != nullptr);
+
+    using PFN_SetConfig  = HRESULT(WINAPI*)(const DSTORAGE_CONFIGURATION*);
+    using PFN_GetFactory = HRESULT(WINAPI*)(REFIID, void**);
+
+    auto pSetConfig  = reinterpret_cast<PFN_SetConfig>(GetProcAddress(dsMod, "DStorageSetConfiguration"));
+    auto pGetFactory = reinterpret_cast<PFN_GetFactory>(GetProcAddress(dsMod, "DStorageGetFactory"));
+    SC_EXPECT(pSetConfig != nullptr && pGetFactory != nullptr);
+
+    DSTORAGE_CONFIGURATION cfg{};
+    cfg.NumSubmitThreads = 1;
+    cfg.NumBuiltInCpuDecompressionThreads = 2;
+    cfg.ForceMappingLayer = false;
+    cfg.DisableBypassIO = false;
+    cfg.DisableTelemetry = false;
+    SC_EXPECT(SUCCEEDED(pSetConfig(&cfg)));
+
+    Microsoft::WRL::ComPtr<IDStorageFactoryX> factory;
+    SC_EXPECT(SUCCEEDED(pGetFactory(IID_IDStorageFactoryX, reinterpret_cast<void**>(factory.GetAddressOf()))));
+    SC_EXPECT(factory != nullptr);
+
+    DSTORAGE_QUEUE_DESC qd{};
+    qd.SourceType = DSTORAGE_REQUEST_SOURCE_MEMORY;
+    qd.Capacity = 32;
+    qd.Priority = DSTORAGE_PRIORITY_HIGH;
+    qd.Name = "Sprint48VelocityQueue";
+    qd.Device = nullptr;
+
+    Microsoft::WRL::ComPtr<IDStorageQueueX> queue;
+    SC_EXPECT(SUCCEEDED(factory->CreateQueue(&qd, IID_IDStorageQueueX, reinterpret_cast<void**>(queue.GetAddressOf()))));
+    SC_EXPECT(queue != nullptr);
+
+    Microsoft::WRL::ComPtr<IDStorageStatusArrayX> status;
+    SC_EXPECT(SUCCEEDED(factory->CreateStatusArray(2, "Sprint48Status", IID_IDStorageStatusArrayX,
+                                                   reinterpret_cast<void**>(status.GetAddressOf()))));
+    SC_EXPECT(status != nullptr);
+
+    std::vector<uint8_t> src0(4096), dst0(4096, 0);
+    std::vector<uint8_t> src1(8192), dst1(8192, 0);
+    for (size_t i = 0; i < src0.size(); ++i) src0[i] = static_cast<uint8_t>((i * 13u + 0x21u) & 0xFFu);
+    for (size_t i = 0; i < src1.size(); ++i) src1[i] = static_cast<uint8_t>((i * 29u + 0x73u) & 0xFFu);
+
+    DSTORAGE_REQUEST req0{};
+    req0.Options.CompressionFormat = DSTORAGE_COMPRESSION_FORMAT_NONE;
+    req0.Options.SourceType = DSTORAGE_REQUEST_SOURCE_MEMORY;
+    req0.Options.DestinationType = DSTORAGE_REQUEST_DESTINATION_MEMORY;
+    req0.Source.Memory.Source = src0.data();
+    req0.Source.Memory.Size = static_cast<uint32_t>(src0.size());
+    req0.Destination.Memory.Buffer = dst0.data();
+    req0.Destination.Memory.Size = static_cast<uint32_t>(dst0.size());
+    req0.UncompressedSize = static_cast<uint32_t>(src0.size());
+    req0.Name = "Sprint48::Chunk0";
+
+    DSTORAGE_REQUEST req1{};
+    req1.Options.CompressionFormat = DSTORAGE_COMPRESSION_FORMAT_NONE;
+    req1.Options.SourceType = DSTORAGE_REQUEST_SOURCE_MEMORY;
+    req1.Options.DestinationType = DSTORAGE_REQUEST_DESTINATION_MEMORY;
+    req1.Source.Memory.Source = src1.data();
+    req1.Source.Memory.Size = static_cast<uint32_t>(src1.size());
+    req1.Destination.Memory.Buffer = dst1.data();
+    req1.Destination.Memory.Size = static_cast<uint32_t>(dst1.size());
+    req1.UncompressedSize = static_cast<uint32_t>(src1.size());
+    req1.Name = "Sprint48::Chunk1";
+
+    queue->EnqueueRequest(&req0);
+    queue->EnqueueStatus(status.Get(), 0);
+    queue->EnqueueRequest(&req1);
+    queue->EnqueueStatus(status.Get(), 1);
+    queue->Submit();
+
+    uint32_t spins = 0;
+    while ((!status->IsComplete(0) || !status->IsComplete(1)) && spins < 5000) {
+        Sleep(1);
+        ++spins;
+    }
+    SC_EXPECT(status->IsComplete(0) && status->IsComplete(1));
+    SC_EXPECT(SUCCEEDED(status->GetHResult(0)));
+    SC_EXPECT(SUCCEEDED(status->GetHResult(1)));
+    SC_EXPECT(std::memcmp(src0.data(), dst0.data(), src0.size()) == 0);
+    SC_EXPECT(std::memcmp(src1.data(), dst1.data(), src1.size()) == 0);
+
+    status.Reset();
+    queue.Reset();
+    factory.Reset();
+    FreeLibrary(dsMod);
+    return true;
+}
+
 bool TestXMemAndXgXsSwizzleE2E() {
     // 1. Load xmem & xg_xs shims dynamically
     HMODULE xmemMod = LoadLibraryW(L"shims\\xmem.dll");
@@ -5169,6 +5260,7 @@ int main() {
     RunTest("ScarlettTitleBringUpE2E",           TestScarlettTitleBringUpE2E);
     RunTest("KernelXAndPixEvtE2E",               TestKernelXAndPixEvtE2E);
     RunTest("XMemAndXgXsSwizzleE2E",             TestXMemAndXgXsSwizzleE2E);
+    RunTest("DStorageVelocityDynamicE2E",        TestDStorageVelocityDynamicE2E);
 
     XGameRuntimeUninitialize();
 
