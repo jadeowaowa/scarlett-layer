@@ -4,7 +4,7 @@
 
 **Native Windows/D3D12 binary compatibility & shim layer for Xbox Series X|S (Scarlett / GDK) titles.**
 
-[![Build](https://img.shields.io/badge/build-CMake%20%2B%20Ninja%20%2B%20MSVC-0078D4?style=flat-square)](#build--verify) [![Tests](https://img.shields.io/badge/CTests-38%2F38%20passing-2ea44f?style=flat-square)](#verification-suite) [![Baseline](https://img.shields.io/badge/baseline-sprint--39-8957e5?style=flat-square)](#delivery-timeline) [![Platform](https://img.shields.io/badge/platform-Windows%20x64%20%7C%20D3D12-blue?style=flat-square)](#requirements)
+[![Build](https://img.shields.io/badge/build-CMake%20%2B%20Ninja%20%2B%20MSVC-0078D4?style=flat-square)](#build--verify) [![Tests](https://img.shields.io/badge/CTests-39%2F39%20passing-2ea44f?style=flat-square)](#verification-suite) [![Baseline](https://img.shields.io/badge/baseline-sprint--40-8957e5?style=flat-square)](#delivery-timeline) [![Platform](https://img.shields.io/badge/platform-Windows%20x64%20%7C%20D3D12-blue?style=flat-square)](#requirements)
 
 </div>
 
@@ -55,7 +55,7 @@ cd scarlett-layer
 
 ### Verification Suite
 
-All **38 CTests** run end-to-end on real D3D12 hardware, including:
+All **39 CTests** run end-to-end on real D3D12 hardware, including:
 - **`Rdna2TexturedDrawE2E`** — Binary RDNA2 `MIMG IMAGE_SAMPLE` PS -> HLSL -> `ps_5_0` GPU textured draw + RGBA readback.
 - **`Rdna2ComputeDispatchE2E`** — Binary RDNA2 `MUBUF` load/store CS -> SCXS -> `cs_5_0` GPU `Dispatch` + 64-uint UAV readback.
 - **`DStorageGpuBufferAndFenceE2E`** — Async 4 KB VFS file -> D3D12 `DEFAULT` buffer + `ID3D12Fence` + readback.
@@ -69,7 +69,7 @@ All **38 CTests** run end-to-end on real D3D12 hardware, including:
 | **Phase 1B: RDNA2 & Manifest** | Sprints 30–31 | Native `MicrosoftGame.Config` parser, binary RDNA2 `MIMG IMAGE_SAMPLE` decoder & lifter (30 CTests) | **Done** |
 | **Phase 1C: E2E GPU & Input** | Sprints 32–33 | E2E RDNA2 textured draw on RTX 5070, live XInput + keyboard-to-gamepad fallback (32 CTests) | **Done** |
 | **Phase 2A: Hooks, I/O & CS** | Sprints 34–36 | `GetModuleHandle*` hooks, `dstorage_xs` GPU buffer streaming + fence E2E, RDNA2 Compute `Dispatch` E2E (35 CTests) | **Done** |
-| **Phase 2B: D3D12_XS Parity** | Sprints 37–40 | `ID3D12GraphicsCommandListX` wrapper coverage, extended RDNA2 ALU/CBV/texture ops, PSO cache hardening | **Next** |
+| **Phase 2B: D3D12_XS Parity** | Sprints 37–40 | `ID3D12GraphicsCommandListX` wrapper coverage, extended RDNA2 ALU/CBV/texture ops, PSO cache hardening | **Done** |
 | **Phase 3: Audio, Net & Boot** | Sprints 41–45 | `xaudio2_9`/`AcpHal` runtime audio, `XCurl`/`libHttpClient` stubs, first full Scarlett title bring-up | **Planned** |
 
 ## Documentation

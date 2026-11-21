@@ -1,7 +1,7 @@
 # 02 â€” Graphics (`d3d12_xs`), Surface Tiling (`xg_xs`) & RDNA2 Binary Lifter
 
 ## `d3d12_xs.dll`
-**Files:** `src/shims/d3d12_xs/d3d12_xs.cpp` (1288 L), `src/shims/d3d12_xs/d3d12_xs.def` (4 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (222 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1191 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_translator.hpp` (401 L)
+**Files:** `src/shims/d3d12_xs/d3d12_xs.cpp` (1318 L), `src/shims/d3d12_xs/d3d12_xs.def` (4 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (237 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1191 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_translator.hpp` (401 L)
 
 **DLL Exports (`.def`):** `D3D12XboxCreateDevice`, `D3D12SerializeRootSignature = ScarlettSerializeRootSignature`
 
@@ -39,9 +39,15 @@
 - `[24]` `void SetComputeRootDescriptorTable( UINT RootParameterIndex, D3D12_GPU_DESCRIPTOR_HANDLE BaseDescriptor)`
 - `[25]` `void SetGraphicsRootConstantBufferView( UINT RootParameterIndex, D3D12_GPU_VIRTUAL_ADDRESS BufferLocation)`
 - `[26]` `void SetComputeRootConstantBufferView( UINT RootParameterIndex, D3D12_GPU_VIRTUAL_ADDRESS BufferLocation)`
-- `[27]` `void CopyTextureRegion( const D3D12_TEXTURE_COPY_LOCATION* pDst, UINT DstX, UINT DstY, UINT DstZ, const D3D12_TEXTURE_COPY_LOCATION* pSrc, const D3D12_BOX* pSrcBox)`
-- `[28]` `void InsertWaitOnPresent(UINT64 PresentToken)`
-- `[29]` `ID3D12GraphicsCommandList* GetNativeCommandList()`
+- `[27]` `void IASetVertexBuffers( UINT StartSlot, UINT NumViews, const D3D12_VERTEX_BUFFER_VIEW* pViews)`
+- `[28]` `void IASetIndexBuffer(const D3D12_INDEX_BUFFER_VIEW* pView)`
+- `[29]` `void DrawIndexedInstanced( UINT IndexCountPerInstance, UINT InstanceCount, UINT StartIndexLocation, INT BaseVertexLocation, UINT StartInstanceLocation)`
+- `[30]` `void ClearDepthStencilView( D3D12_CPU_DESCRIPTOR_HANDLE DepthStencilView, D3D12_CLEAR_FLAGS ClearFlags, FLOAT Depth, UINT8 Stencil, UINT NumRects, const D3D12_RECT* pRects)`
+- `[31]` `void SetGraphicsRoot32BitConstants( UINT RootParameterIndex, UINT Num32BitValuesToSet, const void* pSrcData, UINT DestOffsetIn32BitValues)`
+- `[32]` `void SetComputeRoot32BitConstants( UINT RootParameterIndex, UINT Num32BitValuesToSet, const void* pSrcData, UINT DestOffsetIn32BitValues)`
+- `[33]` `void CopyTextureRegion( const D3D12_TEXTURE_COPY_LOCATION* pDst, UINT DstX, UINT DstY, UINT DstZ, const D3D12_TEXTURE_COPY_LOCATION* pSrc, const D3D12_BOX* pSrcBox)`
+- `[34]` `void InsertWaitOnPresent(UINT64 PresentToken)`
+- `[35]` `ID3D12GraphicsCommandList* GetNativeCommandList()`
 
 **COM Interface `ID3D12DeviceX : IUnknown`:**
 - `[03]` `HRESULT CreateCommandQueueX( const D3D12_COMMAND_QUEUE_DESC* pDesc, ID3D12CommandQueueX** ppCommandQueue)`

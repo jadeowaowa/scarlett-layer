@@ -1,6 +1,6 @@
 # 05 â€” Automated Test Suite & Synthetic Title Index
 
-`scarlett_tests.exe` runs **38 checks** via `loader.exe` under CTest (`ctest --test-dir build`).
+`scarlett_tests.exe` runs **39 checks** via `loader.exe` under CTest (`ctest --test-dir build`).
 
 ## Exact `RunTest` Registration Order (`src/tests/scarlett_tests/main.cpp`)
 ```cpp
@@ -80,10 +80,12 @@
     RunTest("D3D12XsCommandListWrapperE2E",      TestD3D12XsCommandListWrapperE2E);
 // 38
     RunTest("D3D12XsCmdListRenderClearE2E",      TestD3D12XsCmdListRenderClearE2E);
+// 39
+    RunTest("D3D12XsCmdListComputeDispatchE2E",  TestD3D12XsCmdListComputeDispatchE2E);
 ```
 
 ## Test & Title Files
 - `src/tests/dummy_title/main.cpp` (1651 lines)
 - `src/tests/engine_plugin/engine_plugin.cpp` (59 lines)
 - `src/tests/engine_plugin/engine_plugin.def` (3 lines)
-- `src/tests/scarlett_tests/main.cpp` (4155 lines)
+- `src/tests/scarlett_tests/main.cpp` (4288 lines)
