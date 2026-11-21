@@ -1,3 +1,4 @@
+#include "common/config.hpp"
 #include "common/stub.hpp"
 #include "gdk_types.hpp"
 #include "runtime_internal.hpp"
@@ -58,12 +59,7 @@ std::string SanitizePathComponent(const char* raw) {
 }
 
 std::filesystem::path ResolveSavesBaseDir() {
-    wchar_t shimDirBuf[MAX_PATH]{};
-    DWORD len = GetEnvironmentVariableW(L"SCARLETT_SHIM_DIR", shimDirBuf, MAX_PATH);
-    if (len > 0 && len < MAX_PATH) {
-        return std::filesystem::path(shimDirBuf).parent_path() / L"saves";
-    }
-    return std::filesystem::current_path() / L"saves";
+    return sc::config::ResolveDataDir(L"saves");
 }
 
 size_t AlignUp8(size_t value) {

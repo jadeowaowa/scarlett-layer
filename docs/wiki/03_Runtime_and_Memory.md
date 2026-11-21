@@ -1,7 +1,7 @@
 # 03 â€” Runtime (`xgameruntime`), Kernel (`kernelx`), Memory (`xmem`), Input & PIX
 
 ## `xgameruntime.dll`
-**Files:** `src/shims/xgameruntime/game_save.cpp` (489 L), `src/shims/xgameruntime/gdk_types.hpp` (101 L), `src/shims/xgameruntime/runtime_internal.hpp` (87 L), `src/shims/xgameruntime/task_queue.cpp` (191 L), `src/shims/xgameruntime/task_queue.hpp` (13 L), `src/shims/xgameruntime/xgameruntime.cpp` (173 L), `src/shims/xgameruntime/xgameruntime.def` (29 L)
+**Files:** `src/shims/xgameruntime/game_save.cpp` (485 L), `src/shims/xgameruntime/gdk_types.hpp` (101 L), `src/shims/xgameruntime/runtime_internal.hpp` (87 L), `src/shims/xgameruntime/task_queue.cpp` (191 L), `src/shims/xgameruntime/task_queue.hpp` (13 L), `src/shims/xgameruntime/xgameruntime.cpp` (173 L), `src/shims/xgameruntime/xgameruntime.def` (29 L)
 
 **DLL Exports (`.def`):** `XGameRuntimeInitialize`, `XGameRuntimeUninitialize`, `XSystemGetDeviceType`, `XTaskQueueCreate`, `XTaskQueueDispatch`, `XTaskQueueCloseHandle`, `XAsyncGetStatus`, `XUserAddAsync`, `XUserAddResult`, `XUserGetGamertag`, `XUserGetId`, `XUserGetState`, `XUserGetLocalId`, `XUserCloseHandle`, `XGameSaveInitializeProviderAsync`, `XGameSaveInitializeProviderResult`, `XGameSaveCloseProvider`, `XGameSaveCreateContainer`, `XGameSaveCloseContainer`, `XGameSaveCreateUpdate`, `XGameSaveCloseUpdate`, `XGameSaveSubmitBlobWrite`, `XGameSaveSubmitBlobDelete`, `XGameSaveSubmitUpdateAsync`, `XGameSaveSubmitUpdateResult`, `XGameSaveReadBlobDataAsync`, `XGameSaveReadBlobDataResult`
 

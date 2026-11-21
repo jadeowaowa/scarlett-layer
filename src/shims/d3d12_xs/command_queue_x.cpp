@@ -1,4 +1,5 @@
 #include "d3d12_xs_internal.hpp"
+#include "common/config.hpp"
 #include "common/stub.hpp"
 
 #include <algorithm>
@@ -242,10 +243,7 @@ private:
         const UINT width = static_cast<UINT>(desc.Width);
         const UINT height = desc.Height;
 
-        char headlessEnv[8]{};
-        m_headless =
-            GetEnvironmentVariableA("SCARLETT_HEADLESS", headlessEnv, sizeof(headlessEnv)) > 0 &&
-            headlessEnv[0] == '1';
+        m_headless = sc::config::IsHeadless();
 
         if (m_headless) {
             D3D12_HEAP_PROPERTIES defHeap{ D3D12_HEAP_TYPE_DEFAULT };
@@ -433,11 +431,12 @@ private:
 
 namespace sc::d3d12xs {
 
-ID3D12CommandQueueX* CreateScarlettCommandQueueX(
+ComPtr<ID3D12CommandQueueX> CreateScarlettCommandQueueX(
     ComPtr<IDXGIFactory6> factory,
     ComPtr<ID3D12Device> device,
     ComPtr<ID3D12CommandQueue> queue) {
-    return new ScarlettCommandQueueX(std::move(factory), std::move(device), std::move(queue));
+    return MakeCom<ID3D12CommandQueueX, ScarlettCommandQueueX>(
+        std::move(factory), std::move(device), std::move(queue));
 }
 
 } // namespace sc::d3d12xs

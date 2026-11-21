@@ -249,3 +249,8 @@
 - Split the 6,500-line `src/tests/scarlett_tests/main.cpp` monolith into `test_harness.hpp` and five subsystem suites: `tests_d3d12_core.cpp` (13 tests), `tests_d3d12_shaders_present.cpp` (11 tests), `tests_storage_swizzle.cpp` (12 tests), `tests_runtime_io.cpp` (12 tests), and `tests_loader_e2e.cpp` (9 tests).
 - Collapsed duplicate curl write callbacks (`TestXCurlWriteCb` / `CurlTestWriteCb`) into a single shared `CurlStringWriteCb` helper in `test_harness.hpp`.
 - Replaced `main.cpp` with a 125-line table-driven test runner supporting `--list` and `--filter <substring>` CLI flags, verified `57 passed, 0 failed` with zero `d3d12_debug` output under `SCARLETT_STRICT_D3D12=1`.
+
+## Sprint 62: COM/RAII Hygiene, Centralized Config & Warning-Free Polish
+- Added `src/common/config.hpp` (`sc::config::IsHeadless`, `IsStrictD3D12`, `GetShimDir`, `ResolveDataDir`) to replace duplicated `GetEnvironmentVariable*` blocks and fixed `MAX_PATH` buffers across `d3d12_xs`, `xgameruntime`, and `scarlett_hook`.
+- Added `sc::d3d12xs::MakeCom<Interface, Impl>()` in `d3d12_xs_internal.hpp` and migrated `CreateScarlettDeviceX`, `CreateScarlettCommandQueueX`, and `CreateScarlettGraphicsCommandListX` to return `Microsoft::WRL::ComPtr<T>`, eliminating all raw `new` and manual `->Release()` calls across `d3d12_xs` translation units.
+- Verified clean `/W4 /permissive-` build with zero compiler warnings and `57 passed, 0 failed` with zero `d3d12_debug` output under `SCARLETT_STRICT_D3D12=1`.

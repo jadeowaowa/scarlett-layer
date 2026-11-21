@@ -1,4 +1,5 @@
 #include "d3d12_xs_internal.hpp"
+#include "common/config.hpp"
 #include "common/stub.hpp"
 
 #include <cstdlib>
@@ -78,12 +79,8 @@ HRESULT WINAPI D3D12XboxCreateDevice(
                     sc::log::Write(
                         sev == D3D12_MESSAGE_SEVERITY_WARNING ? sc::log::Level::Warn : sc::log::Level::Error,
                         "d3d12_debug", "Validation", desc);
-                    if (sev <= D3D12_MESSAGE_SEVERITY_ERROR) {
-                        char strictEnv[8]{};
-                        if (GetEnvironmentVariableA("SCARLETT_STRICT_D3D12", strictEnv, sizeof(strictEnv)) > 0 &&
-                            strictEnv[0] == '1') {
-                            std::abort();
-                        }
+                    if (sev <= D3D12_MESSAGE_SEVERITY_ERROR && sc::config::IsStrictD3D12()) {
+                        std::abort();
                     }
                 }
             },
@@ -91,11 +88,9 @@ HRESULT WINAPI D3D12XboxCreateDevice(
     }
 #endif
 
-    auto* wrapper = sc::d3d12xs::CreateScarlettDeviceX(
+    auto wrapper = sc::d3d12xs::CreateScarlettDeviceX(
         std::move(factory), std::move(nativeDevice), desc.VendorId, desc.DeviceId);
-    hr = wrapper->QueryInterface(riid, ppDevice);
-    wrapper->Release();
-    return hr;
+    return wrapper->QueryInterface(riid, ppDevice);
 }
 
 HRESULT WINAPI ScarlettSerializeRootSignature(
