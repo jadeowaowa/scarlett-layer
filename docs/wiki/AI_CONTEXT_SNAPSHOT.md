@@ -1,7 +1,7 @@
 # Scarlett Layer â€” AI Context Snapshot
 
-**Commit:** `8fb22f4` (#43) | **Generated:** 2026-11-21 00:50 UTC  
-**Totals:** 61 files (16,923 LOC) | 12 shims | 31 CTest checks
+**Commit:** `9d2e1cf` (#45) | **Generated:** 2026-11-21 00:54 UTC  
+**Totals:** 61 files (17,009 LOC) | 12 shims | 32 CTest checks
 
 ---
 
@@ -87,9 +87,9 @@
  1269  src/shims/dstorage_xs/dstorage_xs.cpp
     4  src/shims/dstorage_xs/dstorage_xs.def
   181  src/shims/dstorage_xs/dstorage_xs.hpp
-  277  src/shims/gameinput/gameinput.cpp
-    3  src/shims/gameinput/gameinput.def
-   82  src/shims/gameinput/gameinput.hpp
+  321  src/shims/gameinput/gameinput.cpp
+    4  src/shims/gameinput/gameinput.def
+   83  src/shims/gameinput/gameinput.hpp
   212  src/shims/kernelx/kernelx.cpp
     7  src/shims/kernelx/kernelx.def
    40  src/shims/kernelx/kernelx.hpp
@@ -121,7 +121,7 @@
  1651  src/tests/dummy_title/main.cpp
    59  src/tests/engine_plugin/engine_plugin.cpp
     3  src/tests/engine_plugin/engine_plugin.def
- 3531  src/tests/scarlett_tests/main.cpp
+ 3571  src/tests/scarlett_tests/main.cpp
   242  tools/audit_imports.py
   505  tools/build_wiki.py
   108  tools/test_brief.py
@@ -209,12 +209,13 @@
 - `[07]` `HRESULT SetStagingBufferSize(uint32_t size)`
 
 ## `gameinput.dll`
-**Files:** `src/shims/gameinput/gameinput.cpp` (277 L), `src/shims/gameinput/gameinput.def` (3 L), `src/shims/gameinput/gameinput.hpp` (82 L)
+**Files:** `src/shims/gameinput/gameinput.cpp` (321 L), `src/shims/gameinput/gameinput.def` (4 L), `src/shims/gameinput/gameinput.hpp` (83 L)
 
-**DLL Exports (`.def`):** `GameInputCreate @1`
+**DLL Exports (`.def`):** `GameInputCreate @1`, `ScarlettGameInputSetSyntheticGamepad @2`
 
 **C Entrypoints:**
 - `HRESULT WINAPI GameInputCreate(IGameInput** gameInput)`
+- `void WINAPI ScarlettGameInputSetSyntheticGamepad(bool enabled, const GameInputGamepadState* state)`
 
 **COM Interface `IGameInputReading : IUnknown`:**
 - `[03]` `GameInputKind GetInputKind()`
@@ -345,7 +346,7 @@
 - `MimgOp`: kMimgImageSample = 0x20u
 - `InstFormat`: Sopp, Vop1, Vop2, Vop3, Exp, Mubuf, Smem, Vintrp, Mimg
 
-## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 31 total)
+## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 32 total)
 ```cpp
     RunTest("VfsPathTranslation",         TestVfsPathTranslation);
     RunTest("RuntimeAndXUser",            TestRuntimeAndXUser);
@@ -378,9 +379,12 @@
     RunTest("ScarlettXConformanceSuite",         TestScarlettXConformanceSuite);
     RunTest("GameConfigBootParser",              TestGameConfigBootParser);
     RunTest("Rdna2TexturedDrawE2E",              TestRdna2TexturedDrawE2E);
+    RunTest("GameInputLivePolling",              TestGameInputLivePolling);
 ```
 
 ## 6. Recent Git History
+- `9d2e1cf Merge Sprint 32: RDNA2 IMAGE_SAMPLE E2E GPU draw`
+- `20de7c3 Sprint 32: RDNA2 IMAGE_SAMPLE E2E GPU draw test + AppendExp fix + CTest #31`
 - `8fb22f4 Merge Sprint 31: native MicrosoftGame.Config parser & --boot`
 - `99af35b Sprint 31: native MicrosoftGame.Config parser + loader --boot + CTest #30`
 - `1419e6a Docs: add GitHub README with architecture overview and Sprint 30 progress report`
@@ -389,5 +393,3 @@
 - `ea01f6d Merge Sprint 29: PresentX & descriptor-handle audit`
 - `21dc0e0 Sprint 29: PresentX CopyTextureRegion fallback + descriptor-handle audit + CTest #28`
 - `5dc706f Merge Sprint 28: RDNA2 IMAGE_SAMPLE texture sampling`
-- `e5717e5 Sprint 28: RDNA2 MIMG IMAGE_SAMPLE decoder + PS HLSL lifter + CTest #27`
-- `90804f6 Merge Sprint 27: Loader PE inspector & XVD container`
