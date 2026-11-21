@@ -1,7 +1,7 @@
 # Scarlett Layer â€” AI Context Snapshot
 
-**Commit:** `9d2e1cf` (#45) | **Generated:** 2026-11-21 00:54 UTC  
-**Totals:** 61 files (17,009 LOC) | 12 shims | 32 CTest checks
+**Commit:** `8338e20` (#47) | **Generated:** 2026-11-21 00:58 UTC  
+**Totals:** 61 files (17,113 LOC) | 12 shims | 33 CTest checks
 
 ---
 
@@ -74,7 +74,7 @@
   177  src/loader/pe_inspector.hpp
   396  src/loader/pe_patcher.cpp
    19  src/loader/pe_patcher.hpp
-  401  src/loader/scarlett_hook.cpp
+  469  src/loader/scarlett_hook.cpp
   105  src/shims/acphal/acphal.cpp
     7  src/shims/acphal/acphal.def
    33  src/shims/acphal/acphal.hpp
@@ -121,7 +121,7 @@
  1651  src/tests/dummy_title/main.cpp
    59  src/tests/engine_plugin/engine_plugin.cpp
     3  src/tests/engine_plugin/engine_plugin.def
- 3571  src/tests/scarlett_tests/main.cpp
+ 3607  src/tests/scarlett_tests/main.cpp
   242  tools/audit_imports.py
   505  tools/build_wiki.py
   108  tools/test_brief.py
@@ -346,7 +346,7 @@
 - `MimgOp`: kMimgImageSample = 0x20u
 - `InstFormat`: Sopp, Vop1, Vop2, Vop3, Exp, Mubuf, Smem, Vintrp, Mimg
 
-## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 32 total)
+## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 33 total)
 ```cpp
     RunTest("VfsPathTranslation",         TestVfsPathTranslation);
     RunTest("RuntimeAndXUser",            TestRuntimeAndXUser);
@@ -380,9 +380,12 @@
     RunTest("GameConfigBootParser",              TestGameConfigBootParser);
     RunTest("Rdna2TexturedDrawE2E",              TestRdna2TexturedDrawE2E);
     RunTest("GameInputLivePolling",              TestGameInputLivePolling);
+    RunTest("DynamicLoaderHooks",                TestDynamicLoaderHooks);
 ```
 
 ## 6. Recent Git History
+- `8338e20 Merge Sprint 33: live GameInput polling & keyboard fallback`
+- `ccf15f0 Sprint 33: live GameInput keyboard-to-gamepad fallback + synthetic override + CTest #32`
 - `9d2e1cf Merge Sprint 32: RDNA2 IMAGE_SAMPLE E2E GPU draw`
 - `20de7c3 Sprint 32: RDNA2 IMAGE_SAMPLE E2E GPU draw test + AppendExp fix + CTest #31`
 - `8fb22f4 Merge Sprint 31: native MicrosoftGame.Config parser & --boot`
@@ -391,5 +394,3 @@
 - `31b7b29 Merge Sprint 30: ScarlettX ABI conformance suite`
 - `57bc148 Sprint 30: ScarlettX ABI conformance suite + CTest #29`
 - `ea01f6d Merge Sprint 29: PresentX & descriptor-handle audit`
-- `21dc0e0 Sprint 29: PresentX CopyTextureRegion fallback + descriptor-handle audit + CTest #28`
-- `5dc706f Merge Sprint 28: RDNA2 IMAGE_SAMPLE texture sampling`

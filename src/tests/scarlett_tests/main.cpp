@@ -2364,6 +2364,41 @@ static size_t TestXCurlWriteCb(char* ptr, size_t size, size_t nmemb, void* userd
     return size * nmemb;
 }
 
+bool TestDynamicLoaderHooks() {
+    // 1. GetModuleHandleW / A redirect to loaded shim in shims dir
+    HMODULE hXgW = GetModuleHandleW(L"xgameruntime.dll");
+    HMODULE hXgA = GetModuleHandleA("xgameruntime.dll");
+    SC_EXPECT(hXgW != nullptr && hXgW == hXgA);
+
+    wchar_t modPath[MAX_PATH]{};
+    SC_EXPECT(GetModuleFileNameW(hXgW, modPath, MAX_PATH) > 0);
+    std::wstring modPathStr(modPath);
+    SC_EXPECT(modPathStr.find(L"shims") != std::wstring::npos);
+
+    // 2. GetModuleHandleExW / A by name
+    HMODULE hD3dW = nullptr;
+    HMODULE hD3dA = nullptr;
+    SC_EXPECT(GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, L"d3d12_xs.dll", &hD3dW) != FALSE);
+    SC_EXPECT(GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, "d3d12_xs.dll", &hD3dA) != FALSE);
+    SC_EXPECT(hD3dW != nullptr && hD3dW == hD3dA);
+
+    // 3. GetModuleHandleExW with FROM_ADDRESS must pass through safely
+    HMODULE hSelf = nullptr;
+    SC_EXPECT(GetModuleHandleExW(
+        GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+        reinterpret_cast<LPCWSTR>(&TestDynamicLoaderHooks), &hSelf) != FALSE);
+    SC_EXPECT(hSelf == GetModuleHandleW(nullptr));
+
+    // 4. Dynamic LoadLibraryW + GetProcAddress on a Scarlett shim
+    HMODULE hGi = LoadLibraryW(L"gameinput.dll");
+    SC_EXPECT(hGi != nullptr);
+    FARPROC pCreate = GetProcAddress(hGi, "GameInputCreate");
+    SC_EXPECT(pCreate != nullptr);
+    FreeLibrary(hGi);
+
+    return true;
+}
+
 bool TestGameInputLivePolling() {
     IGameInput* gi = nullptr;
     SC_EXPECT(SUCCEEDED(GameInputCreate(&gi)) && gi != nullptr);
@@ -3563,6 +3598,7 @@ int main() {
     RunTest("GameConfigBootParser",              TestGameConfigBootParser);
     RunTest("Rdna2TexturedDrawE2E",              TestRdna2TexturedDrawE2E);
     RunTest("GameInputLivePolling",              TestGameInputLivePolling);
+    RunTest("DynamicLoaderHooks",                TestDynamicLoaderHooks);
 
     XGameRuntimeUninitialize();
 
