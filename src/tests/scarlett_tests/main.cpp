@@ -2371,6 +2371,254 @@ static size_t CurlTestWriteCb(char* ptr, size_t size, size_t nmemb, void* userda
     return total;
 }
 
+bool TestD3D12Xs3DPerspectiveDepthRenderE2E() {
+    using Microsoft::WRL::ComPtr;
+
+    D3D12XBOX_CREATE_DEVICE_PARAMETERS devParams{};
+    devParams.Version = 1;
+    ComPtr<ID3D12DeviceX> devX;
+    SC_EXPECT(SUCCEEDED(D3D12XboxCreateDevice(nullptr, &devParams, IID_ID3D12DeviceX,
+        reinterpret_cast<void**>(devX.GetAddressOf()))));
+    ComPtr<ID3D12Device> nativeDev;
+    SC_EXPECT(SUCCEEDED(devX->QueryInterface(IID_ScarlettNativeD3D12Device,
+        reinterpret_cast<void**>(nativeDev.GetAddressOf()))));
+
+    D3D12_COMMAND_QUEUE_DESC qd{};
+    qd.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+    ComPtr<ID3D12CommandQueueX> queueX;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommandQueueX(&qd, queueX.GetAddressOf())));
+    ComPtr<ID3D12CommandAllocator> alloc;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&alloc))));
+    ComPtr<ID3D12GraphicsCommandListX> clX;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, alloc.Get(), nullptr,
+        IID_ID3D12GraphicsCommandListX, reinterpret_cast<void**>(clX.GetAddressOf()))));
+
+    // 1. Compile 3D perspective VS + PS
+    static const char* k3dHlsl = R"(
+        cbuffer CameraCB : register(b0) {
+            row_major float4x4 mvp;
+        };
+        struct VSIn {
+            float3 pos : POSITION;
+            float4 col : COLOR;
+        };
+        struct PSIn {
+            float4 pos : SV_POSITION;
+            float4 col : COLOR;
+        };
+        PSIn VSMain(VSIn input) {
+            PSIn o;
+            o.pos = mul(float4(input.pos, 1.0f), mvp);
+            o.col = input.col;
+            return o;
+        }
+        float4 PSMain(PSIn input) : SV_TARGET {
+            return input.col;
+        }
+    )";
+
+    ComPtr<ID3DBlob> vsBlob, psBlob, errBlob;
+    SC_EXPECT(SUCCEEDED(D3DCompile(k3dHlsl, std::strlen(k3dHlsl), nullptr, nullptr, nullptr,
+        "VSMain", "vs_5_0", 0, 0, &vsBlob, &errBlob)));
+    SC_EXPECT(SUCCEEDED(D3DCompile(k3dHlsl, std::strlen(k3dHlsl), nullptr, nullptr, nullptr,
+        "PSMain", "ps_5_0", 0, 0, &psBlob, &errBlob)));
+
+    // 2. Root signature with 1 CBV at b0
+    D3D12_ROOT_PARAMETER rp{};
+    rp.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+    rp.Descriptor = { 0, 0 };
+    rp.ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+    D3D12_ROOT_SIGNATURE_DESC rsDesc{};
+    rsDesc.NumParameters = 1;
+    rsDesc.pParameters = &rp;
+    rsDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+
+    ComPtr<ID3DBlob> sigBlob;
+    SC_EXPECT(SUCCEEDED(D3D12SerializeRootSignature(&rsDesc, D3D_ROOT_SIGNATURE_VERSION_1, &sigBlob, &errBlob)));
+    ComPtr<ID3D12RootSignature> rootSig;
+    SC_EXPECT(SUCCEEDED(nativeDev->CreateRootSignature(0, sigBlob->GetBufferPointer(),
+        sigBlob->GetBufferSize(), IID_PPV_ARGS(&rootSig))));
+
+    // 3. Graphics PSO with hardware depth testing enabled (D32_FLOAT, LESS)
+    D3D12_INPUT_ELEMENT_DESC inputLayout[] = {
+        { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0,  0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+        { "COLOR",    0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+    };
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc{};
+    psoDesc.pRootSignature = rootSig.Get();
+    psoDesc.VS = { vsBlob->GetBufferPointer(), vsBlob->GetBufferSize() };
+    psoDesc.PS = { psBlob->GetBufferPointer(), psBlob->GetBufferSize() };
+    psoDesc.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+    psoDesc.SampleMask = UINT_MAX;
+    psoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
+    psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+    psoDesc.RasterizerState.DepthClipEnable = TRUE;
+    psoDesc.DepthStencilState.DepthEnable = TRUE;
+    psoDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+    psoDesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
+    psoDesc.InputLayout = { inputLayout, 2 };
+    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    psoDesc.NumRenderTargets = 1;
+    psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+    psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+    psoDesc.SampleDesc.Count = 1;
+
+    ComPtr<ID3D12PipelineState> pso;
+    SC_EXPECT(SUCCEEDED(nativeDev->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pso))));
+
+    // 4. Create 64x64 RTV + D32_FLOAT DSV + Readback buffer
+    constexpr uint32_t kW = 64, kH = 64, kRowPitch = 256;
+    D3D12_DESCRIPTOR_HEAP_DESC rtvHD{ D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 1, D3D12_DESCRIPTOR_HEAP_FLAG_NONE, 0 };
+    D3D12_DESCRIPTOR_HEAP_DESC dsvHD{ D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 1, D3D12_DESCRIPTOR_HEAP_FLAG_NONE, 0 };
+    ComPtr<ID3D12DescriptorHeap> rtvHeap, dsvHeap;
+    SC_EXPECT(SUCCEEDED(devX->CreateDescriptorHeap(&rtvHD, IID_PPV_ARGS(&rtvHeap))));
+    SC_EXPECT(SUCCEEDED(devX->CreateDescriptorHeap(&dsvHD, IID_PPV_ARGS(&dsvHeap))));
+
+    D3D12_HEAP_PROPERTIES defHeap{ D3D12_HEAP_TYPE_DEFAULT };
+    D3D12_HEAP_PROPERTIES uplHeap{ D3D12_HEAP_TYPE_UPLOAD };
+    D3D12_HEAP_PROPERTIES rbHeap{ D3D12_HEAP_TYPE_READBACK };
+
+    D3D12_RESOURCE_DESC rtDesc{};
+    rtDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    rtDesc.Width = kW; rtDesc.Height = kH; rtDesc.DepthOrArraySize = 1; rtDesc.MipLevels = 1;
+    rtDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM; rtDesc.SampleDesc.Count = 1;
+    rtDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+    D3D12_CLEAR_VALUE rtClear{};
+    rtClear.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    rtClear.Color[0] = 16.0f / 255.0f; rtClear.Color[1] = 16.0f / 255.0f;
+    rtClear.Color[2] = 24.0f / 255.0f; rtClear.Color[3] = 1.0f;
+    ComPtr<ID3D12Resource> rtTex;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommittedResource(&defHeap, D3D12_HEAP_FLAG_NONE, &rtDesc,
+        D3D12_RESOURCE_STATE_RENDER_TARGET, &rtClear, IID_PPV_ARGS(&rtTex))));
+
+    D3D12_RESOURCE_DESC dsDesc{};
+    dsDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    dsDesc.Width = kW; dsDesc.Height = kH; dsDesc.DepthOrArraySize = 1; dsDesc.MipLevels = 1;
+    dsDesc.Format = DXGI_FORMAT_D32_FLOAT; dsDesc.SampleDesc.Count = 1;
+    dsDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+    D3D12_CLEAR_VALUE dsClear{};
+    dsClear.Format = DXGI_FORMAT_D32_FLOAT;
+    dsClear.DepthStencil.Depth = 1.0f;
+    ComPtr<ID3D12Resource> dsTex;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommittedResource(&defHeap, D3D12_HEAP_FLAG_NONE, &dsDesc,
+        D3D12_RESOURCE_STATE_DEPTH_WRITE, &dsClear, IID_PPV_ARGS(&dsTex))));
+
+    D3D12_CPU_DESCRIPTOR_HANDLE rtvH = rtvHeap->GetCPUDescriptorHandleForHeapStart();
+    D3D12_CPU_DESCRIPTOR_HANDLE dsvH = dsvHeap->GetCPUDescriptorHandleForHeapStart();
+    nativeDev->CreateRenderTargetView(rtTex.Get(), nullptr, rtvH);
+    nativeDev->CreateDepthStencilView(dsTex.Get(), nullptr, dsvH);
+
+    // 5. Upload 3D Vertex Buffer (Near Crimson z=2.0 + Far Blue z=3.5), Index Buffer, and Perspective MVP CBV
+    struct Vertex3D { float x, y, z; float r, g, b, a; };
+    const Vertex3D verts[8] = {
+        // Near quad (z = 2.0, Scarlett Crimson) — drawn FIRST
+        { -0.7f, -0.6f, 2.0f, 1.0f, 0.0f, 64.0f / 255.0f, 1.0f },
+        {  0.3f, -0.6f, 2.0f, 1.0f, 0.0f, 64.0f / 255.0f, 1.0f },
+        {  0.3f,  0.6f, 2.0f, 1.0f, 0.0f, 64.0f / 255.0f, 1.0f },
+        { -0.7f,  0.6f, 2.0f, 1.0f, 0.0f, 64.0f / 255.0f, 1.0f },
+        // Far quad (z = 3.5, Cobalt Blue) — drawn SECOND, overlaps center x=32
+        { -0.5f, -1.0f, 3.5f, 0.0f, 128.0f / 255.0f, 1.0f, 1.0f },
+        {  1.4f, -1.0f, 3.5f, 0.0f, 128.0f / 255.0f, 1.0f, 1.0f },
+        {  1.4f,  1.0f, 3.5f, 0.0f, 128.0f / 255.0f, 1.0f, 1.0f },
+        { -0.5f,  1.0f, 3.5f, 0.0f, 128.0f / 255.0f, 1.0f, 1.0f },
+    };
+    const uint16_t indices[12] = { 0,1,2, 0,2,3, 4,5,6, 4,6,7 };
+
+    // Left-handed perspective projection: fovY=60deg (f=1.73205), aspect=1, near=0.5, far=10.0
+    const float f = 1.7320508f;
+    const float a = 10.0f / (10.0f - 0.5f);
+    const float b = (-0.5f * 10.0f) / (10.0f - 0.5f);
+    float mvp[16] = {
+        f,    0.0f, 0.0f, 0.0f,
+        0.0f, f,    0.0f, 0.0f,
+        0.0f, 0.0f, a,    1.0f,
+        0.0f, 0.0f, b,    0.0f
+    };
+
+    auto makeBuf = [&](size_t sz, const D3D12_HEAP_PROPERTIES& hp, D3D12_RESOURCE_STATES st, ComPtr<ID3D12Resource>& out) {
+        D3D12_RESOURCE_DESC bd{};
+        bd.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+        bd.Width = sz; bd.Height = 1; bd.DepthOrArraySize = 1; bd.MipLevels = 1;
+        bd.SampleDesc.Count = 1; bd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        return SUCCEEDED(devX->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &bd, st, nullptr, IID_PPV_ARGS(&out)));
+    };
+
+    ComPtr<ID3D12Resource> vbBuf, ibBuf, cbBuf, rbBuf;
+    SC_EXPECT(makeBuf(sizeof(verts), uplHeap, D3D12_RESOURCE_STATE_GENERIC_READ, vbBuf));
+    SC_EXPECT(makeBuf(sizeof(indices), uplHeap, D3D12_RESOURCE_STATE_GENERIC_READ, ibBuf));
+    SC_EXPECT(makeBuf(256, uplHeap, D3D12_RESOURCE_STATE_GENERIC_READ, cbBuf));
+    SC_EXPECT(makeBuf(static_cast<size_t>(kRowPitch) * kH, rbHeap, D3D12_RESOURCE_STATE_COPY_DEST, rbBuf));
+
+    void* pMap = nullptr;
+    SC_EXPECT(SUCCEEDED(vbBuf->Map(0, nullptr, &pMap))); std::memcpy(pMap, verts, sizeof(verts)); vbBuf->Unmap(0, nullptr);
+    SC_EXPECT(SUCCEEDED(ibBuf->Map(0, nullptr, &pMap))); std::memcpy(pMap, indices, sizeof(indices)); ibBuf->Unmap(0, nullptr);
+    SC_EXPECT(SUCCEEDED(cbBuf->Map(0, nullptr, &pMap))); std::memcpy(pMap, mvp, sizeof(mvp)); cbBuf->Unmap(0, nullptr);
+
+    // 6. Record 3D draw commands through ID3D12GraphicsCommandListX
+    D3D12_VIEWPORT vp{ 0.0f, 0.0f, static_cast<float>(kW), static_cast<float>(kH), 0.0f, 1.0f };
+    D3D12_RECT scissor{ 0, 0, static_cast<LONG>(kW), static_cast<LONG>(kH) };
+    D3D12_VERTEX_BUFFER_VIEW vbv{ vbBuf->GetGPUVirtualAddress(), sizeof(verts), sizeof(Vertex3D) };
+    D3D12_INDEX_BUFFER_VIEW  ibv{ ibBuf->GetGPUVirtualAddress(), sizeof(indices), DXGI_FORMAT_R16_UINT };
+
+    clX->SetPipelineState(pso.Get());
+    clX->SetGraphicsRootSignature(rootSig.Get());
+    clX->SetGraphicsRootConstantBufferView(0, cbBuf->GetGPUVirtualAddress());
+    clX->RSSetViewports(1, &vp);
+    clX->RSSetScissorRects(1, &scissor);
+    clX->OMSetRenderTargets(1, &rtvH, FALSE, &dsvH);
+    clX->ClearRenderTargetView(rtvH, rtClear.Color, 0, nullptr);
+    clX->ClearDepthStencilView(dsvH, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+    clX->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    clX->IASetVertexBuffers(0, 1, &vbv);
+    clX->IASetIndexBuffer(&ibv);
+    clX->DrawIndexedInstanced(12, 1, 0, 0, 0);
+
+    D3D12_RESOURCE_BARRIER bar{};
+    bar.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    bar.Transition = { rtTex.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+                       D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_SOURCE };
+    clX->ResourceBarrier(1, &bar);
+
+    D3D12_TEXTURE_COPY_LOCATION srcL{ rtTex.Get(), D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX, { 0 } };
+    D3D12_TEXTURE_COPY_LOCATION dstL{};
+    dstL.pResource = rbBuf.Get();
+    dstL.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    dstL.PlacedFootprint.Footprint = { DXGI_FORMAT_R8G8B8A8_UNORM, kW, kH, 1, kRowPitch };
+    clX->CopyTextureRegion(&dstL, 0, 0, 0, &srcL, nullptr);
+    SC_EXPECT(SUCCEEDED(clX->Close()));
+
+    ComPtr<ID3D12Fence> fence;
+    SC_EXPECT(SUCCEEDED(nativeDev->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence))));
+    HANDLE ev = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    SC_EXPECT(ev != nullptr);
+    ID3D12CommandList* lists[] = { clX->GetNativeCommandList() };
+    queueX->ExecuteCommandLists(1, lists);
+    SC_EXPECT(SUCCEEDED(queueX->Signal(fence.Get(), 1)));
+    SC_EXPECT(SUCCEEDED(fence->SetEventOnCompletion(1, ev)));
+    SC_EXPECT(WaitForSingleObject(ev, 5000) == WAIT_OBJECT_0);
+    CloseHandle(ev);
+
+    // 7. Verify 3D perspective + Z-buffer occlusion readback
+    uint8_t* px = nullptr;
+    SC_EXPECT(SUCCEEDED(rbBuf->Map(0, nullptr, reinterpret_cast<void**>(&px))));
+    auto pixelAt = [&](uint32_t x, uint32_t y) -> const uint8_t* {
+        return px + static_cast<size_t>(y) * kRowPitch + static_cast<size_t>(x) * 4u;
+    };
+
+    const uint8_t* bg      = pixelAt(2, 2);   // Background dark slate (16, 16, 24)
+    const uint8_t* nearPx  = pixelAt(20, 32); // Near Crimson (255, 0, 64)
+    const uint8_t* overlap = pixelAt(32, 32); // Overlap: Near Crimson MUST win over Far Blue
+    const uint8_t* farPx   = pixelAt(46, 32); // Non-occluded Far Blue (0, 128, 255)
+
+    SC_EXPECT(bg[0] == 16 && bg[1] == 16 && bg[2] == 24 && bg[3] == 255);
+    SC_EXPECT(nearPx[0] == 255 && nearPx[1] == 0 && nearPx[2] == 64 && nearPx[3] == 255);
+    SC_EXPECT(overlap[0] == 255 && overlap[1] == 0 && overlap[2] == 64 && overlap[3] == 255);
+    SC_EXPECT(farPx[0] == 0 && farPx[1] == 128 && farPx[2] == 255 && farPx[3] == 255);
+
+    rbBuf->Unmap(0, nullptr);
+    return true;
+}
+
 bool TestRuntimeDelayLoadAndOrdinalHookE2E() {
     HMODULE hookMod = GetModuleHandleW(L"scarlett_hook.dll");
     bool loadedByTest = false;
@@ -5847,6 +6095,7 @@ int main() {
     RunTest("ScarlettFullStack50SprintCapstoneE2E", TestScarlettFullStack50SprintCapstoneE2E);
     RunTest("PeDelayLoadAndOrdinalAuditE2E",     TestPeDelayLoadAndOrdinalAuditE2E);
     RunTest("RuntimeDelayLoadAndOrdinalHookE2E", TestRuntimeDelayLoadAndOrdinalHookE2E);
+    RunTest("D3D12Xs3DPerspectiveDepthRenderE2E", TestD3D12Xs3DPerspectiveDepthRenderE2E);
 
     XGameRuntimeUninitialize();
 

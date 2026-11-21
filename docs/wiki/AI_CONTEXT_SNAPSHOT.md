@@ -1,7 +1,7 @@
 # Scarlett Layer â€” AI Context Snapshot
 
-**Commit:** `a84c1d3` (#86) | **Generated:** 2026-11-21 05:38 UTC  
-**Totals:** 61 files (19,764 LOC) | 12 shims | 51 CTest checks
+**Commit:** `d5ac70c` (#88) | **Generated:** 2026-11-21 05:43 UTC  
+**Totals:** 61 files (20,013 LOC) | 12 shims | 52 CTest checks
 
 ---
 
@@ -121,7 +121,7 @@
  1651  src/tests/dummy_title/main.cpp
    59  src/tests/engine_plugin/engine_plugin.cpp
     3  src/tests/engine_plugin/engine_plugin.def
- 5855  src/tests/scarlett_tests/main.cpp
+ 6104  src/tests/scarlett_tests/main.cpp
   242  tools/audit_imports.py
   505  tools/build_wiki.py
   108  tools/test_brief.py
@@ -381,7 +381,7 @@
 - `MimgOp`: kMimgImageSample = 0x20u
 - `InstFormat`: Sopp, Vop1, Vop2, Vop3, Exp, Mubuf, Smem, Vintrp, Mimg
 
-## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 51 total)
+## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 52 total)
 ```cpp
     RunTest("VfsPathTranslation",         TestVfsPathTranslation);
     RunTest("RuntimeAndXUser",            TestRuntimeAndXUser);
@@ -434,9 +434,12 @@
     RunTest("ScarlettFullStack50SprintCapstoneE2E", TestScarlettFullStack50SprintCapstoneE2E);
     RunTest("PeDelayLoadAndOrdinalAuditE2E",     TestPeDelayLoadAndOrdinalAuditE2E);
     RunTest("RuntimeDelayLoadAndOrdinalHookE2E", TestRuntimeDelayLoadAndOrdinalHookE2E);
+    RunTest("D3D12Xs3DPerspectiveDepthRenderE2E", TestD3D12Xs3DPerspectiveDepthRenderE2E);
 ```
 
 ## 6. Recent Git History
+- `d5ac70c Merge Sprint 52: Runtime delay-load & GetProcAddress ordinal hooks (51/51 CTests)`
+- `31af4d5 Sprint 52: Runtime delay-load IAT patching & GetProcAddress ordinal hook (CTest #51)`
 - `a84c1d3 Merge Sprint 51: PE64 delay-load & ordinal import auditing (50/50 CTests)`
 - `2029333 Sprint 51: Phase 5 kickoff — PE64 delay-load & ordinal import auditing (CTest #50)`
 - `834af4f Docs: Clean up README for v1.0.0 release and add v2.0+ roadmap`
@@ -445,5 +448,3 @@
 - `c40af26 Sprint 50: 50-Sprint Golden Master Capstone — all 9 shims + XVD/Config E2E (CTest #49)`
 - `da17268 Merge Sprint 49: Loader XVD & MicrosoftGame.config E2E (48/48 CTests)`
 - `0b86dbf Sprint 49: Loader packaging — unencrypted XVD & MicrosoftGame.config E2E (CTest #48)`
-- `316eb9e Merge Sprint 48: dstorage_xs dynamic Velocity streaming E2E (47/47 CTests)`
-- `ad04cf2 Sprint 48: dstorage_xs dynamic Velocity streaming & status-array E2E (CTest #47)`
