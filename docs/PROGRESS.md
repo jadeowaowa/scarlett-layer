@@ -230,3 +230,7 @@
 ## Sprint 57: Headless PresentX Mode (SCARLETT_HEADLESS=1)
 - Added `SCARLETT_HEADLESS=1` support in `src/shims/d3d12_xs/d3d12_xs.cpp` (`InitPresentationPipeline` / `PresentX`), omitting `WS_VISIBLE` and presenting with `syncInterval=0` to eliminate CTest window popups and DWM recomposition hitches while preserving windowed VSync for interactive demos.
 - Configured `scarlett_shim_suite` in `CMakeLists.txt` with `ENVIRONMENT "SCARLETT_HEADLESS=1"` and added CTest #56 (`D3D12XsHeadlessPresentXModeE2E`) in `src/tests/scarlett_tests/main.cpp` (`56 passed, 0 failed`).
+
+## Sprint 58: Async Compute & Cross-Queue Fence Synchronization
+- Hardened `ScarlettCommandQueueX` in `src/shims/d3d12_xs/d3d12_xs.cpp`: release backbuffers and `IDXGISwapChain3` before `DestroyWindow`, back `SCARLETT_HEADLESS=1` with offscreen `ID3D12Resource` ring buffers, retain in-flight `PresentX` source resources until their GPU copy fence completes, and register an `ID3D12InfoQueue1` debug callback in `_DEBUG` builds.
+- Added CTest #57 (`D3D12XsAsyncComputeCrossQueueSyncE2E`) in `src/tests/scarlett_tests/main.cpp` verifying `D3D12_COMMAND_LIST_TYPE_COMPUTE` and `D3D12_COMMAND_LIST_TYPE_DIRECT` queues running a CS 5.0 producer with GPU-to-GPU `Signal()`/`Wait()` synchronization and readback validation (`57 passed, 0 failed`).

@@ -2371,6 +2371,141 @@ static size_t CurlTestWriteCb(char* ptr, size_t size, size_t nmemb, void* userda
     return total;
 }
 
+bool TestD3D12XsAsyncComputeCrossQueueSyncE2E() {
+    using Microsoft::WRL::ComPtr;
+
+    D3D12XBOX_CREATE_DEVICE_PARAMETERS devParams{};
+    devParams.Version = 1;
+    ComPtr<ID3D12DeviceX> devX;
+    SC_EXPECT(SUCCEEDED(D3D12XboxCreateDevice(nullptr, &devParams, IID_ID3D12DeviceX,
+        reinterpret_cast<void**>(devX.GetAddressOf()))));
+
+    ComPtr<ID3D12Device> nativeDev;
+    SC_EXPECT(SUCCEEDED(devX->QueryInterface(IID_ScarlettNativeD3D12Device,
+        reinterpret_cast<void**>(nativeDev.GetAddressOf()))));
+
+    // 1. Create separate COMPUTE and DIRECT queues via ID3D12DeviceX
+    D3D12_COMMAND_QUEUE_DESC cqDesc{};
+    cqDesc.Type = D3D12_COMMAND_LIST_TYPE_COMPUTE;
+    ComPtr<ID3D12CommandQueueX> computeQueueX;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommandQueueX(&cqDesc, computeQueueX.GetAddressOf())));
+
+    D3D12_COMMAND_QUEUE_DESC dqDesc{};
+    dqDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+    ComPtr<ID3D12CommandQueueX> directQueueX;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommandQueueX(&dqDesc, directQueueX.GetAddressOf())));
+
+    // 2. Create allocators & command lists for each queue type
+    ComPtr<ID3D12CommandAllocator> computeAlloc, directAlloc;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&computeAlloc))));
+    SC_EXPECT(SUCCEEDED(devX->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,  IID_PPV_ARGS(&directAlloc))));
+
+    ComPtr<ID3D12GraphicsCommandListX> computeClX, directClX;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_COMPUTE, computeAlloc.Get(), nullptr,
+        IID_ID3D12GraphicsCommandListX, reinterpret_cast<void**>(computeClX.GetAddressOf()))));
+    SC_EXPECT(SUCCEEDED(devX->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, directAlloc.Get(), nullptr,
+        IID_ID3D12GraphicsCommandListX, reinterpret_cast<void**>(directClX.GetAddressOf()))));
+
+    // 3. Compile minimal CS 5.0 producer shader: uav[tid] = tid * 10 + 7
+    static const char* kCsHlsl = R"(
+        RWStructuredBuffer<uint> OutBuf : register(u0);
+        [numthreads(64, 1, 1)]
+        void CSMain(uint3 tid : SV_DispatchThreadID) {
+            OutBuf[tid.x] = tid.x * 10u + 7u;
+        }
+    )";
+    ComPtr<ID3DBlob> csBlob, errBlob;
+    SC_EXPECT(SUCCEEDED(D3DCompile(kCsHlsl, std::strlen(kCsHlsl), nullptr, nullptr, nullptr,
+        "CSMain", "cs_5_0", 0, 0, &csBlob, &errBlob)));
+
+    D3D12_ROOT_PARAMETER rp{};
+    rp.ParameterType = D3D12_ROOT_PARAMETER_TYPE_UAV;
+    rp.Descriptor = { 0, 0 };
+    rp.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+    D3D12_ROOT_SIGNATURE_DESC rsDesc{ 1, &rp, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_NONE };
+    ComPtr<ID3DBlob> sigBlob;
+    SC_EXPECT(SUCCEEDED(D3D12SerializeRootSignature(&rsDesc, D3D_ROOT_SIGNATURE_VERSION_1, &sigBlob, &errBlob)));
+    ComPtr<ID3D12RootSignature> rootSig;
+    SC_EXPECT(SUCCEEDED(nativeDev->CreateRootSignature(0, sigBlob->GetBufferPointer(), sigBlob->GetBufferSize(),
+        IID_PPV_ARGS(&rootSig))));
+
+    D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc{};
+    psoDesc.pRootSignature = rootSig.Get();
+    psoDesc.CS = { csBlob->GetBufferPointer(), csBlob->GetBufferSize() };
+    ComPtr<ID3D12PipelineState> csPso;
+    SC_EXPECT(SUCCEEDED(nativeDev->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&csPso))));
+
+    // 4. Allocate DEFAULT UAV buffer (64 * uint32) and READBACK buffer
+    constexpr uint32_t kCount = 64;
+    constexpr UINT64   kBytes = kCount * sizeof(uint32_t);
+
+    D3D12_HEAP_PROPERTIES defHeap{ D3D12_HEAP_TYPE_DEFAULT };
+    D3D12_HEAP_PROPERTIES rbHeap{ D3D12_HEAP_TYPE_READBACK };
+
+    D3D12_RESOURCE_DESC uavDesc{};
+    uavDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    uavDesc.Width = kBytes; uavDesc.Height = 1; uavDesc.DepthOrArraySize = 1; uavDesc.MipLevels = 1;
+    uavDesc.SampleDesc.Count = 1; uavDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    uavDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+    ComPtr<ID3D12Resource> uavBuf;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommittedResource(&defHeap, D3D12_HEAP_FLAG_NONE, &uavDesc,
+        D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&uavBuf))));
+
+    D3D12_RESOURCE_DESC rbDesc = uavDesc;
+    rbDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+    ComPtr<ID3D12Resource> rbBuf;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommittedResource(&rbHeap, D3D12_HEAP_FLAG_NONE, &rbDesc,
+        D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&rbBuf))));
+
+    // 5. Record & submit async compute pass, then signal cross-queue fence
+    computeClX->SetPipelineState(csPso.Get());
+    computeClX->SetComputeRootSignature(rootSig.Get());
+    computeClX->SetComputeRootUnorderedAccessView(0, uavBuf->GetGPUVirtualAddress());
+    computeClX->Dispatch(1, 1, 1);
+    SC_EXPECT(SUCCEEDED(computeClX->Close()));
+
+    ComPtr<ID3D12Fence> crossFence, doneFence;
+    SC_EXPECT(SUCCEEDED(nativeDev->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&crossFence))));
+    SC_EXPECT(SUCCEEDED(nativeDev->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&doneFence))));
+
+    ID3D12CommandList* computeLists[] = { computeClX->GetNativeCommandList() };
+    computeQueueX->ExecuteCommandLists(1, computeLists);
+    SC_EXPECT(SUCCEEDED(computeQueueX->Signal(crossFence.Get(), 1)));
+
+    // 6. Direct queue GPU-waits on compute fence, then copies UAV -> READBACK
+    SC_EXPECT(SUCCEEDED(directQueueX->Wait(crossFence.Get(), 1)));
+
+    directClX->CopyBufferRegion(rbBuf.Get(), 0, uavBuf.Get(), 0, kBytes);
+    SC_EXPECT(SUCCEEDED(directClX->Close()));
+
+    ID3D12CommandList* directLists[] = { directClX->GetNativeCommandList() };
+    directQueueX->ExecuteCommandLists(1, directLists);
+    SC_EXPECT(SUCCEEDED(directQueueX->Signal(doneFence.Get(), 1)));
+
+    HANDLE ev = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    SC_EXPECT(ev != nullptr);
+    SC_EXPECT(SUCCEEDED(doneFence->SetEventOnCompletion(1, ev)));
+    SC_EXPECT(WaitForSingleObject(ev, 5000) == WAIT_OBJECT_0);
+    CloseHandle(ev);
+
+    // 7. Verify all 64 compute-produced values arrived via cross-queue sync
+    uint32_t* mapped = nullptr;
+    D3D12_RANGE readRange{ 0, kBytes };
+    SC_EXPECT(SUCCEEDED(rbBuf->Map(0, &readRange, reinterpret_cast<void**>(&mapped))) && mapped != nullptr);
+    bool allMatch = true;
+    for (uint32_t i = 0; i < kCount; ++i) {
+        if (mapped[i] != i * 10u + 7u) {
+            allMatch = false;
+            break;
+        }
+    }
+    D3D12_RANGE writeRange{ 0, 0 };
+    rbBuf->Unmap(0, &writeRange);
+    SC_EXPECT(allMatch);
+
+    return true;
+}
+
 bool TestD3D12XsHeadlessPresentXModeE2E() {
     using Microsoft::WRL::ComPtr;
 
@@ -6377,6 +6512,7 @@ int main() {
     RunTest("D3D12XsPresentXSwapChainE2E",        TestD3D12XsPresentXSwapChainE2E);
     RunTest("D3D12XsFramePacingTokensE2E",        TestD3D12XsFramePacingTokensE2E);
     RunTest("D3D12XsHeadlessPresentXModeE2E",     TestD3D12XsHeadlessPresentXModeE2E);
+    RunTest("D3D12XsAsyncComputeCrossQueueSyncE2E", TestD3D12XsAsyncComputeCrossQueueSyncE2E);
 
     XGameRuntimeUninitialize();
 

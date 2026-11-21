@@ -1,7 +1,7 @@
 # Scarlett Layer â€” AI Context Snapshot
 
-**Commit:** `2d78b03` (#95) | **Generated:** 2026-11-21 06:25 UTC  
-**Totals:** 62 files (20,677 LOC) | 12 shims | 56 CTest checks
+**Commit:** `f4fcfe1` (#97) | **Generated:** 2026-11-21 06:45 UTC  
+**Totals:** 62 files (20,888 LOC) | 12 shims | 57 CTest checks
 
 ---
 
@@ -78,7 +78,7 @@
   105  src/shims/acphal/acphal.cpp
     7  src/shims/acphal/acphal.def
    33  src/shims/acphal/acphal.hpp
- 1363  src/shims/d3d12_xs/d3d12_xs.cpp
+ 1438  src/shims/d3d12_xs/d3d12_xs.cpp
     4  src/shims/d3d12_xs/d3d12_xs.def
   237  src/shims/d3d12_xs/d3d12_xs.hpp
  1191  src/shims/d3d12_xs/rdna2_isa.hpp
@@ -122,7 +122,7 @@
    59  src/tests/engine_plugin/engine_plugin.cpp
     3  src/tests/engine_plugin/engine_plugin.def
   328  src/tests/scarlett_3d_demo/main.cpp
- 6385  src/tests/scarlett_tests/main.cpp
+ 6521  src/tests/scarlett_tests/main.cpp
   242  tools/audit_imports.py
   505  tools/build_wiki.py
   108  tools/test_brief.py
@@ -143,7 +143,7 @@
 - `HRESULT WINAPI ApuFree(void* virtualAddress)`
 
 ## `d3d12_xs.dll`
-**Files:** `src/shims/d3d12_xs/d3d12_xs.cpp` (1363 L), `src/shims/d3d12_xs/d3d12_xs.def` (4 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (237 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1191 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_translator.hpp` (401 L)
+**Files:** `src/shims/d3d12_xs/d3d12_xs.cpp` (1438 L), `src/shims/d3d12_xs/d3d12_xs.def` (4 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (237 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1191 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_translator.hpp` (401 L)
 
 **DLL Exports (`.def`):** `D3D12XboxCreateDevice`, `D3D12SerializeRootSignature = ScarlettSerializeRootSignature`
 
@@ -382,7 +382,7 @@
 - `MimgOp`: kMimgImageSample = 0x20u
 - `InstFormat`: Sopp, Vop1, Vop2, Vop3, Exp, Mubuf, Smem, Vintrp, Mimg
 
-## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 56 total)
+## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 57 total)
 ```cpp
     RunTest("VfsPathTranslation",         TestVfsPathTranslation);
     RunTest("RuntimeAndXUser",            TestRuntimeAndXUser);
@@ -440,9 +440,12 @@
     RunTest("D3D12XsPresentXSwapChainE2E",        TestD3D12XsPresentXSwapChainE2E);
     RunTest("D3D12XsFramePacingTokensE2E",        TestD3D12XsFramePacingTokensE2E);
     RunTest("D3D12XsHeadlessPresentXModeE2E",     TestD3D12XsHeadlessPresentXModeE2E);
+    RunTest("D3D12XsAsyncComputeCrossQueueSyncE2E", TestD3D12XsAsyncComputeCrossQueueSyncE2E);
 ```
 
 ## 6. Recent Git History
+- `f4fcfe1 Merge Sprint 57: Headless PresentX mode (56/56 CTests)`
+- `dffe91f Sprint 57: Headless PresentX mode (SCARLETT_HEADLESS=1) & E2E (CTest #56)`
 - `2d78b03 Merge Sprint 55: Zero-readback GPU PresentX & DXGI SwapChain E2E (54/54 CTests)`
 - `12ccf0c Sprint 55: Zero-readback GPU PresentX demo & DXGI SwapChain E2E (CTest #54)`
 - `47a919c Merge Sprint 54: COM vtable ABI conformance (53/53 CTests)`
@@ -451,5 +454,3 @@
 - `9647773 Merge Sprint 53: 3D perspective & depth-buffer E2E render (52/52 CTests)`
 - `b7fe9bc Sprint 53: 3D perspective-projected indexed render & D32_FLOAT Z-buffer E2E (CTest #52)`
 - `d5ac70c Merge Sprint 52: Runtime delay-load & GetProcAddress ordinal hooks (51/51 CTests)`
-- `31af4d5 Sprint 52: Runtime delay-load IAT patching & GetProcAddress ordinal hook (CTest #51)`
-- `a84c1d3 Merge Sprint 51: PE64 delay-load & ordinal import auditing (50/50 CTests)`

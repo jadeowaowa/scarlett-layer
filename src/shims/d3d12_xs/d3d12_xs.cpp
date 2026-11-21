@@ -188,6 +188,13 @@ public:
 
     ~ScarlettCommandQueueX() {
         FlushGpu();
+        for (auto& src : m_inFlightSrcResources) {
+            src.Reset();
+        }
+        for (auto& bb : m_backBuffers) {
+            bb.Reset();
+        }
+        m_swapChain.Reset();
         if (m_fenceEvent) {
             CloseHandle(m_fenceEvent);
             m_fenceEvent = nullptr;
@@ -254,7 +261,7 @@ public:
             return E_INVALIDARG;
         }
 
-        if (!m_swapChain) {
+        if (!m_pipelineInitialized) {
             HRESULT hr = InitPresentationPipeline(srcResource);
             if (FAILED(hr)) {
                 return hr;
@@ -267,8 +274,9 @@ public:
             return S_FALSE;
         }
 
-        UINT backIdx = m_swapChain->GetCurrentBackBufferIndex();
+        UINT backIdx = m_headless ? m_headlessBackIdx : m_swapChain->GetCurrentBackBufferIndex();
         WaitForFenceValue(m_frameFenceValues[backIdx]);
+        m_inFlightSrcResources[backIdx] = srcResource;
 
         HRESULT hr = m_copyAllocators[backIdx]->Reset();
         if (FAILED(hr)) {
@@ -342,13 +350,13 @@ public:
         ID3D12CommandList* lists[] = { m_copyCmdList.Get() };
         m_queue->ExecuteCommandLists(1, lists);
 
-        char headlessEnv[8]{};
-        const bool isHeadless =
-            GetEnvironmentVariableA("SCARLETT_HEADLESS", headlessEnv, sizeof(headlessEnv)) > 0 &&
-            headlessEnv[0] == '1';
-        hr = m_swapChain->Present(isHeadless ? 0u : 1u, 0);
-        if (FAILED(hr)) {
-            return hr;
+        if (!m_headless) {
+            hr = m_swapChain->Present(1, 0);
+            if (FAILED(hr)) {
+                return hr;
+            }
+        } else {
+            m_headlessBackIdx = (m_headlessBackIdx + 1) % kSwapBufferCount;
         }
 
         ++m_fenceValue;
@@ -363,6 +371,58 @@ private:
         const UINT width = static_cast<UINT>(desc.Width);
         const UINT height = desc.Height;
 
+        char headlessEnv[8]{};
+        m_headless =
+            GetEnvironmentVariableA("SCARLETT_HEADLESS", headlessEnv, sizeof(headlessEnv)) > 0 &&
+            headlessEnv[0] == '1';
+
+        if (m_headless) {
+            D3D12_HEAP_PROPERTIES defHeap{ D3D12_HEAP_TYPE_DEFAULT };
+            D3D12_RESOURCE_DESC bbDesc{};
+            bbDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+            bbDesc.Width = width;
+            bbDesc.Height = height;
+            bbDesc.DepthOrArraySize = 1;
+            bbDesc.MipLevels = 1;
+            bbDesc.Format = desc.Format;
+            bbDesc.SampleDesc.Count = 1;
+            bbDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+
+            for (UINT i = 0; i < kSwapBufferCount; ++i) {
+                HRESULT hr = m_device->CreateCommittedResource(
+                    &defHeap, D3D12_HEAP_FLAG_NONE, &bbDesc,
+                    D3D12_RESOURCE_STATE_PRESENT, nullptr, IID_PPV_ARGS(&m_backBuffers[i]));
+                if (FAILED(hr)) {
+                    return hr;
+                }
+                hr = m_device->CreateCommandAllocator(
+                    D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_copyAllocators[i]));
+                if (FAILED(hr)) {
+                    return hr;
+                }
+            }
+
+            HRESULT hr = m_device->CreateCommandList(
+                0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_copyAllocators[0].Get(), nullptr,
+                IID_PPV_ARGS(&m_copyCmdList));
+            if (FAILED(hr)) {
+                return hr;
+            }
+            m_copyCmdList->Close();
+
+            hr = m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_copyFence));
+            if (FAILED(hr)) {
+                return hr;
+            }
+            m_fenceEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+            m_pipelineInitialized = true;
+
+            char info[128];
+            std::snprintf(info, sizeof(info), "-> created %ux%u offscreen PresentX pipeline (headless)", width, height);
+            sc::log::Write(sc::log::Level::Info, "d3d12_xs", "InitPresentationPipeline", info);
+            return S_OK;
+        }
+
         HINSTANCE hInst = GetModuleHandleW(nullptr);
         WNDCLASSEXW wc{};
         wc.cbSize = sizeof(wc);
@@ -376,17 +436,11 @@ private:
         RECT rc{ 0, 0, static_cast<LONG>(width), static_cast<LONG>(height) };
         AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
 
-        char headlessEnv[8]{};
-        const bool isHeadless =
-            GetEnvironmentVariableA("SCARLETT_HEADLESS", headlessEnv, sizeof(headlessEnv)) > 0 &&
-            headlessEnv[0] == '1';
-        const DWORD winStyle = isHeadless ? WS_OVERLAPPEDWINDOW : (WS_OVERLAPPEDWINDOW | WS_VISIBLE);
-
         m_hwnd = CreateWindowExW(
             0,
             kWindowClassName,
             L"Scarlett Layer - Xbox Series X [Compute UAV + SCXS + PSO Cache]",
-            winStyle,
+            WS_OVERLAPPEDWINDOW | WS_VISIBLE,
             CW_USEDEFAULT, CW_USEDEFAULT,
             rc.right - rc.left, rc.bottom - rc.top,
             nullptr, nullptr, hInst, &m_windowClosed);
@@ -446,7 +500,8 @@ private:
         m_fenceEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
 
         char info[128];
-        std::snprintf(info, sizeof(info), "-> created %ux%u DXGI Flip-Discard swapchain for PresentX (%s)", width, height, isHeadless ? "headless" : "windowed");
+        m_pipelineInitialized = true;
+        std::snprintf(info, sizeof(info), "-> created %ux%u DXGI Flip-Discard swapchain for PresentX (windowed)", width, height);
         sc::log::Write(sc::log::Level::Info, "d3d12_xs", "InitPresentationPipeline", info);
         return S_OK;
     }
@@ -487,9 +542,13 @@ private:
     ComPtr<ID3D12CommandQueue> m_queue;
     ComPtr<IDXGISwapChain3> m_swapChain;
     ComPtr<ID3D12Resource> m_backBuffers[kSwapBufferCount];
+    ComPtr<ID3D12Resource> m_inFlightSrcResources[kSwapBufferCount];
     ComPtr<ID3D12Fence> m_copyFence;
     ComPtr<ID3D12CommandAllocator> m_copyAllocators[kSwapBufferCount];
     ComPtr<ID3D12GraphicsCommandList> m_copyCmdList;
+    bool m_headless{false};
+    bool m_pipelineInitialized{false};
+    UINT m_headlessBackIdx{0};
 
     HWND m_hwnd{nullptr};
     HANDLE m_fenceEvent{nullptr};
@@ -1344,6 +1403,22 @@ HRESULT WINAPI D3D12XboxCreateDevice(
         sc::log::Write(sc::log::Level::Error, "d3d12_xs", __FUNCTION__, "-> D3D12CreateDevice failed");
         return hr;
     }
+
+#ifdef _DEBUG
+    ComPtr<ID3D12InfoQueue1> infoQueue1;
+    if (SUCCEEDED(nativeDevice.As(&infoQueue1))) {
+        DWORD cookie = 0;
+        infoQueue1->RegisterMessageCallback(
+            [](D3D12_MESSAGE_CATEGORY, D3D12_MESSAGE_SEVERITY sev, D3D12_MESSAGE_ID, LPCSTR desc, void*) {
+                if (sev <= D3D12_MESSAGE_SEVERITY_WARNING && desc) {
+                    sc::log::Write(
+                        sev == D3D12_MESSAGE_SEVERITY_WARNING ? sc::log::Level::Warn : sc::log::Level::Error,
+                        "d3d12_debug", "Validation", desc);
+                }
+            },
+            D3D12_MESSAGE_CALLBACK_FLAG_NONE, nullptr, &cookie);
+    }
+#endif
 
     auto* wrapper = new ScarlettDeviceX(
         std::move(factory), std::move(nativeDevice), desc.VendorId, desc.DeviceId);
