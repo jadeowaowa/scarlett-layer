@@ -119,7 +119,7 @@ All source code in this repository was generated with Gemini, working through an
 
 ## Legal
 
-This is an independent implementation written to interoperate with software that targets the Xbox GDK. This project is an independent implementation and is not affiliated with or endorsed by Microsoft or Xbox. The author has not intentionally included Microsoft proprietary source code, console firmware, or keys, and the project does not decrypt retail content. Because the code was AI-generated, its exact provenance can't be fully documented. If you believe something here infringes your rights, please open an issue.
+This project is an independent implementation and is not affiliated with or endorsed by Microsoft or Xbox. The author has not intentionally included Microsoft proprietary source code, console firmware, or keys, and the project does not decrypt retail content. Because the code was AI-generated, its exact provenance can't be fully documented. If you believe something here infringes your rights, please open an issue.
 
 ## License
 
