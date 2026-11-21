@@ -1,7 +1,7 @@
 # Scarlett Layer â€” AI Context Snapshot
 
-**Commit:** `48df6a1` (#76) | **Generated:** 2026-11-21 05:10 UTC  
-**Totals:** 61 files (19,106 LOC) | 12 shims | 47 CTest checks
+**Commit:** `316eb9e` (#78) | **Generated:** 2026-11-21 05:16 UTC  
+**Totals:** 61 files (19,184 LOC) | 12 shims | 48 CTest checks
 
 ---
 
@@ -121,7 +121,7 @@
  1651  src/tests/dummy_title/main.cpp
    59  src/tests/engine_plugin/engine_plugin.cpp
     3  src/tests/engine_plugin/engine_plugin.def
- 5269  src/tests/scarlett_tests/main.cpp
+ 5347  src/tests/scarlett_tests/main.cpp
   242  tools/audit_imports.py
   505  tools/build_wiki.py
   108  tools/test_brief.py
@@ -381,7 +381,7 @@
 - `MimgOp`: kMimgImageSample = 0x20u
 - `InstFormat`: Sopp, Vop1, Vop2, Vop3, Exp, Mubuf, Smem, Vintrp, Mimg
 
-## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 47 total)
+## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 48 total)
 ```cpp
     RunTest("VfsPathTranslation",         TestVfsPathTranslation);
     RunTest("RuntimeAndXUser",            TestRuntimeAndXUser);
@@ -430,9 +430,12 @@
     RunTest("KernelXAndPixEvtE2E",               TestKernelXAndPixEvtE2E);
     RunTest("XMemAndXgXsSwizzleE2E",             TestXMemAndXgXsSwizzleE2E);
     RunTest("DStorageVelocityDynamicE2E",        TestDStorageVelocityDynamicE2E);
+    RunTest("LoaderXvdAndGameConfigE2E",         TestLoaderXvdAndGameConfigE2E);
 ```
 
 ## 6. Recent Git History
+- `316eb9e Merge Sprint 48: dstorage_xs dynamic Velocity streaming E2E (47/47 CTests)`
+- `ad04cf2 Sprint 48: dstorage_xs dynamic Velocity streaming & status-array E2E (CTest #47)`
 - `48df6a1 Merge Sprint 47: xmem & xg_xs physical memory + BC7 swizzle E2E (46/46 CTests)`
 - `8ed0b9c Sprint 47: xmem & xg_xs physical memory + 64KB_S BC7 swizzle E2E (CTest #46)`
 - `03e18a1 Merge Sprint 46: kernelx & pixevt OS/profiler E2E (45/45 CTests)`
@@ -441,5 +444,3 @@
 - `6f628b4 Sprint 45: Phase 3 closeout — full Scarlett title bring-up E2E (CTest #44)`
 - `62406f1 Merge Sprint 44: GameInput runtime polling E2E (43/43 CTests)`
 - `3b6ec9e Sprint 44: GameInput runtime polling E2E (CTest #43)`
-- `bf159be Merge Sprint 43: XUser profile parity & XGameSave E2E (42/42 CTests)`
-- `0209cbe Sprint 43: XUser profile parity (GetId/GetState/GetLocalId) + XGameSave E2E (CTest #42)`

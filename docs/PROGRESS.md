@@ -200,3 +200,6 @@
 
 ## Sprint 48: dstorage_xs Dynamic Velocity Streaming & Status-Array E2E
 - Added CTest #47 (`DStorageVelocityDynamicE2E`) in `src/tests/scarlett_tests/main.cpp` dynamically loading `shims\dstorage_xs.dll` and validating `DStorageSetConfiguration`, `DStorageGetFactory`, high-priority multi-request batching, `IDStorageStatusArrayX` completion, and bit-for-bit memory streaming parity (`47 passed, 0 failed`).
+
+## Sprint 49: Loader Packaging — Unencrypted XVD & MicrosoftGame.config E2E
+- Added CTest #48 (`LoaderXvdAndGameConfigE2E`) in `src/tests/scarlett_tests/main.cpp` validating encrypted XVD rejection, unencrypted XVD `ReadUserData` extraction, and `sc::loader::ParseGameConfig` manifest/executable resolution (`48 passed, 0 failed`).
