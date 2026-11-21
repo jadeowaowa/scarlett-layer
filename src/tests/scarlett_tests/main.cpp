@@ -2371,6 +2371,100 @@ static size_t CurlTestWriteCb(char* ptr, size_t size, size_t nmemb, void* userda
     return total;
 }
 
+bool TestD3D12XsComVtableAbiConformanceE2E() {
+    using Microsoft::WRL::ComPtr;
+
+    D3D12XBOX_CREATE_DEVICE_PARAMETERS devParams{};
+    devParams.Version = 1;
+    ComPtr<ID3D12DeviceX> devX;
+    SC_EXPECT(SUCCEEDED(D3D12XboxCreateDevice(nullptr, &devParams, IID_ID3D12DeviceX,
+        reinterpret_cast<void**>(devX.GetAddressOf()))));
+
+    D3D12_COMMAND_QUEUE_DESC qd{};
+    qd.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+    ComPtr<ID3D12CommandQueueX> queueX;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommandQueueX(&qd, queueX.GetAddressOf())));
+
+    ComPtr<ID3D12CommandAllocator> alloc;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&alloc))));
+
+    ComPtr<ID3D12GraphicsCommandListX> clX;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, alloc.Get(), nullptr,
+        IID_ID3D12GraphicsCommandListX, reinterpret_cast<void**>(clX.GetAddressOf()))));
+
+    // 1. Raw x64 COM vtable pointer inspection (slots 0..2 = IUnknown, plus interface slots)
+    auto checkVtableSlots = [](void* comObj, size_t expectedSlots) -> bool {
+        if (!comObj) return false;
+        auto** vtbl = *reinterpret_cast<void***>(comObj);
+        if (!vtbl) return false;
+        for (size_t i = 0; i < expectedSlots; ++i) {
+            if (vtbl[i] == nullptr) return false;
+        }
+        return true;
+    };
+    SC_EXPECT(checkVtableSlots(queueX.Get(), 7));
+    SC_EXPECT(checkVtableSlots(clX.Get(), 36));
+    SC_EXPECT(checkVtableSlots(devX.Get(), 10));
+
+    // 2. Direct raw vtable invocation of IUnknown (slot 0 = QI, slot 1 = AddRef, slot 2 = Release)
+    using PFN_QI      = HRESULT(STDMETHODCALLTYPE*)(void*, REFIID, void**);
+    using PFN_AddRef  = ULONG(STDMETHODCALLTYPE*)(void*);
+    using PFN_Release = ULONG(STDMETHODCALLTYPE*)(void*);
+
+    auto** devVtbl = *reinterpret_cast<void***>(devX.Get());
+    auto rawQI      = reinterpret_cast<PFN_QI>(devVtbl[0]);
+    auto rawAddRef  = reinterpret_cast<PFN_AddRef>(devVtbl[1]);
+    auto rawRelease = reinterpret_cast<PFN_Release>(devVtbl[2]);
+
+    const ULONG r1 = rawAddRef(devX.Get());
+    const ULONG r2 = rawAddRef(devX.Get());
+    SC_EXPECT(r2 == r1 + 1);
+    const ULONG r3 = rawRelease(devX.Get());
+    const ULONG r4 = rawRelease(devX.Get());
+    SC_EXPECT(r3 == r1 && r4 == r1 - 1);
+
+    void* unkPtr = nullptr;
+    void* devPtr = nullptr;
+    SC_EXPECT(SUCCEEDED(rawQI(devX.Get(), __uuidof(IUnknown), &unkPtr)) && unkPtr != nullptr);
+    SC_EXPECT(SUCCEEDED(rawQI(devX.Get(), IID_ID3D12DeviceX, &devPtr)) && devPtr != nullptr);
+    SC_EXPECT(unkPtr == devPtr);
+    rawRelease(unkPtr);
+    rawRelease(devPtr);
+
+    static constexpr GUID kBogusGuid =
+        { 0xdeadbeef, 0x1234, 0x5678, { 0x9a, 0xbc, 0xde, 0xf0, 0x11, 0x22, 0x33, 0x44 } };
+    void* bogusPtr = reinterpret_cast<void*>(0x12345678ULL);
+    SC_EXPECT(rawQI(devX.Get(), kBogusGuid, &bogusPtr) == E_NOINTERFACE);
+    SC_EXPECT(bogusPtr == nullptr);
+
+    // 3. Direct raw vtable invocation of ID3D12GraphicsCommandListX::Close (slot 3)
+    using PFN_Close = HRESULT(STDMETHODCALLTYPE*)(void*);
+    auto** clVtbl = *reinterpret_cast<void***>(clX.Get());
+    auto rawClose = reinterpret_cast<PFN_Close>(clVtbl[3]);
+    SC_EXPECT(SUCCEEDED(rawClose(clX.Get())));
+
+    // 4. Direct raw vtable invocation of ID3D12CommandQueueX::Signal (slot 4)
+    ComPtr<ID3D12Device> nativeDev;
+    SC_EXPECT(SUCCEEDED(devX->QueryInterface(IID_ScarlettNativeD3D12Device,
+        reinterpret_cast<void**>(nativeDev.GetAddressOf()))));
+    ComPtr<ID3D12Fence> fence;
+    SC_EXPECT(SUCCEEDED(nativeDev->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence))));
+
+    using PFN_Signal = HRESULT(STDMETHODCALLTYPE*)(void*, ID3D12Fence*, UINT64);
+    auto** qVtbl = *reinterpret_cast<void***>(queueX.Get());
+    auto rawSignal = reinterpret_cast<PFN_Signal>(qVtbl[4]);
+    SC_EXPECT(SUCCEEDED(rawSignal(queueX.Get(), fence.Get(), 77)));
+
+    HANDLE ev = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    SC_EXPECT(ev != nullptr);
+    SC_EXPECT(SUCCEEDED(fence->SetEventOnCompletion(77, ev)));
+    SC_EXPECT(WaitForSingleObject(ev, 5000) == WAIT_OBJECT_0);
+    CloseHandle(ev);
+    SC_EXPECT(fence->GetCompletedValue() == 77);
+
+    return true;
+}
+
 bool TestD3D12Xs3DPerspectiveDepthRenderE2E() {
     using Microsoft::WRL::ComPtr;
 
@@ -6131,6 +6225,7 @@ int main() {
     RunTest("PeDelayLoadAndOrdinalAuditE2E",     TestPeDelayLoadAndOrdinalAuditE2E);
     RunTest("RuntimeDelayLoadAndOrdinalHookE2E", TestRuntimeDelayLoadAndOrdinalHookE2E);
     RunTest("D3D12Xs3DPerspectiveDepthRenderE2E", TestD3D12Xs3DPerspectiveDepthRenderE2E);
+    RunTest("D3D12XsComVtableAbiConformanceE2E",  TestD3D12XsComVtableAbiConformanceE2E);
 
     XGameRuntimeUninitialize();
 
