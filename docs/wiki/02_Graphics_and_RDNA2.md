@@ -1,7 +1,7 @@
 # 02 â€” Graphics (`d3d12_xs`), Surface Tiling (`xg_xs`) & RDNA2 Binary Lifter
 
 ## `d3d12_xs.dll`
-**Files:** `src/shims/d3d12_xs/d3d12_xs.cpp` (1318 L), `src/shims/d3d12_xs/d3d12_xs.def` (4 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (237 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1191 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_translator.hpp` (401 L)
+**Files:** `src/shims/d3d12_xs/d3d12_xs.cpp` (1320 L), `src/shims/d3d12_xs/d3d12_xs.def` (4 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (237 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1191 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_translator.hpp` (401 L)
 
 **DLL Exports (`.def`):** `D3D12XboxCreateDevice`, `D3D12SerializeRootSignature = ScarlettSerializeRootSignature`
 
