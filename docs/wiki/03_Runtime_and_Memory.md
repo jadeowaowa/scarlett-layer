@@ -1,15 +1,16 @@
 # 03 â€” Runtime (`xgameruntime`), Kernel (`kernelx`), Memory (`xmem`), Input & PIX
 
 ## `xgameruntime.dll`
-**Files:** `src/shims/xgameruntime/game_save.cpp` (489 L), `src/shims/xgameruntime/gdk_types.hpp` (91 L), `src/shims/xgameruntime/runtime_internal.hpp` (87 L), `src/shims/xgameruntime/task_queue.cpp` (191 L), `src/shims/xgameruntime/task_queue.hpp` (13 L), `src/shims/xgameruntime/xgameruntime.cpp` (151 L), `src/shims/xgameruntime/xgameruntime.def` (26 L)
+**Files:** `src/shims/xgameruntime/game_save.cpp` (489 L), `src/shims/xgameruntime/gdk_types.hpp` (101 L), `src/shims/xgameruntime/runtime_internal.hpp` (87 L), `src/shims/xgameruntime/task_queue.cpp` (191 L), `src/shims/xgameruntime/task_queue.hpp` (13 L), `src/shims/xgameruntime/xgameruntime.cpp` (173 L), `src/shims/xgameruntime/xgameruntime.def` (29 L)
 
-**DLL Exports (`.def`):** `XGameRuntimeInitialize`, `XGameRuntimeUninitialize`, `XSystemGetDeviceType`, `XTaskQueueCreate`, `XTaskQueueDispatch`, `XTaskQueueCloseHandle`, `XAsyncGetStatus`, `XUserAddAsync`, `XUserAddResult`, `XUserGetGamertag`, `XUserCloseHandle`, `XGameSaveInitializeProviderAsync`, `XGameSaveInitializeProviderResult`, `XGameSaveCloseProvider`, `XGameSaveCreateContainer`, `XGameSaveCloseContainer`, `XGameSaveCreateUpdate`, `XGameSaveCloseUpdate`, `XGameSaveSubmitBlobWrite`, `XGameSaveSubmitBlobDelete`, `XGameSaveSubmitUpdateAsync`, `XGameSaveSubmitUpdateResult`, `XGameSaveReadBlobDataAsync`, `XGameSaveReadBlobDataResult`
+**DLL Exports (`.def`):** `XGameRuntimeInitialize`, `XGameRuntimeUninitialize`, `XSystemGetDeviceType`, `XTaskQueueCreate`, `XTaskQueueDispatch`, `XTaskQueueCloseHandle`, `XAsyncGetStatus`, `XUserAddAsync`, `XUserAddResult`, `XUserGetGamertag`, `XUserGetId`, `XUserGetState`, `XUserGetLocalId`, `XUserCloseHandle`, `XGameSaveInitializeProviderAsync`, `XGameSaveInitializeProviderResult`, `XGameSaveCloseProvider`, `XGameSaveCreateContainer`, `XGameSaveCloseContainer`, `XGameSaveCreateUpdate`, `XGameSaveCloseUpdate`, `XGameSaveSubmitBlobWrite`, `XGameSaveSubmitBlobDelete`, `XGameSaveSubmitUpdateAsync`, `XGameSaveSubmitUpdateResult`, `XGameSaveReadBlobDataAsync`, `XGameSaveReadBlobDataResult`
 
 **Key Enums:**
 - `XSystemDeviceType`: Unknown = 0x00, Pc = 0x01, XboxOne = 0x02, XboxOneS = 0x03, XboxOneX = 0x04, XboxOneXDevkit = 0x05, XboxScarlettLockhart = 0x06, XboxScarlettAnaconda = 0x07, XboxScarlettDevkit = 0x08
 - `XTaskQueueDispatchMode`: Manual = 0, ThreadPool = 1, SerializedThreadPool = 2, Immediate = 3
 - `XTaskQueuePort`: Work = 0, Completion = 1
 - `XUserAddOptions`: None = 0x00, AddDefaultUserSilently = 0x01, AllowGuests = 0x02, AddDefaultUserAllowingUI = 0x04
+- `XUserState`: SignedIn = 0, SigningOut = 1, SignedOut = 2
 - `XUserGamertagComponent`: Classic = 0, Modern = 1, ModernSuffix = 2, UniqueModern = 3
 
 ## `kernelx.dll`

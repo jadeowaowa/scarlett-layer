@@ -149,3 +149,25 @@ void WINAPI XUserCloseHandle(XUserHandle user) {
 }
 
 } // extern "C"
+
+extern "C" {
+
+HRESULT WINAPI XUserGetId(XUserHandle user, uint64_t* userId) {
+    if (!user || !userId) return E_INVALIDARG;
+    *userId = sc::runtime::GetUserXuid(user);
+    return S_OK;
+}
+
+HRESULT WINAPI XUserGetState(XUserHandle user, XUserState* state) {
+    if (!user || !state) return E_INVALIDARG;
+    *state = XUserState::SignedIn;
+    return S_OK;
+}
+
+HRESULT WINAPI XUserGetLocalId(XUserHandle user, XUserLocalId* userLocalId) {
+    if (!user || !userLocalId) return E_INVALIDARG;
+    userLocalId->value = sc::runtime::GetUserXuid(user);
+    return S_OK;
+}
+
+} // extern "C"

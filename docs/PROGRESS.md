@@ -180,3 +180,7 @@
 
 ## Sprint 42: Phase 3 Networking Shims E2E (libHttpClient + XCurl)
 - Added CTest #41 (`NetworkingShimsE2E`) in `src/tests/scarlett_tests/main.cpp` dynamically loading `libHttpClient` and `XCurl` shims and validating full mock-backed HTTP request/response lifecycles, headers, write callbacks, and status codes (`41 passed, 0 failed`).
+
+## Sprint 43: XUser Profile Parity & XGameSave Offline E2E
+- Added `XUserState`, `XUserLocalId`, and exported `XUserGetId`, `XUserGetState`, and `XUserGetLocalId` in `src/shims/xgameruntime/` (`gdk_types.hpp`, `xgameruntime.def`, `xgameruntime.cpp`).
+- Added CTest #42 (`XUserAndGameSaveProfileE2E`) in `src/tests/scarlett_tests/main.cpp` exercising the full offline `XUser` identity + `XGameSave` write/read round-trip (`42 passed, 0 failed`).
