@@ -16,7 +16,9 @@ size_t DecodeAlignment(uint32_t attrs) {
     if (code == XALLOC_ALIGNMENT_DEFAULT) {
         return 16;
     }
-    return size_t{1} << (code + 1u); // code 1 -> 4 B ... code 15 -> 65536 B (64 KB)
+    const size_t requested = size_t{1} << (code + 1u); // code 1 -> 4 B ... code 15 -> 65536 B (64 KB)
+    // Xbox Series X|S / SlimEra invariant: XMemAllocDefault guarantees >= 16-byte alignment.
+    return (std::max)(requested, size_t{16});
 }
 
 uint8_t DecodeAllocatorId(uint32_t attrs) {

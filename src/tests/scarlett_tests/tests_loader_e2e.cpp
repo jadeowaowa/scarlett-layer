@@ -1022,3 +1022,158 @@ bool TestScarlettFullStack50SprintCapstoneE2E() {
     std::filesystem::remove_all(tmpDir, ec);
     return true;
 }
+
+namespace {
+
+uint32_t g_s63TlsSlot = TLS_OUT_OF_INDEXES;
+int g_s63AttachCount = 0;
+int g_s63DetachCount = 0;
+bool g_s63SlotMatches = false;
+std::vector<int> g_s63AtExitOrder;
+
+void NTAPI S63TlsCallbackA(PVOID, DWORD reason, PVOID) {
+    if (reason == DLL_PROCESS_ATTACH) {
+        ++g_s63AttachCount;
+        void* val = TlsGetValue(g_s63TlsSlot);
+        if (val && static_cast<const uint8_t*>(val)[0] == 0x5Au) {
+            g_s63SlotMatches = true;
+        }
+    } else if (reason == DLL_PROCESS_DETACH) {
+        ++g_s63DetachCount;
+    }
+}
+
+void NTAPI S63TlsCallbackB(PVOID, DWORD reason, PVOID) {
+    if (reason == DLL_PROCESS_ATTACH) {
+        ++g_s63AttachCount;
+    } else if (reason == DLL_PROCESS_DETACH) {
+        ++g_s63DetachCount;
+    }
+}
+
+void __cdecl S63AtExit1() { g_s63AtExitOrder.push_back(1); }
+void __cdecl S63AtExit2() { g_s63AtExitOrder.push_back(2); }
+void __cdecl S63AtExit3() { g_s63AtExitOrder.push_back(3); }
+
+} // namespace
+
+bool TestPe64ImplicitTlsAndGuestAtExitE2E() {
+    // 1. Static PE64 IMAGE_DIRECTORY_ENTRY_TLS inspection on a synthetic PE32+ image
+    std::vector<uint8_t> pe(0x400, 0);
+    auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(pe.data());
+    dos->e_magic = IMAGE_DOS_SIGNATURE;
+    dos->e_lfanew = 0x80;
+
+    auto* nt = reinterpret_cast<IMAGE_NT_HEADERS64*>(pe.data() + 0x80);
+    nt->Signature = IMAGE_NT_SIGNATURE;
+    nt->FileHeader.Machine = IMAGE_FILE_MACHINE_AMD64;
+    nt->FileHeader.NumberOfSections = 1;
+    nt->FileHeader.SizeOfOptionalHeader = sizeof(IMAGE_OPTIONAL_HEADER64);
+    nt->OptionalHeader.Magic = IMAGE_NT_OPTIONAL_HDR64_MAGIC;
+    nt->OptionalHeader.ImageBase = 0x140000000ULL;
+    nt->OptionalHeader.NumberOfRvaAndSizes = IMAGE_NUMBEROF_DIRECTORY_ENTRIES;
+    nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_TLS].VirtualAddress = 0x1000;
+    nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_TLS].Size = sizeof(IMAGE_TLS_DIRECTORY64);
+
+    auto* sec = IMAGE_FIRST_SECTION(nt);
+    std::memcpy(sec->Name, ".rdata", 6);
+    sec->Misc.VirtualSize = 0x200;
+    sec->VirtualAddress = 0x1000;
+    sec->SizeOfRawData = 0x200;
+    sec->PointerToRawData = 0x200;
+
+    auto* fileTls = reinterpret_cast<IMAGE_TLS_DIRECTORY64*>(pe.data() + 0x200);
+    fileTls->StartAddressOfRawData = 0x140001040ULL;
+    fileTls->EndAddressOfRawData   = 0x140001060ULL; // 32 bytes raw template
+    fileTls->AddressOfIndex        = 0x140001060ULL;
+    fileTls->AddressOfCallBacks    = 0x140001080ULL;
+    fileTls->SizeOfZeroFill        = 16;
+    fileTls->Characteristics       = 0x00500000u; // 16-byte alignment
+
+    uint64_t fakeCbs[3] = { 0x140001100ULL, 0x140001120ULL, 0ULL };
+    std::memcpy(pe.data() + 0x280, fakeCbs, sizeof(fakeCbs));
+
+    const auto probePath = sc::vfs::TranslatePath(L"T:\\sprint63_tls_probe.exe");
+    std::filesystem::create_directories(probePath.parent_path());
+    {
+        std::ofstream out(probePath, std::ios::binary | std::ios::trunc);
+        SC_EXPECT(out.good());
+        out.write(reinterpret_cast<const char*>(pe.data()), static_cast<std::streamsize>(pe.size()));
+    }
+
+    const auto audit = sc::loader::InspectPeImports(probePath, probePath.parent_path());
+    std::error_code ec;
+    std::filesystem::remove(probePath, ec);
+
+    SC_EXPECT(audit.validPe64);
+    SC_EXPECT(audit.hasTlsDirectory);
+    SC_EXPECT(audit.tlsRawDataSize == 32u);
+    SC_EXPECT(audit.tlsZeroFillSize == 16u);
+    SC_EXPECT(audit.tlsCallbackCount == 2u);
+    SC_EXPECT(audit.tlsCharacteristics == 0x00500000u);
+
+    // 2. Live implicit TLS template copy + zero-fill + callback dispatch via scarlett_hook.dll
+    HMODULE hookMod = GetModuleHandleW(L"scarlett_hook.dll");
+    SC_EXPECT(hookMod != nullptr);
+
+    using InitTlsFn = BOOL(WINAPI*)(const IMAGE_TLS_DIRECTORY64*, HMODULE, void**, uint32_t*, uint32_t*);
+    using FreeTlsFn = void(WINAPI*)(const IMAGE_TLS_DIRECTORY64*, HMODULE, void*, uint32_t);
+    using RegAtExitFn = int(WINAPI*)(void(__cdecl*)());
+    using RunAtExitFn = uint32_t(WINAPI*)();
+
+    auto pInitTls   = reinterpret_cast<InitTlsFn>(GetProcAddress(hookMod, "ScarlettHookInitImplicitTls"));
+    auto pFreeTls   = reinterpret_cast<FreeTlsFn>(GetProcAddress(hookMod, "ScarlettHookFreeImplicitTls"));
+    auto pRegAtExit = reinterpret_cast<RegAtExitFn>(GetProcAddress(hookMod, "ScarlettHookRegisterGuestAtExit"));
+    auto pRunAtExit = reinterpret_cast<RunAtExitFn>(GetProcAddress(hookMod, "ScarlettHookRunGuestAtExit"));
+    SC_EXPECT(pInitTls && pFreeTls && pRegAtExit && pRunAtExit);
+
+    uint8_t tlsTemplate[16]{};
+    for (uint8_t i = 0; i < 16; ++i) {
+        tlsTemplate[i] = static_cast<uint8_t>(0x5Au + i);
+    }
+    PIMAGE_TLS_CALLBACK liveCbs[3] = { &S63TlsCallbackA, &S63TlsCallbackB, nullptr };
+
+    g_s63TlsSlot = TLS_OUT_OF_INDEXES;
+    g_s63AttachCount = 0;
+    g_s63DetachCount = 0;
+    g_s63SlotMatches = false;
+
+    IMAGE_TLS_DIRECTORY64 liveTls{};
+    liveTls.StartAddressOfRawData = reinterpret_cast<ULONGLONG>(tlsTemplate);
+    liveTls.EndAddressOfRawData   = reinterpret_cast<ULONGLONG>(tlsTemplate + sizeof(tlsTemplate));
+    liveTls.AddressOfIndex        = reinterpret_cast<ULONGLONG>(&g_s63TlsSlot);
+    liveTls.AddressOfCallBacks    = reinterpret_cast<ULONGLONG>(liveCbs);
+    liveTls.SizeOfZeroFill        = 16;
+
+    void* tlsBlock = nullptr;
+    uint32_t tlsSlot = TLS_OUT_OF_INDEXES;
+    uint32_t cbsRun = 0;
+    SC_EXPECT(pInitTls(&liveTls, GetModuleHandleW(nullptr), &tlsBlock, &tlsSlot, &cbsRun) == TRUE);
+    SC_EXPECT(tlsBlock != nullptr);
+    SC_EXPECT(tlsSlot != TLS_OUT_OF_INDEXES && g_s63TlsSlot == tlsSlot);
+    SC_EXPECT(cbsRun == 2u);
+    SC_EXPECT(g_s63AttachCount == 2);
+    SC_EXPECT(g_s63SlotMatches);
+
+    const auto* blockBytes = static_cast<const uint8_t*>(tlsBlock);
+    for (size_t i = 0; i < 16; ++i) {
+        SC_EXPECT(blockBytes[i] == tlsTemplate[i]);
+        SC_EXPECT(blockBytes[16 + i] == 0u);
+    }
+
+    pFreeTls(&liveTls, GetModuleHandleW(nullptr), tlsBlock, tlsSlot);
+    SC_EXPECT(g_s63DetachCount == 2);
+
+    // 3. Isolated guest atexit LIFO ordering & idempotent drain
+    g_s63AtExitOrder.clear();
+    SC_EXPECT(pRegAtExit(nullptr) != 0);
+    SC_EXPECT(pRegAtExit(&S63AtExit1) == 0);
+    SC_EXPECT(pRegAtExit(&S63AtExit2) == 0);
+    SC_EXPECT(pRegAtExit(&S63AtExit3) == 0);
+
+    SC_EXPECT(pRunAtExit() == 3u);
+    SC_EXPECT(g_s63AtExitOrder.size() == 3u);
+    SC_EXPECT(g_s63AtExitOrder[0] == 3 && g_s63AtExitOrder[1] == 2 && g_s63AtExitOrder[2] == 1);
+    SC_EXPECT(pRunAtExit() == 0u);
+    return true;
+}

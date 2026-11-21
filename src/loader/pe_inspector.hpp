@@ -23,6 +23,11 @@ struct PeImportAuditResult {
     std::vector<std::string> delayLoadImports;
     size_t                   totalImportedSymbols{0};
     size_t                   ordinalImportCount{0};
+    bool                     hasTlsDirectory{false};
+    size_t                   tlsRawDataSize{0};
+    size_t                   tlsZeroFillSize{0};
+    size_t                   tlsCallbackCount{0};
+    uint32_t                 tlsCharacteristics{0};
 };
 
 namespace detail {
@@ -198,6 +203,41 @@ inline PeImportAuditResult InspectPeImports(
                 const uint32_t thunkRva = ddesc->ImportNameTableRVA ? ddesc->ImportNameTableRVA : ddesc->ImportAddressTableRVA;
                 countThunks(thunkRva);
                 delayOff += sizeof(IMAGE_DELAYLOAD_DESCRIPTOR);
+            }
+        }
+    }
+
+    // 3. Implicit TLS Directory (IMAGE_DIRECTORY_ENTRY_TLS)
+    const auto& tlsDir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_TLS];
+    if (tlsDir.VirtualAddress != 0 && tlsDir.Size != 0) {
+        size_t tlsOff = 0;
+        if (detail::RvaToFileOffset(tlsDir.VirtualAddress, sections, numSections, fileSize, tlsOff) &&
+            tlsOff + sizeof(IMAGE_TLS_DIRECTORY64) <= fileSize) {
+            const auto* tls = reinterpret_cast<const IMAGE_TLS_DIRECTORY64*>(buf.data() + tlsOff);
+            res.hasTlsDirectory = true;
+            res.tlsCharacteristics = tls->Characteristics;
+            res.tlsZeroFillSize = tls->SizeOfZeroFill;
+            if (tls->EndAddressOfRawData >= tls->StartAddressOfRawData) {
+                res.tlsRawDataSize = static_cast<size_t>(tls->EndAddressOfRawData - tls->StartAddressOfRawData);
+            }
+            const uint64_t imageBase = nt->OptionalHeader.ImageBase;
+            if (tls->AddressOfCallBacks >= imageBase) {
+                const uint64_t cbRva64 = tls->AddressOfCallBacks - imageBase;
+                if (cbRva64 <= 0xFFFFFFFFULL) {
+                    size_t cbOff = 0;
+                    if (detail::RvaToFileOffset(static_cast<uint32_t>(cbRva64), sections, numSections, fileSize, cbOff)) {
+                        constexpr size_t kMaxTlsCallbacks = 256;
+                        while (res.tlsCallbackCount < kMaxTlsCallbacks && cbOff + sizeof(uint64_t) <= fileSize) {
+                            uint64_t cbVa = 0;
+                            std::memcpy(&cbVa, buf.data() + cbOff, sizeof(uint64_t));
+                            if (cbVa == 0) {
+                                break;
+                            }
+                            ++res.tlsCallbackCount;
+                            cbOff += sizeof(uint64_t);
+                        }
+                    }
+                }
             }
         }
     }
