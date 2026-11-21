@@ -2364,6 +2364,162 @@ static size_t TestXCurlWriteCb(char* ptr, size_t size, size_t nmemb, void* userd
     return size * nmemb;
 }
 
+bool TestRdna2ComputeDispatchE2E() {
+    using Microsoft::WRL::ComPtr;
+    using namespace sc::d3d12;
+    using namespace sc::d3d12::rdna2;
+
+    // 1. Assemble binary RDNA2 compute shader: gOut[i] = (7 + gIn[i]) + gIn[i] = 2 * gIn[i] + 7
+    std::vector<uint32_t> isa;
+    AppendMubufLoadDword(isa, 1, 0, 0);                        // u1 = gIn[u0]
+    AppendVop2LiteralU32(isa, kVop2AddNcU32, 2, 7u, 1);        // u2 = 7u + u1
+    AppendVop2(isa, kVop2AddNcU32, 2, kSrcVgprBase + 2u, 1);   // u2 = u2 + u1
+    AppendMubufStoreDword(isa, 2, 0, 0);                       // gOut[u0] = u2
+    AppendSopp(isa, kSoppEndpgm);
+
+    auto scxs = BuildScxsContainer(
+        ScxsShaderStage::Compute,
+        ScxsTargetArch::Rdna2Scarlett,
+        ScxsPayloadFormat::Rdna2Isa,
+        isa.data(), isa.size() * sizeof(uint32_t),
+        6, 6);
+
+    D3D12_SHADER_BYTECODE inBc{ scxs.data(), scxs.size() };
+    Rdna2IsaTranslator translator;
+    TranslatedShader translated{};
+    std::string err;
+    SC_EXPECT(translator.CanTranslate(inBc));
+    SC_EXPECT(SUCCEEDED(translator.Translate(inBc, translated, err)));
+    SC_EXPECT(!translated.bytecode.empty());
+
+    // 2. Create real D3D12 device, root signature (t0 SRV + u0 UAV), and compute PSO
+    HMODULE d3d12Mod = LoadLibraryW(L"d3d12.dll");
+    SC_EXPECT(d3d12Mod != nullptr);
+    auto pD3D12CreateDevice = reinterpret_cast<PFN_D3D12_CREATE_DEVICE>(
+        GetProcAddress(d3d12Mod, "D3D12CreateDevice"));
+    auto pD3D12SerializeRootSignature = reinterpret_cast<PFN_D3D12_SERIALIZE_ROOT_SIGNATURE>(
+        GetProcAddress(d3d12Mod, "D3D12SerializeRootSignature"));
+    SC_EXPECT(pD3D12CreateDevice != nullptr && pD3D12SerializeRootSignature != nullptr);
+
+    ComPtr<ID3D12Device> dev;
+    SC_EXPECT(SUCCEEDED(pD3D12CreateDevice(nullptr, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&dev))));
+
+    D3D12_ROOT_PARAMETER params[2]{};
+    params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
+    params[0].Descriptor.ShaderRegister = 0;
+    params[0].Descriptor.RegisterSpace = 0;
+    params[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+    params[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_UAV;
+    params[1].Descriptor.ShaderRegister = 0;
+    params[1].Descriptor.RegisterSpace = 0;
+    params[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+    D3D12_ROOT_SIGNATURE_DESC rsDesc{};
+    rsDesc.NumParameters = 2;
+    rsDesc.pParameters = params;
+    ComPtr<ID3DBlob> rsBlob, rsErr;
+    SC_EXPECT(SUCCEEDED(pD3D12SerializeRootSignature(&rsDesc, D3D_ROOT_SIGNATURE_VERSION_1, &rsBlob, &rsErr)));
+
+    ComPtr<ID3D12RootSignature> rootSig;
+    SC_EXPECT(SUCCEEDED(dev->CreateRootSignature(
+        0, rsBlob->GetBufferPointer(), rsBlob->GetBufferSize(), IID_PPV_ARGS(&rootSig))));
+
+    D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc{};
+    psoDesc.pRootSignature = rootSig.Get();
+    psoDesc.CS.pShaderBytecode = translated.bytecode.data();
+    psoDesc.CS.BytecodeLength = translated.bytecode.size();
+    ComPtr<ID3D12PipelineState> pso;
+    SC_EXPECT(SUCCEEDED(dev->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&pso))));
+
+    // 3. Allocate 64-uint input (UPLOAD), output (DEFAULT+UAV), and readback (READBACK) buffers
+    constexpr uint32_t kCount = 64;
+    constexpr uint64_t kBytes = kCount * sizeof(uint32_t);
+    D3D12_HEAP_PROPERTIES uploadHeap{ D3D12_HEAP_TYPE_UPLOAD };
+    D3D12_HEAP_PROPERTIES defaultHeap{ D3D12_HEAP_TYPE_DEFAULT };
+    D3D12_HEAP_PROPERTIES readbackHeap{ D3D12_HEAP_TYPE_READBACK };
+
+    D3D12_RESOURCE_DESC inDesc{};
+    inDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    inDesc.Width = kBytes;
+    inDesc.Height = 1;
+    inDesc.DepthOrArraySize = 1;
+    inDesc.MipLevels = 1;
+    inDesc.SampleDesc.Count = 1;
+    inDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+    D3D12_RESOURCE_DESC outDesc = inDesc;
+    outDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+
+    ComPtr<ID3D12Resource> inBuf, outBuf, rbBuf;
+    SC_EXPECT(SUCCEEDED(dev->CreateCommittedResource(
+        &uploadHeap, D3D12_HEAP_FLAG_NONE, &inDesc,
+        D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&inBuf))));
+    SC_EXPECT(SUCCEEDED(dev->CreateCommittedResource(
+        &defaultHeap, D3D12_HEAP_FLAG_NONE, &outDesc,
+        D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&outBuf))));
+    SC_EXPECT(SUCCEEDED(dev->CreateCommittedResource(
+        &readbackHeap, D3D12_HEAP_FLAG_NONE, &inDesc,
+        D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&rbBuf))));
+
+    uint32_t* inPtr = nullptr;
+    SC_EXPECT(SUCCEEDED(inBuf->Map(0, nullptr, reinterpret_cast<void**>(&inPtr))));
+    for (uint32_t i = 0; i < kCount; ++i) {
+        inPtr[i] = i * 11u + 5u;
+    }
+    inBuf->Unmap(0, nullptr);
+
+    // 4. Dispatch(1, 1, 1) on GPU and read back all 64 outputs
+    D3D12_COMMAND_QUEUE_DESC cqDesc{};
+    cqDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+    ComPtr<ID3D12CommandQueue> cq;
+    SC_EXPECT(SUCCEEDED(dev->CreateCommandQueue(&cqDesc, IID_PPV_ARGS(&cq))));
+    ComPtr<ID3D12CommandAllocator> ca;
+    SC_EXPECT(SUCCEEDED(dev->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&ca))));
+    ComPtr<ID3D12GraphicsCommandList> cl;
+    SC_EXPECT(SUCCEEDED(dev->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, ca.Get(), pso.Get(), IID_PPV_ARGS(&cl))));
+
+    cl->SetComputeRootSignature(rootSig.Get());
+    cl->SetComputeRootShaderResourceView(0, inBuf->GetGPUVirtualAddress());
+    cl->SetComputeRootUnorderedAccessView(1, outBuf->GetGPUVirtualAddress());
+    cl->Dispatch(1, 1, 1);
+
+    D3D12_RESOURCE_BARRIER barrier{};
+    barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    barrier.Transition.pResource = outBuf.Get();
+    barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+    barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
+    barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    cl->ResourceBarrier(1, &barrier);
+    cl->CopyBufferRegion(rbBuf.Get(), 0, outBuf.Get(), 0, kBytes);
+    SC_EXPECT(SUCCEEDED(cl->Close()));
+
+    ComPtr<ID3D12Fence> fence;
+    SC_EXPECT(SUCCEEDED(dev->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence))));
+    HANDLE fenceEv = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    SC_EXPECT(fenceEv != nullptr);
+
+    ID3D12CommandList* lists[] = { cl.Get() };
+    cq->ExecuteCommandLists(1, lists);
+    SC_EXPECT(SUCCEEDED(cq->Signal(fence.Get(), 1)));
+    SC_EXPECT(SUCCEEDED(fence->SetEventOnCompletion(1, fenceEv)));
+    SC_EXPECT(WaitForSingleObject(fenceEv, 5000) == WAIT_OBJECT_0);
+    CloseHandle(fenceEv);
+
+    uint32_t* rbPtr = nullptr;
+    SC_EXPECT(SUCCEEDED(rbBuf->Map(0, nullptr, reinterpret_cast<void**>(&rbPtr))));
+    bool allMatch = true;
+    for (uint32_t i = 0; i < kCount; ++i) {
+        const uint32_t expected = (i * 11u + 5u) * 2u + 7u;
+        if (rbPtr[i] != expected) {
+            allMatch = false;
+            break;
+        }
+    }
+    rbBuf->Unmap(0, nullptr);
+    SC_EXPECT(allMatch);
+    return true;
+}
+
 bool TestDStorageGpuBufferAndFenceE2E() {
     using Microsoft::WRL::ComPtr;
 
@@ -3726,6 +3882,7 @@ int main() {
     RunTest("GameInputLivePolling",              TestGameInputLivePolling);
     RunTest("DynamicLoaderHooks",                TestDynamicLoaderHooks);
     RunTest("DStorageGpuBufferAndFenceE2E",      TestDStorageGpuBufferAndFenceE2E);
+    RunTest("Rdna2ComputeDispatchE2E",           TestRdna2ComputeDispatchE2E);
 
     XGameRuntimeUninitialize();
 

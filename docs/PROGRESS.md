@@ -151,3 +151,7 @@
 ## Sprint 35: DirectStorage GPU Buffer Streaming & Fence Synchronization E2E
 - Added CTest #34 (`DStorageGpuBufferAndFenceE2E`) in `src/tests/scarlett_tests/main.cpp`.
 - Verified end-to-end async streaming from VFS (`T:\dstorage_gpu_stream.bin`) directly into a D3D12 `DEFAULT` heap GPU buffer via `IDStorageQueueX::EnqueueRequest` (`DSTORAGE_REQUEST_DESTINATION_BUFFER`) + `EnqueueSignal(ID3D12Fence*, 1)` with zero error records and exact 4096-byte GPU readback parity (`34 passed, 0 failed`).
+
+## Sprint 36: RDNA2 Compute Shader Lifter (MUBUF Load/Store) & GPU Dispatch E2E
+- Added `kMubufLoadDword` (`0x14`) decoding, `AppendMubufLoadDword` encoding, and `StructuredBuffer<uint> gIn : register(t0)` lifting in `src/shims/d3d12_xs/rdna2_isa.hpp`.
+- Added CTest #35 (`Rdna2ComputeDispatchE2E`) in `src/tests/scarlett_tests/main.cpp`: wrapped a binary RDNA2 compute shader (`out[i] = 2 * in[i] + 7`) in an SCXS container, translated to `cs_5_0` via `Rdna2IsaTranslator`, dispatched 64 threads on D3D12 hardware with root SRV `t0` + UAV `u0`, and verified all 64 `uint32_t` outputs via GPU readback (`35 passed, 0 failed`).
