@@ -2371,6 +2371,130 @@ static size_t CurlTestWriteCb(char* ptr, size_t size, size_t nmemb, void* userda
     return total;
 }
 
+bool TestXMemAndXgXsSwizzleE2E() {
+    // 1. Load xmem & xg_xs shims dynamically
+    HMODULE xmemMod = LoadLibraryW(L"shims\\xmem.dll");
+    if (!xmemMod) xmemMod = LoadLibraryW(L"xmem.dll");
+    SC_EXPECT(xmemMod != nullptr);
+
+    HMODULE xgMod = LoadLibraryW(L"shims\\xg_xs.dll");
+    if (!xgMod) xgMod = LoadLibraryW(L"xg_xs.dll");
+    SC_EXPECT(xgMod != nullptr);
+
+    using PFN_XMemAlloc        = void*(WINAPI*)(size_t, uint32_t);
+    using PFN_XMemFree         = void(WINAPI*)(void*, uint32_t);
+    using PFN_XMemSize         = size_t(WINAPI*)(void*, uint32_t);
+    using PFN_XMemAllocDefault = void*(WINAPI*)(size_t, uint32_t);
+    using PFN_XMemFreeDefault  = void(WINAPI*)(void*, uint32_t);
+    using PFN_XMemSizeDefault  = size_t(WINAPI*)(void*, uint32_t);
+
+    auto pXMemAlloc        = reinterpret_cast<PFN_XMemAlloc>(GetProcAddress(xmemMod, "XMemAlloc"));
+    auto pXMemFree         = reinterpret_cast<PFN_XMemFree>(GetProcAddress(xmemMod, "XMemFree"));
+    auto pXMemSize         = reinterpret_cast<PFN_XMemSize>(GetProcAddress(xmemMod, "XMemSize"));
+    auto pXMemAllocDefault = reinterpret_cast<PFN_XMemAllocDefault>(GetProcAddress(xmemMod, "XMemAllocDefault"));
+    auto pXMemFreeDefault  = reinterpret_cast<PFN_XMemFreeDefault>(GetProcAddress(xmemMod, "XMemFreeDefault"));
+    auto pXMemSizeDefault  = reinterpret_cast<PFN_XMemSizeDefault>(GetProcAddress(xmemMod, "XMemSizeDefault"));
+    SC_EXPECT(pXMemAlloc && pXMemFree && pXMemSize && pXMemAllocDefault && pXMemFreeDefault && pXMemSizeDefault);
+
+    // Verify default allocator path
+    const uint32_t defAttrs = (0u) | (3u << 8) | (0u << 12) | (1u << 14); // Default, 16B, Heap, ZeroInit
+    void* defBuf = pXMemAllocDefault(4096, defAttrs);
+    SC_EXPECT(defBuf != nullptr);
+    SC_EXPECT((reinterpret_cast<uintptr_t>(defBuf) & 15u) == 0);
+    SC_EXPECT(pXMemSizeDefault(defBuf, defAttrs) >= 4096);
+    pXMemFreeDefault(defBuf, defAttrs);
+
+    // 2. xg_xs 256x256 3-mip BC7_UNORM 64KB_S layout + computer
+    struct LocalXgDesc {
+        uint32_t    Width;
+        uint32_t    Height;
+        uint32_t    MipLevels;
+        uint32_t    ArraySize;
+        DXGI_FORMAT Format;
+        uint32_t    TileMode; // 2 = XG_TILE_MODE_64KB_S
+    };
+    struct LocalXgMipLayout {
+        uint64_t OffsetBytes;
+        uint64_t SizeBytes;
+        uint32_t PitchBytes;
+        uint32_t PaddedWidthElements;
+        uint32_t PaddedHeightElements;
+        uint32_t TileMode;
+    };
+    struct LocalXgPlaneLayout {
+        uint64_t         BaseOffsetBytes;
+        uint64_t         SizeBytes;
+        uint32_t         BytesPerElement;
+        uint32_t         MipLevels;
+        LocalXgMipLayout MipLayout[15];
+    };
+    struct LocalXgResourceLayout {
+        uint64_t           SizeBytes;
+        uint64_t           BaseAlignmentBytes;
+        uint32_t           Planes;
+        LocalXgPlaneLayout Plane[1];
+    };
+    struct ILocalXgComputer : public IUnknown {
+        virtual HRESULT STDMETHODCALLTYPE GetResourceLayout(LocalXgResourceLayout* pLayout) = 0;
+        virtual HRESULT STDMETHODCALLTYPE CopyIntoSubresource(
+            void* pResourceBaseAddress, uint32_t Subresource,
+            const void* pSourceData, uint32_t SourceRowPitch, uint32_t SourceSlicePitch) = 0;
+        virtual HRESULT STDMETHODCALLTYPE CopyFromSubresource(
+            void* pDestinationData, uint32_t Subresource,
+            const void* pResourceBaseAddress, uint32_t DestRowPitch, uint32_t DestSlicePitch) = 0;
+    };
+
+    auto pComputeLayout = reinterpret_cast<HRESULT(WINAPI*)(const LocalXgDesc*, LocalXgResourceLayout*)>(
+        GetProcAddress(xgMod, "XGComputeTexture2DLayout"));
+    auto pCreateComp = reinterpret_cast<HRESULT(WINAPI*)(const LocalXgDesc*, ILocalXgComputer**)>(
+        GetProcAddress(xgMod, "XGCreateTexture2DComputer"));
+    SC_EXPECT(pComputeLayout && pCreateComp);
+
+    LocalXgDesc desc{ 256, 256, 3, 1, DXGI_FORMAT_BC7_UNORM, 2u };
+    LocalXgResourceLayout layout{};
+    SC_EXPECT(SUCCEEDED(pComputeLayout(&desc, &layout)));
+    SC_EXPECT(layout.SizeBytes >= 65536ULL);
+    SC_EXPECT(layout.BaseAlignmentBytes == 65536ULL);
+    SC_EXPECT(layout.Plane[0].BytesPerElement == 16u);
+
+    ILocalXgComputer* comp = nullptr;
+    SC_EXPECT(SUCCEEDED(pCreateComp(&desc, &comp)) && comp != nullptr);
+
+    // Allocate 64 KiB-aligned physical tiled surface via xmem
+    const uint32_t tiledAttrs = (10u) | (15u << 8) | (1u << 12) | (1u << 14); // TextureTiled, 64K, Physical, ZeroInit
+    void* tiledMem = pXMemAlloc(static_cast<size_t>(layout.SizeBytes), tiledAttrs);
+    SC_EXPECT(tiledMem != nullptr);
+    SC_EXPECT((reinterpret_cast<uintptr_t>(tiledMem) & 65535u) == 0);
+    SC_EXPECT(pXMemSize(tiledMem, tiledAttrs) >= layout.SizeBytes);
+
+    // Mip 0 (64x64 BC7 blocks -> macro-tiled) & Mip 1 (32x32 BC7 blocks -> micro-tiled)
+    auto verifyMip = [&](uint32_t mip, uint32_t bw, uint32_t bh, uint8_t seed) -> bool {
+        const uint32_t rowPitch = bw * 16u;
+        const size_t totalBytes = static_cast<size_t>(rowPitch) * bh;
+        std::vector<uint8_t> src(totalBytes);
+        std::vector<uint8_t> dst(totalBytes, 0);
+        for (size_t i = 0; i < totalBytes; ++i) {
+            src[i] = static_cast<uint8_t>((i * 31u + seed) & 0xFFu);
+        }
+        if (FAILED(comp->CopyIntoSubresource(tiledMem, mip, src.data(), rowPitch, static_cast<uint32_t>(totalBytes)))) {
+            return false;
+        }
+        if (FAILED(comp->CopyFromSubresource(dst.data(), mip, tiledMem, rowPitch, static_cast<uint32_t>(totalBytes)))) {
+            return false;
+        }
+        return std::memcmp(src.data(), dst.data(), totalBytes) == 0;
+    };
+
+    SC_EXPECT(verifyMip(0, 64, 64, 0x11));
+    SC_EXPECT(verifyMip(1, 32, 32, 0x5A));
+
+    comp->Release();
+    pXMemFree(tiledMem, tiledAttrs);
+    FreeLibrary(xgMod);
+    FreeLibrary(xmemMod);
+    return true;
+}
+
 bool TestKernelXAndPixEvtE2E() {
     // 1. kernelx OS shim E2E
     HMODULE kxMod = LoadLibraryW(L"shims\\kernelx.dll");
@@ -5044,6 +5168,7 @@ int main() {
     RunTest("GameInputRuntimePollingE2E",        TestGameInputRuntimePollingE2E);
     RunTest("ScarlettTitleBringUpE2E",           TestScarlettTitleBringUpE2E);
     RunTest("KernelXAndPixEvtE2E",               TestKernelXAndPixEvtE2E);
+    RunTest("XMemAndXgXsSwizzleE2E",             TestXMemAndXgXsSwizzleE2E);
 
     XGameRuntimeUninitialize();
 

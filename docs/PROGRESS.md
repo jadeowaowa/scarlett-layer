@@ -194,3 +194,6 @@
 
 ## Sprint 46: Phase 4 Kickoff — kernelx & pixevt OS/Profiler E2E
 - Added CTest #45 (`KernelXAndPixEvtE2E`) in `src/tests/scarlett_tests/main.cpp` dynamically loading `shims\kernelx.dll` and `shims\pixevt.dll` to validate 13.5 GiB `TitleMemoryStatus`, `VirtualAllocX`/`VirtualFreeX`, `GetConsoleProcessorInfo` (7 cores / 14 SMT threads), `SetThreadAffinityMaskX`, and nested `PIXBeginEvent`/`PIXSetMarker`/`PIXEndEvent` calls (`45 passed, 0 failed`).
+
+## Sprint 47: xmem & xg_xs Physical Memory + 64KB_S BC7 Swizzle E2E
+- Added CTest #46 (`XMemAndXgXsSwizzleE2E`) in `src/tests/scarlett_tests/main.cpp` dynamically loading `shims\xmem.dll` and `shims\xg_xs.dll` to validate 64 KiB-aligned `XALLOC_MEMTYPE_PHYSICAL` allocations paired with `256x256` 3-mip `BC7_UNORM` `64KB_S` macro- and micro-tiled swizzle/detile round-trips (`46 passed, 0 failed`).
