@@ -218,3 +218,6 @@
 
 ## Sprint 53: 3D Perspective-Projected Indexed Geometry & Hardware Z-Buffer E2E
 - Added CTest #52 (`D3D12Xs3DPerspectiveDepthRenderE2E`) in `src/tests/scarlett_tests/main.cpp` rendering overlapping 3D indexed quads through a `4x4` perspective MVP matrix (`cbuffer b0`) with `D32_FLOAT` hardware depth testing (`D3D12_COMPARISON_FUNC_LESS`) via `ID3D12GraphicsCommandListX`, verifying near/far Z-buffer occlusion via GPU readback (`52 passed, 0 failed`).
+
+## Sprint 54: COM Vtable ABI Conformance
+- Added CTest #53 (`D3D12XsComVtableAbiConformanceE2E`) in `src/tests/scarlett_tests/main.cpp` validating raw x64 MSVC COM vtable slot layouts, direct vtable-pointer invocation (`IUnknown` slots 0-2, `ID3D12GraphicsCommandListX::Close` slot 3, `ID3D12CommandQueueX::Signal` slot 4), `IUnknown` identity/reflexivity, monotonic ref-counting, and `E_NOINTERFACE` null-out semantics (`53 passed, 0 failed`).
