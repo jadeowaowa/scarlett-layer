@@ -7,8 +7,16 @@
 #include <cstring>
 #include <filesystem>
 #include <string>
+#include <utility>
 
 namespace sc::d3d12xs {
+
+template <typename Interface, typename Impl, typename... Args>
+Microsoft::WRL::ComPtr<Interface> MakeCom(Args&&... args) {
+    Microsoft::WRL::ComPtr<Interface> ptr;
+    ptr.Attach(new Impl(std::forward<Args>(args)...));
+    return ptr;
+}
 
 class Fnv1a64 {
 public:
@@ -54,15 +62,15 @@ uint64_t HashComputePsoDesc(
     const D3D12_COMPUTE_PIPELINE_STATE_DESC& desc,
     uint64_t rootSigHash);
 
-ID3D12CommandQueueX* CreateScarlettCommandQueueX(
+Microsoft::WRL::ComPtr<ID3D12CommandQueueX> CreateScarlettCommandQueueX(
     Microsoft::WRL::ComPtr<IDXGIFactory6> factory,
     Microsoft::WRL::ComPtr<ID3D12Device> device,
     Microsoft::WRL::ComPtr<ID3D12CommandQueue> queue);
 
-ID3D12GraphicsCommandListX* CreateScarlettGraphicsCommandListX(
+Microsoft::WRL::ComPtr<ID3D12GraphicsCommandListX> CreateScarlettGraphicsCommandListX(
     ID3D12GraphicsCommandList* nativeCl);
 
-ID3D12DeviceX* CreateScarlettDeviceX(
+Microsoft::WRL::ComPtr<ID3D12DeviceX> CreateScarlettDeviceX(
     Microsoft::WRL::ComPtr<IDXGIFactory6> factory,
     Microsoft::WRL::ComPtr<ID3D12Device> device,
     UINT vendorId,

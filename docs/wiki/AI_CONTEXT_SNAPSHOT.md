@@ -1,7 +1,7 @@
 # Scarlett Layer â€” AI Context Snapshot
 
-**Commit:** `d5f5fb0` (#103) | **Generated:** 2026-11-21 09:53 UTC  
-**Totals:** 73 files (21,154 LOC) | 12 shims | 0 CTest checks
+**Commit:** `f8f6eeb` (#105) | **Generated:** 2026-11-21 09:59 UTC  
+**Totals:** 74 files (21,189 LOC) | 12 shims | 0 CTest checks
 
 ---
 
@@ -66,6 +66,7 @@
 ```text
   201  CMakeLists.txt
   343  src/common/codecs.hpp
+   46  src/common/config.hpp
    43  src/common/stub.hpp
    76  src/common/vfs.hpp
   161  src/common/xvd_container.hpp
@@ -79,13 +80,13 @@
     7  src/shims/acphal/acphal.def
    33  src/shims/acphal/acphal.hpp
   172  src/shims/d3d12_xs/command_list_x.cpp
-  443  src/shims/d3d12_xs/command_queue_x.cpp
-  109  src/shims/d3d12_xs/d3d12_xs.cpp
+  442  src/shims/d3d12_xs/command_queue_x.cpp
+  104  src/shims/d3d12_xs/d3d12_xs.cpp
     4  src/shims/d3d12_xs/d3d12_xs.def
   237  src/shims/d3d12_xs/d3d12_xs.hpp
-   71  src/shims/d3d12_xs/d3d12_xs_internal.hpp
-   93  src/shims/d3d12_xs/d3d12_xs_utils.cpp
-  665  src/shims/d3d12_xs/device_x.cpp
+   79  src/shims/d3d12_xs/d3d12_xs_internal.hpp
+   85  src/shims/d3d12_xs/d3d12_xs_utils.cpp
+  664  src/shims/d3d12_xs/device_x.cpp
  1191  src/shims/d3d12_xs/rdna2_isa.hpp
   201  src/shims/d3d12_xs/shader_inspector.hpp
   401  src/shims/d3d12_xs/shader_translator.hpp
@@ -113,7 +114,7 @@
   304  src/shims/xg_xs/xg_xs.cpp
     4  src/shims/xg_xs/xg_xs.def
    75  src/shims/xg_xs/xg_xs.hpp
-  489  src/shims/xgameruntime/game_save.cpp
+  485  src/shims/xgameruntime/game_save.cpp
   101  src/shims/xgameruntime/gdk_types.hpp
    87  src/shims/xgameruntime/runtime_internal.hpp
   191  src/shims/xgameruntime/task_queue.cpp
@@ -154,7 +155,7 @@
 - `HRESULT WINAPI ApuFree(void* virtualAddress)`
 
 ## `d3d12_xs.dll`
-**Files:** `src/shims/d3d12_xs/command_list_x.cpp` (172 L), `src/shims/d3d12_xs/command_queue_x.cpp` (443 L), `src/shims/d3d12_xs/d3d12_xs.cpp` (109 L), `src/shims/d3d12_xs/d3d12_xs.def` (4 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (237 L), `src/shims/d3d12_xs/d3d12_xs_internal.hpp` (71 L), `src/shims/d3d12_xs/d3d12_xs_utils.cpp` (93 L), `src/shims/d3d12_xs/device_x.cpp` (665 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1191 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_translator.hpp` (401 L)
+**Files:** `src/shims/d3d12_xs/command_list_x.cpp` (172 L), `src/shims/d3d12_xs/command_queue_x.cpp` (442 L), `src/shims/d3d12_xs/d3d12_xs.cpp` (104 L), `src/shims/d3d12_xs/d3d12_xs.def` (4 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (237 L), `src/shims/d3d12_xs/d3d12_xs_internal.hpp` (79 L), `src/shims/d3d12_xs/d3d12_xs_utils.cpp` (85 L), `src/shims/d3d12_xs/device_x.cpp` (664 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1191 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_translator.hpp` (401 L)
 
 **DLL Exports (`.def`):** `D3D12XboxCreateDevice`, `D3D12SerializeRootSignature = ScarlettSerializeRootSignature`
 
@@ -364,7 +365,7 @@
 - `[05]` `HRESULT CopyFromSubresource( void* pDestinationData, uint32_t Subresource, const void* pResourceBaseAddress, uint32_t DestRowPitch, uint32_t DestSlicePitch)`
 
 ## `xgameruntime.dll`
-**Files:** `src/shims/xgameruntime/game_save.cpp` (489 L), `src/shims/xgameruntime/gdk_types.hpp` (101 L), `src/shims/xgameruntime/runtime_internal.hpp` (87 L), `src/shims/xgameruntime/task_queue.cpp` (191 L), `src/shims/xgameruntime/task_queue.hpp` (13 L), `src/shims/xgameruntime/xgameruntime.cpp` (173 L), `src/shims/xgameruntime/xgameruntime.def` (29 L)
+**Files:** `src/shims/xgameruntime/game_save.cpp` (485 L), `src/shims/xgameruntime/gdk_types.hpp` (101 L), `src/shims/xgameruntime/runtime_internal.hpp` (87 L), `src/shims/xgameruntime/task_queue.cpp` (191 L), `src/shims/xgameruntime/task_queue.hpp` (13 L), `src/shims/xgameruntime/xgameruntime.cpp` (173 L), `src/shims/xgameruntime/xgameruntime.def` (29 L)
 
 **DLL Exports (`.def`):** `XGameRuntimeInitialize`, `XGameRuntimeUninitialize`, `XSystemGetDeviceType`, `XTaskQueueCreate`, `XTaskQueueDispatch`, `XTaskQueueCloseHandle`, `XAsyncGetStatus`, `XUserAddAsync`, `XUserAddResult`, `XUserGetGamertag`, `XUserGetId`, `XUserGetState`, `XUserGetLocalId`, `XUserCloseHandle`, `XGameSaveInitializeProviderAsync`, `XGameSaveInitializeProviderResult`, `XGameSaveCloseProvider`, `XGameSaveCreateContainer`, `XGameSaveCloseContainer`, `XGameSaveCreateUpdate`, `XGameSaveCloseUpdate`, `XGameSaveSubmitBlobWrite`, `XGameSaveSubmitBlobDelete`, `XGameSaveSubmitUpdateAsync`, `XGameSaveSubmitUpdateResult`, `XGameSaveReadBlobDataAsync`, `XGameSaveReadBlobDataResult`
 
@@ -398,6 +399,8 @@
 ```
 
 ## 6. Recent Git History
+- `f8f6eeb Merge Sprint 61: Modularize scarlett_tests suite (57/57 CTests)`
+- `199d672 Sprint 61: Modularize scarlett_tests into subsystem suites + CLI filtering`
 - `d5f5fb0 Merge Sprint 60: Modularize d3d12_xs shim (57/57 CTests)`
 - `6e5f1ef Sprint 60: Decompose d3d12_xs.cpp monolith into modular translation units`
 - `b037f35 Merge Sprint 59: Zero-warning D3D12 validation (57/57 CTests)`
@@ -406,5 +409,3 @@
 - `be60a74 Sprint 58: Async compute & cross-queue fence sync E2E + PresentX lifetime hardening (CTest #57)`
 - `f4fcfe1 Merge Sprint 57: Headless PresentX mode (56/56 CTests)`
 - `dffe91f Sprint 57: Headless PresentX mode (SCARLETT_HEADLESS=1) & E2E (CTest #56)`
-- `2d78b03 Merge Sprint 55: Zero-readback GPU PresentX & DXGI SwapChain E2E (54/54 CTests)`
-- `12ccf0c Sprint 55: Zero-readback GPU PresentX demo & DXGI SwapChain E2E (CTest #54)`

@@ -1,3 +1,4 @@
+#include "common/config.hpp"
 #include "common/stub.hpp"
 
 #include <cctype>
@@ -404,13 +405,12 @@ void DiscoverShimsWin32() {
         g_winDirLower = EnsureTrailingSlash(ToLowerW(std::wstring(winBuf, winLen)));
     }
 
-    wchar_t dirBuf[MAX_PATH]{};
-    DWORD len = GetEnvironmentVariableW(L"SCARLETT_SHIM_DIR", dirBuf, MAX_PATH);
-    if (len == 0 || len >= MAX_PATH) {
+    auto shimDirPath = sc::config::GetShimDir();
+    if (!shimDirPath) {
         return;
     }
 
-    std::wstring shimDir(dirBuf, len);
+    std::wstring shimDir = shimDirPath->wstring();
     g_shimDirLower = EnsureTrailingSlash(ToLowerW(shimDir));
 
     std::wstring pattern = shimDir + L"\\*.dll";

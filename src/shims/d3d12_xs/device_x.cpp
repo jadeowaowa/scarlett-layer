@@ -82,7 +82,7 @@ public:
         if (FAILED(hr)) {
             return hr;
         }
-        *ppCommandQueue = sc::d3d12xs::CreateScarlettCommandQueueX(m_factory, m_device, std::move(nativeQueue));
+        *ppCommandQueue = sc::d3d12xs::CreateScarlettCommandQueueX(m_factory, m_device, std::move(nativeQueue)).Detach();
         const char* typeName = (pDesc->Type == D3D12_COMMAND_LIST_TYPE_COMPUTE) ? "COMPUTE"
                              : (pDesc->Type == D3D12_COMMAND_LIST_TYPE_COPY)    ? "COPY"
                                                                                 : "DIRECT";
@@ -108,10 +108,8 @@ public:
             HRESULT hr = m_device->CreateCommandList(
                 nodeMask, type, pCommandAllocator, pInitialState, IID_PPV_ARGS(&nativeCl));
             if (FAILED(hr)) return hr;
-            auto* wrapped = sc::d3d12xs::CreateScarlettGraphicsCommandListX(nativeCl.Get());
-            hr = wrapped->QueryInterface(riid, ppCommandList);
-            wrapped->Release();
-            return hr;
+            auto wrapped = sc::d3d12xs::CreateScarlettGraphicsCommandListX(nativeCl.Get());
+            return wrapped->QueryInterface(riid, ppCommandList);
         }
         return m_device->CreateCommandList(nodeMask, type, pCommandAllocator, pInitialState, riid, ppCommandList);
     }
@@ -654,12 +652,13 @@ private:
 
 namespace sc::d3d12xs {
 
-ID3D12DeviceX* CreateScarlettDeviceX(
+ComPtr<ID3D12DeviceX> CreateScarlettDeviceX(
     ComPtr<IDXGIFactory6> factory,
     ComPtr<ID3D12Device> device,
     UINT vendorId,
     UINT deviceId) {
-    return new ScarlettDeviceX(std::move(factory), std::move(device), vendorId, deviceId);
+    return MakeCom<ID3D12DeviceX, ScarlettDeviceX>(
+        std::move(factory), std::move(device), vendorId, deviceId);
 }
 
 } // namespace sc::d3d12xs

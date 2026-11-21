@@ -3,6 +3,7 @@
 ## Source Files
 - `CMakeLists.txt` (201 lines)
 - `src/common/codecs.hpp` (343 lines)
+- `src/common/config.hpp` (46 lines)
 - `src/common/stub.hpp` (43 lines)
 - `src/common/vfs.hpp` (76 lines)
 - `src/common/xvd_container.hpp` (161 lines)
@@ -18,6 +19,8 @@
 
 ## `src/common/codecs.hpp`
 - **Structs:** `ScLzHeader`
+
+## `src/common/config.hpp`
 
 ## `src/common/stub.hpp`
 - **Enum `Level`:** Trace, Info, Warn, Stub, Error

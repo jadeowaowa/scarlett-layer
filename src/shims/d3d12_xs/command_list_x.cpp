@@ -164,9 +164,9 @@ private:
 
 namespace sc::d3d12xs {
 
-ID3D12GraphicsCommandListX* CreateScarlettGraphicsCommandListX(
+ComPtr<ID3D12GraphicsCommandListX> CreateScarlettGraphicsCommandListX(
     ID3D12GraphicsCommandList* nativeCl) {
-    return new ScarlettGraphicsCommandListX(nativeCl);
+    return MakeCom<ID3D12GraphicsCommandListX, ScarlettGraphicsCommandListX>(nativeCl);
 }
 
 } // namespace sc::d3d12xs

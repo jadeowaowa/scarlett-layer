@@ -1,4 +1,5 @@
 #include "d3d12_xs_internal.hpp"
+#include "common/config.hpp"
 
 #include <cstdio>
 #include <cstdlib>
@@ -19,18 +20,9 @@ std::string WideToUtf8(const wchar_t* wstr) {
 }
 
 std::filesystem::path ResolvePsoCachePath(UINT vendorId, UINT deviceId) {
-    std::filesystem::path baseDir;
-    wchar_t shimDirBuf[MAX_PATH]{};
-    DWORD len = GetEnvironmentVariableW(L"SCARLETT_SHIM_DIR", shimDirBuf, MAX_PATH);
-    if (len > 0 && len < MAX_PATH) {
-        baseDir = std::filesystem::path(shimDirBuf).parent_path() / L"cache";
-    } else {
-        baseDir = std::filesystem::current_path() / L"cache";
-    }
-
     wchar_t fileName[64];
     std::swprintf(fileName, _countof(fileName), L"pso_cache_%04X_%04X.bin", vendorId, deviceId);
-    return baseDir / fileName;
+    return sc::config::ResolveDataDir(L"cache") / fileName;
 }
 
 uint64_t HashGraphicsPsoDesc(
