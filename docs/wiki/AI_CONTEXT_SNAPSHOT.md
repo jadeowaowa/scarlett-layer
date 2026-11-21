@@ -1,7 +1,7 @@
 # Scarlett Layer â€” AI Context Snapshot
 
-**Commit:** `be8b006` (#99) | **Generated:** 2026-11-21 09:41 UTC  
-**Totals:** 62 files (20,900 LOC) | 12 shims | 57 CTest checks
+**Commit:** `b037f35` (#101) | **Generated:** 2026-11-21 09:48 UTC  
+**Totals:** 67 files (21,020 LOC) | 12 shims | 57 CTest checks
 
 ---
 
@@ -64,7 +64,7 @@
 
 ## 2. File Inventory
 ```text
-  192  CMakeLists.txt
+  196  CMakeLists.txt
   343  src/common/codecs.hpp
    43  src/common/stub.hpp
    76  src/common/vfs.hpp
@@ -78,9 +78,14 @@
   105  src/shims/acphal/acphal.cpp
     7  src/shims/acphal/acphal.def
    33  src/shims/acphal/acphal.hpp
- 1444  src/shims/d3d12_xs/d3d12_xs.cpp
+  172  src/shims/d3d12_xs/command_list_x.cpp
+  443  src/shims/d3d12_xs/command_queue_x.cpp
+  109  src/shims/d3d12_xs/d3d12_xs.cpp
     4  src/shims/d3d12_xs/d3d12_xs.def
   237  src/shims/d3d12_xs/d3d12_xs.hpp
+   71  src/shims/d3d12_xs/d3d12_xs_internal.hpp
+   93  src/shims/d3d12_xs/d3d12_xs_utils.cpp
+  665  src/shims/d3d12_xs/device_x.cpp
  1191  src/shims/d3d12_xs/rdna2_isa.hpp
   201  src/shims/d3d12_xs/shader_inspector.hpp
   401  src/shims/d3d12_xs/shader_translator.hpp
@@ -122,7 +127,7 @@
    59  src/tests/engine_plugin/engine_plugin.cpp
     3  src/tests/engine_plugin/engine_plugin.def
   328  src/tests/scarlett_3d_demo/main.cpp
- 6527  src/tests/scarlett_tests/main.cpp
+ 6534  src/tests/scarlett_tests/main.cpp
   242  tools/audit_imports.py
   505  tools/build_wiki.py
   108  tools/test_brief.py
@@ -143,7 +148,7 @@
 - `HRESULT WINAPI ApuFree(void* virtualAddress)`
 
 ## `d3d12_xs.dll`
-**Files:** `src/shims/d3d12_xs/d3d12_xs.cpp` (1444 L), `src/shims/d3d12_xs/d3d12_xs.def` (4 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (237 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1191 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_translator.hpp` (401 L)
+**Files:** `src/shims/d3d12_xs/command_list_x.cpp` (172 L), `src/shims/d3d12_xs/command_queue_x.cpp` (443 L), `src/shims/d3d12_xs/d3d12_xs.cpp` (109 L), `src/shims/d3d12_xs/d3d12_xs.def` (4 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (237 L), `src/shims/d3d12_xs/d3d12_xs_internal.hpp` (71 L), `src/shims/d3d12_xs/d3d12_xs_utils.cpp` (93 L), `src/shims/d3d12_xs/device_x.cpp` (665 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1191 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_translator.hpp` (401 L)
 
 **DLL Exports (`.def`):** `D3D12XboxCreateDevice`, `D3D12SerializeRootSignature = ScarlettSerializeRootSignature`
 
@@ -444,6 +449,8 @@
 ```
 
 ## 6. Recent Git History
+- `b037f35 Merge Sprint 59: Zero-warning D3D12 validation (57/57 CTests)`
+- `ab98a72 Sprint 59: Zero-warning D3D12 validation + SCARLETT_STRICT_D3D12=1`
 - `be8b006 Merge Sprint 58: Async compute & cross-queue fence sync (57/57 CTests)`
 - `be60a74 Sprint 58: Async compute & cross-queue fence sync E2E + PresentX lifetime hardening (CTest #57)`
 - `f4fcfe1 Merge Sprint 57: Headless PresentX mode (56/56 CTests)`
@@ -452,5 +459,3 @@
 - `12ccf0c Sprint 55: Zero-readback GPU PresentX demo & DXGI SwapChain E2E (CTest #54)`
 - `47a919c Merge Sprint 54: COM vtable ABI conformance (53/53 CTests)`
 - `e1f56ac Sprint 54: COM vtable ABI conformance & raw slot invocation E2E (CTest #53)`
-- `df427cd Demo: Add live interactive scarlett_3d_demo (d3d12_xs spinning lit 3D cube)`
-- `9647773 Merge Sprint 53: 3D perspective & depth-buffer E2E render (52/52 CTests)`

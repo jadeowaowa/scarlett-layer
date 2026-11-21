@@ -239,3 +239,8 @@
 - Silenced raw `ID3D12CommandList::BeginEvent`/`EndEvent`/`SetMarker` forwarding in `ScarlettGraphicsCommandListX` (`src/shims/d3d12_xs/d3d12_xs.cpp`) to eliminate D3D12 debug-layer `BeginEvent` and unmatched `PixEndEvent` errors.
 - Added `SCARLETT_STRICT_D3D12=1` abort enforcement inside the `_DEBUG` `ID3D12InfoQueue1` validation callback.
 - Standardized UAV buffer initial states to `D3D12_RESOURCE_STATE_COMMON` and supplied optimized `D3D12_CLEAR_VALUE` structs on render-target creation in `src/tests/scarlett_tests/main.cpp` (`57 passed, 0 failed`, 0 D3D12 debug errors/warnings).
+
+## Sprint 60: Modularize `d3d12_xs` Shim Architecture
+- Decomposed the 1,440-line `src/shims/d3d12_xs/d3d12_xs.cpp` monolith into focused translation units behind `d3d12_xs_internal.hpp`: `d3d12_xs_utils.cpp` (93 lines), `command_list_x.cpp` (172 lines), `command_queue_x.cpp` (443 lines), `device_x.cpp` (665 lines), and a thin `d3d12_xs.cpp` export shell (109 lines).
+- Cleared the final `ClearRenderTargetView` optimized-clear-value warning in `src/tests/scarlett_tests/main.cpp`.
+- Updated `CMakeLists.txt` target sources and verified `57 passed, 0 failed` with zero `d3d12_debug` errors or warnings under `SCARLETT_STRICT_D3D12=1`.

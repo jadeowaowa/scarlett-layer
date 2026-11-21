@@ -5770,10 +5770,17 @@ bool TestPresentXDescriptorAudit() {
     rtDesc.SampleDesc.Count = 1;
     rtDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
 
+    D3D12_CLEAR_VALUE rtClear{};
+    rtClear.Format = rtDesc.Format;
+    rtClear.Color[0] = 0.25f;
+    rtClear.Color[1] = 0.50f;
+    rtClear.Color[2] = 0.75f;
+    rtClear.Color[3] = 1.0f;
+
     ID3D12Resource* rt = nullptr;
     SC_EXPECT(SUCCEEDED(dev->CreateCommittedResource(
         &defHeap, D3D12_HEAP_FLAG_NONE, &rtDesc,
-        D3D12_RESOURCE_STATE_RENDER_TARGET, nullptr, IID_PPV_ARGS(&rt))) && rt != nullptr);
+        D3D12_RESOURCE_STATE_RENDER_TARGET, &rtClear, IID_PPV_ARGS(&rt))) && rt != nullptr);
 
     dev->CreateRenderTargetView(rt, nullptr, rtv0);
 

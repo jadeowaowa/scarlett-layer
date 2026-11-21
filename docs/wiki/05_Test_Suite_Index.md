@@ -125,4 +125,4 @@
 - `src/tests/engine_plugin/engine_plugin.cpp` (59 lines)
 - `src/tests/engine_plugin/engine_plugin.def` (3 lines)
 - `src/tests/scarlett_3d_demo/main.cpp` (328 lines)
-- `src/tests/scarlett_tests/main.cpp` (6527 lines)
+- `src/tests/scarlett_tests/main.cpp` (6534 lines)
