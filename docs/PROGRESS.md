@@ -177,3 +177,6 @@
 
 ## Sprint 41: Phase 3 Audio Runtime E2E (xaudio2_9 + AcpHal)
 - Added CTest #40 (`XAudio2RuntimePlaybackE2E`) in `src/tests/scarlett_tests/main.cpp` exercising `shims\xaudio2_9.dll` (`XAudio2Create` -> `CreateMasteringVoice` -> `CreateSourceVoice` -> `SubmitSourceBuffer` -> `GetState` -> `Start`/`Stop`/`FlushSourceBuffers`) and `shims\AcpHal.dll` (`AcpHalCreate` / `AcpHalReleaseShapeContexts`) (`40 passed, 0 failed`).
+
+## Sprint 42: Phase 3 Networking Shims E2E (libHttpClient + XCurl)
+- Added CTest #41 (`NetworkingShimsE2E`) in `src/tests/scarlett_tests/main.cpp` dynamically loading `libHttpClient` and `XCurl` shims and validating full mock-backed HTTP request/response lifecycles, headers, write callbacks, and status codes (`41 passed, 0 failed`).

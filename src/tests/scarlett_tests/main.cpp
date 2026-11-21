@@ -2364,6 +2364,129 @@ static size_t TestXCurlWriteCb(char* ptr, size_t size, size_t nmemb, void* userd
     return size * nmemb;
 }
 
+static size_t CurlTestWriteCb(char* ptr, size_t size, size_t nmemb, void* userdata) {
+    auto* out = static_cast<std::string*>(userdata);
+    const size_t total = size * nmemb;
+    if (out && ptr && total > 0) out->append(ptr, total);
+    return total;
+}
+
+bool TestNetworkingShimsE2E() {
+    // 1. libHttpClient shim E2E
+    HMODULE hcMod = LoadLibraryW(L"shims\\libHttpClient.dll");
+    if (!hcMod) hcMod = LoadLibraryW(L"shims\\libHttpClient.GDK.dll");
+    if (!hcMod) hcMod = LoadLibraryW(L"libHttpClient.dll");
+    SC_EXPECT(hcMod != nullptr);
+
+    using PFN_HCInitialize = HRESULT(WINAPI*)(void*);
+    using PFN_HCCleanup = void(WINAPI*)(void);
+    using PFN_HCIsInitialized = uint32_t(WINAPI*)(void);
+    using PFN_HCHttpCallCreate = HRESULT(WINAPI*)(void**);
+    using PFN_HCHttpCallCloseHandle = HRESULT(WINAPI*)(void*);
+    using PFN_HCHttpCallRequestSetUrl = HRESULT(WINAPI*)(void*, const char*, const char*);
+    using PFN_HCHttpCallRequestSetHeader = HRESULT(WINAPI*)(void*, const char*, const char*, uint32_t);
+    using PFN_HCHttpCallPerformAsync = HRESULT(WINAPI*)(void*, void*);
+    using PFN_HCHttpCallResponseGetStatusCode = HRESULT(WINAPI*)(void*, uint32_t*);
+    using PFN_HCHttpCallResponseGetResponseString = HRESULT(WINAPI*)(void*, const char**);
+    using PFN_HCHttpCallRegisterMock = HRESULT(WINAPI*)(const char*, const char*, uint32_t, const char*);
+    using PFN_HCHttpCallClearMocks = void(WINAPI*)(void);
+
+    auto pHCInit = reinterpret_cast<PFN_HCInitialize>(GetProcAddress(hcMod, "HCInitialize"));
+    auto pHCCleanup = reinterpret_cast<PFN_HCCleanup>(GetProcAddress(hcMod, "HCCleanup"));
+    auto pHCIsInit = reinterpret_cast<PFN_HCIsInitialized>(GetProcAddress(hcMod, "HCIsInitialized"));
+    auto pHCCreate = reinterpret_cast<PFN_HCHttpCallCreate>(GetProcAddress(hcMod, "HCHttpCallCreate"));
+    auto pHCClose = reinterpret_cast<PFN_HCHttpCallCloseHandle>(GetProcAddress(hcMod, "HCHttpCallCloseHandle"));
+    auto pHCSetUrl = reinterpret_cast<PFN_HCHttpCallRequestSetUrl>(GetProcAddress(hcMod, "HCHttpCallRequestSetUrl"));
+    auto pHCSetHdr = reinterpret_cast<PFN_HCHttpCallRequestSetHeader>(GetProcAddress(hcMod, "HCHttpCallRequestSetHeader"));
+    auto pHCPerform = reinterpret_cast<PFN_HCHttpCallPerformAsync>(GetProcAddress(hcMod, "HCHttpCallPerformAsync"));
+    auto pHCStatus = reinterpret_cast<PFN_HCHttpCallResponseGetStatusCode>(GetProcAddress(hcMod, "HCHttpCallResponseGetStatusCode"));
+    auto pHCRespStr = reinterpret_cast<PFN_HCHttpCallResponseGetResponseString>(GetProcAddress(hcMod, "HCHttpCallResponseGetResponseString"));
+    auto pHCMock = reinterpret_cast<PFN_HCHttpCallRegisterMock>(GetProcAddress(hcMod, "HCHttpCallRegisterMock"));
+    auto pHCClearMocks = reinterpret_cast<PFN_HCHttpCallClearMocks>(GetProcAddress(hcMod, "HCHttpCallClearMocks"));
+    SC_EXPECT(pHCInit && pHCCleanup && pHCIsInit && pHCCreate && pHCClose &&
+              pHCSetUrl && pHCSetHdr && pHCPerform && pHCStatus && pHCRespStr && pHCMock && pHCClearMocks);
+
+    SC_EXPECT(SUCCEEDED(pHCInit(nullptr)));
+    SC_EXPECT(pHCIsInit() != 0);
+    pHCClearMocks();
+    SC_EXPECT(SUCCEEDED(pHCMock("GET", "https://scarlett.local/title", 200, "{\"ok\":true}")));
+
+    void* hcCall = nullptr;
+    SC_EXPECT(SUCCEEDED(pHCCreate(&hcCall)) && hcCall != nullptr);
+    SC_EXPECT(SUCCEEDED(pHCSetUrl(hcCall, "GET", "https://scarlett.local/title/config")));
+    SC_EXPECT(SUCCEEDED(pHCSetHdr(hcCall, "X-Scarlett-Test", "1", 0)));
+    SC_EXPECT(SUCCEEDED(pHCPerform(hcCall, nullptr)));
+
+    uint32_t hcStatus = 0;
+    const char* hcBody = nullptr;
+    SC_EXPECT(SUCCEEDED(pHCStatus(hcCall, &hcStatus)) && hcStatus == 200);
+    SC_EXPECT(SUCCEEDED(pHCRespStr(hcCall, &hcBody)) && hcBody != nullptr);
+    SC_EXPECT(std::string(hcBody) == "{\"ok\":true}");
+
+    SC_EXPECT(SUCCEEDED(pHCClose(hcCall)));
+    pHCClearMocks();
+    pHCCleanup();
+    FreeLibrary(hcMod);
+
+    // 2. XCurl shim E2E
+    HMODULE curlMod = LoadLibraryW(L"shims\\XCurl.dll");
+    if (!curlMod) curlMod = LoadLibraryW(L"XCurl.dll");
+    SC_EXPECT(curlMod != nullptr);
+
+    using PFN_curl_global_init = int(*)(int64_t);
+    using PFN_curl_global_cleanup = void(*)(void);
+    using PFN_curl_easy_init = void*(*)(void);
+    using PFN_curl_easy_cleanup = void(*)(void*);
+    using PFN_curl_easy_setopt = int(*)(void*, int, ...);
+    using PFN_curl_easy_perform = int(*)(void*);
+    using PFN_curl_easy_getinfo = int(*)(void*, int, ...);
+    using PFN_curl_slist_append = void*(*)(void*, const char*);
+    using PFN_curl_slist_free_all = void(*)(void*);
+    using PFN_xcurl_register_mock = int(*)(const char*, long, const char*);
+    using PFN_xcurl_clear_mocks = void(*)(void);
+
+    auto pGlobalInit = reinterpret_cast<PFN_curl_global_init>(GetProcAddress(curlMod, "curl_global_init"));
+    auto pGlobalCleanup = reinterpret_cast<PFN_curl_global_cleanup>(GetProcAddress(curlMod, "curl_global_cleanup"));
+    auto pEasyInit = reinterpret_cast<PFN_curl_easy_init>(GetProcAddress(curlMod, "curl_easy_init"));
+    auto pEasyCleanup = reinterpret_cast<PFN_curl_easy_cleanup>(GetProcAddress(curlMod, "curl_easy_cleanup"));
+    auto pEasySetopt = reinterpret_cast<PFN_curl_easy_setopt>(GetProcAddress(curlMod, "curl_easy_setopt"));
+    auto pEasyPerform = reinterpret_cast<PFN_curl_easy_perform>(GetProcAddress(curlMod, "curl_easy_perform"));
+    auto pEasyGetinfo = reinterpret_cast<PFN_curl_easy_getinfo>(GetProcAddress(curlMod, "curl_easy_getinfo"));
+    auto pSlistAppend = reinterpret_cast<PFN_curl_slist_append>(GetProcAddress(curlMod, "curl_slist_append"));
+    auto pSlistFree = reinterpret_cast<PFN_curl_slist_free_all>(GetProcAddress(curlMod, "curl_slist_free_all"));
+    auto pRegMock = reinterpret_cast<PFN_xcurl_register_mock>(GetProcAddress(curlMod, "xcurl_register_mock_response"));
+    auto pClearMocks = reinterpret_cast<PFN_xcurl_clear_mocks>(GetProcAddress(curlMod, "xcurl_clear_mocks"));
+    SC_EXPECT(pGlobalInit && pGlobalCleanup && pEasyInit && pEasyCleanup &&
+              pEasySetopt && pEasyPerform && pEasyGetinfo && pSlistAppend && pSlistFree &&
+              pRegMock && pClearMocks);
+
+    SC_EXPECT(pGlobalInit(0) == 0);
+    pClearMocks();
+    SC_EXPECT(pRegMock("https://scarlett.local/curl", 200L, "xcurl-ok") == 0);
+
+    void* curl = pEasyInit();
+    SC_EXPECT(curl != nullptr);
+    void* hdrs = pSlistAppend(nullptr, "Accept: application/json");
+    std::string recvBody;
+    SC_EXPECT(pEasySetopt(curl, 10002, "https://scarlett.local/curl/ping") == 0); // CURLOPT_URL
+    SC_EXPECT(pEasySetopt(curl, 10023, hdrs) == 0);                               // CURLOPT_HTTPHEADER
+    SC_EXPECT(pEasySetopt(curl, 20011, &CurlTestWriteCb) == 0);                   // CURLOPT_WRITEFUNCTION
+    SC_EXPECT(pEasySetopt(curl, 10001, &recvBody) == 0);                          // CURLOPT_WRITEDATA
+    SC_EXPECT(pEasyPerform(curl) == 0);
+
+    long httpCode = 0;
+    SC_EXPECT(pEasyGetinfo(curl, 0x200002, &httpCode) == 0);                      // CURLINFO_RESPONSE_CODE
+    SC_EXPECT(httpCode == 200L);
+    SC_EXPECT(recvBody == "xcurl-ok");
+
+    pSlistFree(hdrs);
+    pEasyCleanup(curl);
+    pClearMocks();
+    pGlobalCleanup();
+    FreeLibrary(curlMod);
+    return true;
+}
+
 bool TestXAudio2RuntimePlaybackE2E() {
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
 
@@ -4349,6 +4472,7 @@ int main() {
     RunTest("D3D12XsCmdListRenderClearE2E",      TestD3D12XsCmdListRenderClearE2E);
     RunTest("D3D12XsCmdListComputeDispatchE2E",  TestD3D12XsCmdListComputeDispatchE2E);
     RunTest("XAudio2RuntimePlaybackE2E",         TestXAudio2RuntimePlaybackE2E);
+    RunTest("NetworkingShimsE2E",                TestNetworkingShimsE2E);
 
     XGameRuntimeUninitialize();
 
