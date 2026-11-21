@@ -121,3 +121,9 @@
 ## Sprint 29: PresentX & Descriptor-Handle Audit
 - Hardened `PresentX` in `src/shims/d3d12_xs/d3d12_xs.cpp` with `Texture2D` dimension/size validation and a clamped `CopyTextureRegion` fallback when source and swapchain backbuffer dimensions or formats differ.
 - Added CTest #28 (`PresentXDescriptorAudit`) verifying all 4 `GetDescriptorHandleIncrementSize` strides, `CreateRenderTargetView` -> `OMSetRenderTargets` -> `ClearRenderTargetView` -> `PresentX` submission, and non-white RGBA GPU readback (`28 passed, 0 failed`).
+
+## Sprint 30: ScarlettX ABI Conformance & Synthetic Game Manifest Suite
+- Added CTest #29 (`ScarlettXConformanceSuite`) in `src/tests/scarlett_tests/main.cpp`.
+- Verified retail COM vtable slot conformance on `gameinput.dll` (`IGameInput` slots 3/4, `IGameInputReading` slots 3/4) matching ScarlettX's `test_gameinput.cpp`.
+- Verified `xgameruntime.dll` initialization, device-type reporting, and manual `XTaskQueue` dispatch lifecycle.
+- Audited all 4 ScarlettX synthetic game manifests (`hello_scarlett`, `iat_probe`, `rt_showcase`, `scarlett_arena`) when present (`29 passed, 0 failed`).

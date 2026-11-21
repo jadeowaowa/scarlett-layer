@@ -1,7 +1,7 @@
 # Scarlett Layer â€” AI Context Snapshot
 
-**Commit:** `5dc706f` (#36) | **Generated:** 2026-11-21 00:24 UTC  
-**Totals:** 60 files (16,327 LOC) | 12 shims | 28 CTest checks
+**Commit:** `ea01f6d` (#38) | **Generated:** 2026-11-21 00:30 UTC  
+**Totals:** 60 files (16,401 LOC) | 12 shims | 29 CTest checks
 
 ---
 
@@ -120,7 +120,7 @@
  1651  src/tests/dummy_title/main.cpp
    59  src/tests/engine_plugin/engine_plugin.cpp
     3  src/tests/engine_plugin/engine_plugin.def
- 3137  src/tests/scarlett_tests/main.cpp
+ 3211  src/tests/scarlett_tests/main.cpp
   242  tools/audit_imports.py
   505  tools/build_wiki.py
   108  tools/test_brief.py
@@ -344,7 +344,7 @@
 - `MimgOp`: kMimgImageSample = 0x20u
 - `InstFormat`: Sopp, Vop1, Vop2, Vop3, Exp, Mubuf, Smem, Vintrp, Mimg
 
-## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 28 total)
+## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 29 total)
 ```cpp
     RunTest("VfsPathTranslation",         TestVfsPathTranslation);
     RunTest("RuntimeAndXUser",            TestRuntimeAndXUser);
@@ -374,9 +374,12 @@
     RunTest("LoaderInspectAndXvdMount",          TestLoaderInspectAndXvdMount);
     RunTest("Rdna2ImageSampleShader",            TestRdna2ImageSampleShader);
     RunTest("PresentXDescriptorAudit",           TestPresentXDescriptorAudit);
+    RunTest("ScarlettXConformanceSuite",         TestScarlettXConformanceSuite);
 ```
 
 ## 6. Recent Git History
+- `ea01f6d Merge Sprint 29: PresentX & descriptor-handle audit`
+- `21dc0e0 Sprint 29: PresentX CopyTextureRegion fallback + descriptor-handle audit + CTest #28`
 - `5dc706f Merge Sprint 28: RDNA2 IMAGE_SAMPLE texture sampling`
 - `e5717e5 Sprint 28: RDNA2 MIMG IMAGE_SAMPLE decoder + PS HLSL lifter + CTest #27`
 - `90804f6 Merge Sprint 27: Loader PE inspector & XVD container`
@@ -385,5 +388,3 @@
 - `5d4f624 Sprint 26: Retail bring-up shims (GameInput @1, AcpHal, libHttpClient.GDK, XCurl) + CTest #25`
 - `e998915 tools: add VS BuildTools ctest fallback to verify.bat`
 - `fc60b8d Sprint 25: d3d12_xs <-> dstorage_xs bridge, mip-chain streaming + CTest #24`
-- `4c41efe Sprint 24: DirectStorage direct-to-VRAM GPU texture streaming + CTest #23`
-- `2c95bab Sprint 23: DirectStorage direct-to-VRAM GPU buffer streaming + CTest #22`
