@@ -187,3 +187,7 @@
 
 ## Sprint 44: GameInput Runtime Polling E2E
 - Added CTest #43 (`GameInputRuntimePollingE2E`) in `src/tests/scarlett_tests/main.cpp` dynamically loading `shims\gameinput.dll` and validating `GameInputCreate`, monotonic timestamps, synthetic gamepad injection, and `GetCurrentReading` -> `GetGamepadState` parity (`43 passed, 0 failed`).
+
+## Sprint 45: Phase 3 Closeout — Full Scarlett Title Bring-Up E2E
+- Added CTest #44 (`ScarlettTitleBringUpE2E`) in `src/tests/scarlett_tests/main.cpp` integrating `xgameruntime` (`XUser` + `XGameSave`), `libHttpClient`, `gameinput`, `xaudio2_9`, and `d3d12_xs` into a single end-to-end boot-to-frame-to-save loop (`44 passed, 0 failed`).
+- Marked **Phase 3 (Runtime Bring-Up)** complete at `sprint-45-baseline`.

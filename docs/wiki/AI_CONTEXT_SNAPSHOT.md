@@ -1,7 +1,7 @@
 # Scarlett Layer â€” AI Context Snapshot
 
-**Commit:** `bf159be` (#68) | **Generated:** 2026-11-21 04:53 UTC  
-**Totals:** 61 files (18,541 LOC) | 12 shims | 43 CTest checks
+**Commit:** `62406f1` (#70) | **Generated:** 2026-11-21 05:01 UTC  
+**Totals:** 61 files (18,803 LOC) | 12 shims | 44 CTest checks
 
 ---
 
@@ -121,7 +121,7 @@
  1651  src/tests/dummy_title/main.cpp
    59  src/tests/engine_plugin/engine_plugin.cpp
     3  src/tests/engine_plugin/engine_plugin.def
- 4704  src/tests/scarlett_tests/main.cpp
+ 4966  src/tests/scarlett_tests/main.cpp
   242  tools/audit_imports.py
   505  tools/build_wiki.py
   108  tools/test_brief.py
@@ -381,7 +381,7 @@
 - `MimgOp`: kMimgImageSample = 0x20u
 - `InstFormat`: Sopp, Vop1, Vop2, Vop3, Exp, Mubuf, Smem, Vintrp, Mimg
 
-## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 43 total)
+## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 44 total)
 ```cpp
     RunTest("VfsPathTranslation",         TestVfsPathTranslation);
     RunTest("RuntimeAndXUser",            TestRuntimeAndXUser);
@@ -426,9 +426,12 @@
     RunTest("NetworkingShimsE2E",                TestNetworkingShimsE2E);
     RunTest("XUserAndGameSaveProfileE2E",        TestXUserAndGameSaveProfileE2E);
     RunTest("GameInputRuntimePollingE2E",        TestGameInputRuntimePollingE2E);
+    RunTest("ScarlettTitleBringUpE2E",           TestScarlettTitleBringUpE2E);
 ```
 
 ## 6. Recent Git History
+- `62406f1 Merge Sprint 44: GameInput runtime polling E2E (43/43 CTests)`
+- `3b6ec9e Sprint 44: GameInput runtime polling E2E (CTest #43)`
 - `bf159be Merge Sprint 43: XUser profile parity & XGameSave E2E (42/42 CTests)`
 - `0209cbe Sprint 43: XUser profile parity (GetId/GetState/GetLocalId) + XGameSave E2E (CTest #42)`
 - `1c71a44 Merge Sprint 42: Phase 3 networking shims E2E (41/41 CTests)`
@@ -437,5 +440,3 @@
 - `96e1a65 Sprint 41: Phase 3 audio runtime E2E (xaudio2_9 + AcpHal, CTest #40)`
 - `3585cbf Merge Sprint 40: Phase 2B closeout (39/39 CTests)`
 - `840a046 Sprint 40: Phase 2B closeout — cmdlist draw/depth/root-const parity + RDNA2 Compute E2E (CTest #39)`
-- `568000d Merge Sprint 39: ID3D12GraphicsCommandListX render & descriptor parity`
-- `46ad4db Sprint 39: ID3D12GraphicsCommandListX render/descriptor parity + RTV clear E2E (CTest #38)`
