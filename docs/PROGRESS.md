@@ -260,3 +260,10 @@
 - Extended `sc::loader::InspectPeImports` (`src/loader/pe_inspector.hpp`) to parse `IMAGE_DIRECTORY_ENTRY_TLS` (`IMAGE_TLS_DIRECTORY64`) raw template size, zero-fill size, characteristics, and callback table counts.
 - Added runtime implicit TLS initialization/teardown (`ScarlettHookInspectModuleTls`, `ScarlettHookInitImplicitTls`, `ScarlettHookFreeImplicitTls`) and an isolated LIFO guest `atexit` registry (`ScarlettHookRegisterGuestAtExit`, `ScarlettHookRunGuestAtExit`, auto-drained on `DLL_PROCESS_DETACH`) to `src/loader/scarlett_hook.cpp`.
 - Added `XMemMin16ByteAlignment` and `Pe64ImplicitTlsAndGuestAtExitE2E` (`59 passed, 0 failed`, zero `/W4` warnings, zero `d3d12_debug` output under `SCARLETT_STRICT_D3D12=1`).
+
+## Sprint 64: JIT x64 Auto-Stub Thunk Engine, Symbol-Level Audit CLI & `XAudio2` Export Parity
+- Added `src/loader/auto_stub.hpp` (`sc::loader::AutoStubEngine`): W^X x64 ABI trampoline slab (`PAGE_READWRITE` <-> `PAGE_EXECUTE_READ` + `FlushInstructionCache`), deduplicated per `dll!symbol` / `dll!#ord`, policy-driven defaults (`E_NOTIMPL`, `S_OK` for `PIX*`/`Etw*`/`Event*`), runtime policy overrides, and sorted Missing Export Hotlist reporting on `DLL_PROCESS_DETACH` (`SCARLETT_STUB_REPORT`).
+- Wired `AutoStubEngine` into `HookGetProcAddress` in `src/loader/scarlett_hook.cpp` (scoped to shimmed DLLs, toggled via `sc::config::IsAutoStubEnabled()` / `SCARLETT_AUTO_STUB=0`).
+- Exported `XAudio2CreateWithVersionInfo` and ordinal `@1` (`XAudio2Create`) from `src/shims/xaudio2_9/` after the auto-stub engine immediately surfaced the `<xaudio2.h>` inline lookup gap.
+- Added PE64 export-table parsing and symbol-level coverage classification (`sc::loader::InspectPeSymbolCoverage`) in `src/loader/pe_inspector.hpp` and upgraded `loader.exe --inspect` / `inspect` in `src/loader/main.cpp` to print `.tls` metadata and exact implemented vs. auto-stubbed symbol coverage.
+- Added `.gitignore` rule for `docs/internal/` and 2 new CTests (`AutoStubThunkSurvivalE2E`, `LoaderSymbolCoverageAuditE2E`) -> `61 passed, 0 failed`, zero `/W4` warnings, zero `d3d12_debug` output.

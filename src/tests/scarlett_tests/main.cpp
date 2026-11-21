@@ -70,6 +70,8 @@ constexpr TestEntry kTests[] = {
     {"D3D12XsAsyncComputeCrossQueueSyncE2E", TestD3D12XsAsyncComputeCrossQueueSyncE2E},
     {"XMemMin16ByteAlignment",             TestXMemMin16ByteAlignment},
     {"Pe64ImplicitTlsAndGuestAtExitE2E",   TestPe64ImplicitTlsAndGuestAtExitE2E},
+    {"AutoStubThunkSurvivalE2E",           TestAutoStubThunkSurvivalE2E},
+    {"LoaderSymbolCoverageAuditE2E",       TestLoaderSymbolCoverageAuditE2E},
 };
 
 bool ContainsCaseInsensitive(std::string_view haystack, std::string_view needle) {

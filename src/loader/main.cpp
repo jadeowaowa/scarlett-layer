@@ -55,22 +55,34 @@ int wmain(int argc, wchar_t* argv[]) {
     const std::filesystem::path shimDir = loaderDir / L"shims";
     const std::filesystem::path hookDll = loaderDir / L"scarlett_hook.dll";
 
-    if (argc >= 3 && std::wstring_view(argv[1]) == L"--inspect") {
+    if (argc >= 3 && (std::wstring_view(argv[1]) == L"--inspect" || std::wstring_view(argv[1]) == L"inspect")) {
         const std::filesystem::path pePath = std::filesystem::absolute(argv[2]);
-        const auto audit = sc::loader::InspectPeImports(pePath, shimDir);
+        const auto cov = sc::loader::InspectPeSymbolCoverage(pePath, shimDir);
+        const auto& audit = cov.audit;
         if (!audit.validPe64) {
             std::fprintf(stderr, "[inspect] ERROR: %s\n", audit.error.c_str());
             return 1;
         }
-        std::printf("[inspect] PE64: %s (%zu imported symbols)\n",
-                    pePath.string().c_str(), audit.totalImportedSymbols);
+        const size_t totalShimmedSyms = cov.implementedSymbols.size() + cov.autoStubSymbols.size();
+        const double pct = totalShimmedSyms > 0
+            ? (100.0 * static_cast<double>(cov.implementedSymbols.size()) / static_cast<double>(totalShimmedSyms))
+            : 100.0;
+        std::printf("[inspect] PE64: %s (%zu imported symbols, %zu ordinals)\n",
+                    pePath.string().c_str(), audit.totalImportedSymbols, audit.ordinalImportCount);
+        std::printf("  TLS     : %s (raw=%zu B, zeroFill=%zu B, callbacks=%zu)\n",
+                    audit.hasTlsDirectory ? "present" : "none",
+                    audit.tlsRawDataSize, audit.tlsZeroFillSize, audit.tlsCallbackCount);
         std::printf("  Shimmed (%zu):", audit.shimmedImports.size());
         for (const auto& d : audit.shimmedImports) std::printf(" %s", d.c_str());
         std::printf("\n  System  (%zu):", audit.systemImports.size());
         for (const auto& d : audit.systemImports) std::printf(" %s", d.c_str());
         std::printf("\n  Missing (%zu):", audit.missingImports.size());
         for (const auto& d : audit.missingImports) std::printf(" %s", d.c_str());
-        std::printf("\n");
+        std::printf("\n  Coverage: %zu/%zu shimmed symbol(s) implemented (%.1f%%), %zu auto-stubbed\n",
+                    cov.implementedSymbols.size(), totalShimmedSyms, pct, cov.autoStubSymbols.size());
+        for (const auto& s : cov.autoStubSymbols) {
+            std::printf("    [AUTO_STUB] %s\n", s.c_str());
+        }
         return 0;
     }
 

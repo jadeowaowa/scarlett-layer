@@ -649,4 +649,12 @@ HRESULT WINAPI ScarlettXAudio2Create(
     return S_OK;
 }
 
+HRESULT WINAPI ScarlettXAudio2CreateWithVersionInfo(
+    IXAudio2** ppXAudio2,
+    UINT32 Flags,
+    XAUDIO2_PROCESSOR XAudio2Processor,
+    DWORD /*ntddiVersion*/) {
+    return ScarlettXAudio2Create(ppXAudio2, Flags, XAudio2Processor);
+}
+
 } // extern "C"

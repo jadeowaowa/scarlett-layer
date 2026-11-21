@@ -1,1 +1,4 @@
 build/ 
+
+# Internal-only engineering guides
+docs/internal/
