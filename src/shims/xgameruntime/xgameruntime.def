@@ -10,6 +10,9 @@ EXPORTS
     XUserAddAsync
     XUserAddResult
     XUserGetGamertag
+    XUserGetId
+    XUserGetState
+    XUserGetLocalId
     XUserCloseHandle
     XGameSaveInitializeProviderAsync
     XGameSaveInitializeProviderResult

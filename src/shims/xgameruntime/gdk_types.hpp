@@ -59,6 +59,16 @@ enum class XUserAddOptions : uint32_t {
     AddDefaultUserAllowingUI = 0x04
 };
 
+enum class XUserState : uint32_t {
+    SignedIn  = 0,
+    SigningOut = 1,
+    SignedOut = 2
+};
+
+struct XUserLocalId {
+    uint64_t value;
+};
+
 enum class XUserGamertagComponent : uint32_t {
     Classic      = 0,
     Modern       = 1,

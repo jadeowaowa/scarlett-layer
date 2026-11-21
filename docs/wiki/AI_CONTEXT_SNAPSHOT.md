@@ -1,7 +1,7 @@
 # Scarlett Layer â€” AI Context Snapshot
 
-**Commit:** `20de58b` (#64) | **Generated:** 2026-11-21 04:41 UTC  
-**Totals:** 61 files (18,283 LOC) | 12 shims | 41 CTest checks
+**Commit:** `1c71a44` (#66) | **Generated:** 2026-11-21 04:50 UTC  
+**Totals:** 61 files (18,463 LOC) | 12 shims | 42 CTest checks
 
 ---
 
@@ -109,19 +109,19 @@
     4  src/shims/xg_xs/xg_xs.def
    75  src/shims/xg_xs/xg_xs.hpp
   489  src/shims/xgameruntime/game_save.cpp
-   91  src/shims/xgameruntime/gdk_types.hpp
+  101  src/shims/xgameruntime/gdk_types.hpp
    87  src/shims/xgameruntime/runtime_internal.hpp
   191  src/shims/xgameruntime/task_queue.cpp
    13  src/shims/xgameruntime/task_queue.hpp
-  151  src/shims/xgameruntime/xgameruntime.cpp
-   26  src/shims/xgameruntime/xgameruntime.def
+  173  src/shims/xgameruntime/xgameruntime.cpp
+   29  src/shims/xgameruntime/xgameruntime.def
   277  src/shims/xmem/xmem.cpp
     8  src/shims/xmem/xmem.def
    62  src/shims/xmem/xmem.hpp
  1651  src/tests/dummy_title/main.cpp
    59  src/tests/engine_plugin/engine_plugin.cpp
     3  src/tests/engine_plugin/engine_plugin.def
- 4481  src/tests/scarlett_tests/main.cpp
+ 4626  src/tests/scarlett_tests/main.cpp
   242  tools/audit_imports.py
   505  tools/build_wiki.py
   108  tools/test_brief.py
@@ -352,9 +352,9 @@
 - `[05]` `HRESULT CopyFromSubresource( void* pDestinationData, uint32_t Subresource, const void* pResourceBaseAddress, uint32_t DestRowPitch, uint32_t DestSlicePitch)`
 
 ## `xgameruntime.dll`
-**Files:** `src/shims/xgameruntime/game_save.cpp` (489 L), `src/shims/xgameruntime/gdk_types.hpp` (91 L), `src/shims/xgameruntime/runtime_internal.hpp` (87 L), `src/shims/xgameruntime/task_queue.cpp` (191 L), `src/shims/xgameruntime/task_queue.hpp` (13 L), `src/shims/xgameruntime/xgameruntime.cpp` (151 L), `src/shims/xgameruntime/xgameruntime.def` (26 L)
+**Files:** `src/shims/xgameruntime/game_save.cpp` (489 L), `src/shims/xgameruntime/gdk_types.hpp` (101 L), `src/shims/xgameruntime/runtime_internal.hpp` (87 L), `src/shims/xgameruntime/task_queue.cpp` (191 L), `src/shims/xgameruntime/task_queue.hpp` (13 L), `src/shims/xgameruntime/xgameruntime.cpp` (173 L), `src/shims/xgameruntime/xgameruntime.def` (29 L)
 
-**DLL Exports (`.def`):** `XGameRuntimeInitialize`, `XGameRuntimeUninitialize`, `XSystemGetDeviceType`, `XTaskQueueCreate`, `XTaskQueueDispatch`, `XTaskQueueCloseHandle`, `XAsyncGetStatus`, `XUserAddAsync`, `XUserAddResult`, `XUserGetGamertag`, `XUserCloseHandle`, `XGameSaveInitializeProviderAsync`, `XGameSaveInitializeProviderResult`, `XGameSaveCloseProvider`, `XGameSaveCreateContainer`, `XGameSaveCloseContainer`, `XGameSaveCreateUpdate`, `XGameSaveCloseUpdate`, `XGameSaveSubmitBlobWrite`, `XGameSaveSubmitBlobDelete`, `XGameSaveSubmitUpdateAsync`, `XGameSaveSubmitUpdateResult`, `XGameSaveReadBlobDataAsync`, `XGameSaveReadBlobDataResult`
+**DLL Exports (`.def`):** `XGameRuntimeInitialize`, `XGameRuntimeUninitialize`, `XSystemGetDeviceType`, `XTaskQueueCreate`, `XTaskQueueDispatch`, `XTaskQueueCloseHandle`, `XAsyncGetStatus`, `XUserAddAsync`, `XUserAddResult`, `XUserGetGamertag`, `XUserGetId`, `XUserGetState`, `XUserGetLocalId`, `XUserCloseHandle`, `XGameSaveInitializeProviderAsync`, `XGameSaveInitializeProviderResult`, `XGameSaveCloseProvider`, `XGameSaveCreateContainer`, `XGameSaveCloseContainer`, `XGameSaveCreateUpdate`, `XGameSaveCloseUpdate`, `XGameSaveSubmitBlobWrite`, `XGameSaveSubmitBlobDelete`, `XGameSaveSubmitUpdateAsync`, `XGameSaveSubmitUpdateResult`, `XGameSaveReadBlobDataAsync`, `XGameSaveReadBlobDataResult`
 
 ## `xmem.dll`
 **Files:** `src/shims/xmem/xmem.cpp` (277 L), `src/shims/xmem/xmem.def` (8 L), `src/shims/xmem/xmem.hpp` (62 L)
@@ -381,7 +381,7 @@
 - `MimgOp`: kMimgImageSample = 0x20u
 - `InstFormat`: Sopp, Vop1, Vop2, Vop3, Exp, Mubuf, Smem, Vintrp, Mimg
 
-## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 41 total)
+## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 42 total)
 ```cpp
     RunTest("VfsPathTranslation",         TestVfsPathTranslation);
     RunTest("RuntimeAndXUser",            TestRuntimeAndXUser);
@@ -424,9 +424,12 @@
     RunTest("D3D12XsCmdListComputeDispatchE2E",  TestD3D12XsCmdListComputeDispatchE2E);
     RunTest("XAudio2RuntimePlaybackE2E",         TestXAudio2RuntimePlaybackE2E);
     RunTest("NetworkingShimsE2E",                TestNetworkingShimsE2E);
+    RunTest("XUserAndGameSaveProfileE2E",        TestXUserAndGameSaveProfileE2E);
 ```
 
 ## 6. Recent Git History
+- `1c71a44 Merge Sprint 42: Phase 3 networking shims E2E (41/41 CTests)`
+- `6b2fae4 Sprint 42: Phase 3 networking shims E2E (libHttpClient + XCurl, CTest #41)`
 - `20de58b Merge Sprint 41: Phase 3 audio runtime E2E (40/40 CTests)`
 - `96e1a65 Sprint 41: Phase 3 audio runtime E2E (xaudio2_9 + AcpHal, CTest #40)`
 - `3585cbf Merge Sprint 40: Phase 2B closeout (39/39 CTests)`
@@ -435,5 +438,3 @@
 - `46ad4db Sprint 39: ID3D12GraphicsCommandListX render/descriptor parity + RTV clear E2E (CTest #38)`
 - `9ece10b Merge Sprint 38: ID3D12GraphicsCommandListX wrapper parity`
 - `6e997d4 Sprint 38: ID3D12GraphicsCommandListX wrapper parity + GPU E2E (CTest #37)`
-- `94dddef Merge Sprint 37: Disk-backed RDNA2-to-DXBC shader cache`
-- `8713ddc Sprint 37: Disk-backed RDNA2-to-DXBC shader cache + CTest #36`

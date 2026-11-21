@@ -2371,6 +2371,150 @@ static size_t CurlTestWriteCb(char* ptr, size_t size, size_t nmemb, void* userda
     return total;
 }
 
+bool TestXUserAndGameSaveProfileE2E() {
+    HMODULE xgrMod = LoadLibraryW(L"shims\\xgameruntime.dll");
+    if (!xgrMod) xgrMod = LoadLibraryW(L"xgameruntime.dll");
+    SC_EXPECT(xgrMod != nullptr);
+
+    struct LocalAsyncBlock {
+        void* queue;
+        void* context;
+        void (CALLBACK* callback)(LocalAsyncBlock*);
+        unsigned char internal[sizeof(void*) * 4];
+    };
+    struct LocalBlobInfo { const char* name; uint32_t size; };
+    struct LocalBlob { LocalBlobInfo info; uint8_t* data; };
+
+    using PFN_Init = HRESULT(WINAPI*)(void);
+    using PFN_Uninit = void(WINAPI*)(void);
+    using PFN_QueueCreate = HRESULT(WINAPI*)(uint32_t, uint32_t, void**);
+    using PFN_QueueDispatch = bool(WINAPI*)(void*, uint32_t, uint32_t);
+    using PFN_QueueClose = void(WINAPI*)(void*);
+    using PFN_UserAddAsync = HRESULT(WINAPI*)(uint32_t, LocalAsyncBlock*);
+    using PFN_UserAddResult = HRESULT(WINAPI*)(LocalAsyncBlock*, void**);
+    using PFN_UserGetId = HRESULT(WINAPI*)(void*, uint64_t*);
+    using PFN_UserGetState = HRESULT(WINAPI*)(void*, uint32_t*);
+    using PFN_UserGetLocalId = HRESULT(WINAPI*)(void*, uint64_t*);
+    using PFN_UserGetGamertag = HRESULT(WINAPI*)(void*, uint32_t, size_t, char*, size_t*);
+    using PFN_UserClose = void(WINAPI*)(void*);
+    using PFN_GsInitAsync = HRESULT(WINAPI*)(void*, const char*, bool, LocalAsyncBlock*);
+    using PFN_GsInitResult = HRESULT(WINAPI*)(LocalAsyncBlock*, void**);
+    using PFN_GsCloseProv = void(WINAPI*)(void*);
+    using PFN_GsCreateCont = HRESULT(WINAPI*)(void*, const char*, void**);
+    using PFN_GsCloseCont = void(WINAPI*)(void*);
+    using PFN_GsCreateUpd = HRESULT(WINAPI*)(void*, const char*, void**);
+    using PFN_GsCloseUpd = void(WINAPI*)(void*);
+    using PFN_GsWriteBlob = HRESULT(WINAPI*)(void*, const char*, const uint8_t*, size_t);
+    using PFN_GsSubmitAsync = HRESULT(WINAPI*)(void*, LocalAsyncBlock*);
+    using PFN_GsSubmitResult = HRESULT(WINAPI*)(LocalAsyncBlock*);
+    using PFN_GsReadAsync = HRESULT(WINAPI*)(void*, const char**, uint32_t, LocalAsyncBlock*);
+    using PFN_GsReadResult = HRESULT(WINAPI*)(LocalAsyncBlock*, size_t, LocalBlob*, uint32_t*);
+
+    auto pInit = reinterpret_cast<PFN_Init>(GetProcAddress(xgrMod, "XGameRuntimeInitialize"));
+    auto pUninit = reinterpret_cast<PFN_Uninit>(GetProcAddress(xgrMod, "XGameRuntimeUninitialize"));
+    auto pQCreate = reinterpret_cast<PFN_QueueCreate>(GetProcAddress(xgrMod, "XTaskQueueCreate"));
+    auto pQDispatch = reinterpret_cast<PFN_QueueDispatch>(GetProcAddress(xgrMod, "XTaskQueueDispatch"));
+    auto pQClose = reinterpret_cast<PFN_QueueClose>(GetProcAddress(xgrMod, "XTaskQueueCloseHandle"));
+    auto pUserAdd = reinterpret_cast<PFN_UserAddAsync>(GetProcAddress(xgrMod, "XUserAddAsync"));
+    auto pUserAddRes = reinterpret_cast<PFN_UserAddResult>(GetProcAddress(xgrMod, "XUserAddResult"));
+    auto pUserGetId = reinterpret_cast<PFN_UserGetId>(GetProcAddress(xgrMod, "XUserGetId"));
+    auto pUserGetState = reinterpret_cast<PFN_UserGetState>(GetProcAddress(xgrMod, "XUserGetState"));
+    auto pUserGetLocalId = reinterpret_cast<PFN_UserGetLocalId>(GetProcAddress(xgrMod, "XUserGetLocalId"));
+    auto pUserGetTag = reinterpret_cast<PFN_UserGetGamertag>(GetProcAddress(xgrMod, "XUserGetGamertag"));
+    auto pUserClose = reinterpret_cast<PFN_UserClose>(GetProcAddress(xgrMod, "XUserCloseHandle"));
+    auto pGsInit = reinterpret_cast<PFN_GsInitAsync>(GetProcAddress(xgrMod, "XGameSaveInitializeProviderAsync"));
+    auto pGsInitRes = reinterpret_cast<PFN_GsInitResult>(GetProcAddress(xgrMod, "XGameSaveInitializeProviderResult"));
+    auto pGsCloseProv = reinterpret_cast<PFN_GsCloseProv>(GetProcAddress(xgrMod, "XGameSaveCloseProvider"));
+    auto pGsCreateCont = reinterpret_cast<PFN_GsCreateCont>(GetProcAddress(xgrMod, "XGameSaveCreateContainer"));
+    auto pGsCloseCont = reinterpret_cast<PFN_GsCloseCont>(GetProcAddress(xgrMod, "XGameSaveCloseContainer"));
+    auto pGsCreateUpd = reinterpret_cast<PFN_GsCreateUpd>(GetProcAddress(xgrMod, "XGameSaveCreateUpdate"));
+    auto pGsCloseUpd = reinterpret_cast<PFN_GsCloseUpd>(GetProcAddress(xgrMod, "XGameSaveCloseUpdate"));
+    auto pGsWriteBlob = reinterpret_cast<PFN_GsWriteBlob>(GetProcAddress(xgrMod, "XGameSaveSubmitBlobWrite"));
+    auto pGsSubmit = reinterpret_cast<PFN_GsSubmitAsync>(GetProcAddress(xgrMod, "XGameSaveSubmitUpdateAsync"));
+    auto pGsSubmitRes = reinterpret_cast<PFN_GsSubmitResult>(GetProcAddress(xgrMod, "XGameSaveSubmitUpdateResult"));
+    auto pGsRead = reinterpret_cast<PFN_GsReadAsync>(GetProcAddress(xgrMod, "XGameSaveReadBlobDataAsync"));
+    auto pGsReadRes = reinterpret_cast<PFN_GsReadResult>(GetProcAddress(xgrMod, "XGameSaveReadBlobDataResult"));
+
+    SC_EXPECT(pInit && pUninit && pQCreate && pQDispatch && pQClose &&
+              pUserAdd && pUserAddRes && pUserGetId && pUserGetState && pUserGetLocalId &&
+              pUserGetTag && pUserClose && pGsInit && pGsInitRes && pGsCloseProv &&
+              pGsCreateCont && pGsCloseCont && pGsCreateUpd && pGsCloseUpd &&
+              pGsWriteBlob && pGsSubmit && pGsSubmitRes && pGsRead && pGsReadRes);
+
+    SC_EXPECT(SUCCEEDED(pInit()));
+    void* queue = nullptr;
+    SC_EXPECT(SUCCEEDED(pQCreate(0, 0, &queue)) && queue != nullptr); // Manual / Manual
+
+    LocalAsyncBlock asyncUser{};
+    asyncUser.queue = queue;
+    SC_EXPECT(SUCCEEDED(pUserAdd(1, &asyncUser))); // AddDefaultUserSilently
+    while (pQDispatch(queue, 0, 0)) {}
+    while (pQDispatch(queue, 1, 0)) {}
+
+    void* user = nullptr;
+    SC_EXPECT(SUCCEEDED(pUserAddRes(&asyncUser, &user)) && user != nullptr);
+
+    uint64_t xuid = 0, localId = 0;
+    uint32_t state = 99;
+    char gamertag[64]{};
+    size_t tagUsed = 0;
+    SC_EXPECT(SUCCEEDED(pUserGetId(user, &xuid)) && xuid != 0);
+    SC_EXPECT(SUCCEEDED(pUserGetState(user, &state)) && state == 0);
+    SC_EXPECT(SUCCEEDED(pUserGetLocalId(user, &localId)) && localId == xuid);
+    SC_EXPECT(SUCCEEDED(pUserGetTag(user, 0, sizeof(gamertag), gamertag, &tagUsed)) && tagUsed > 1);
+
+    LocalAsyncBlock asyncProv{};
+    asyncProv.queue = queue;
+    SC_EXPECT(SUCCEEDED(pGsInit(user, "00000000-0000-0000-0000-000000000043", false, &asyncProv)));
+    while (pQDispatch(queue, 0, 0)) {}
+    while (pQDispatch(queue, 1, 0)) {}
+
+    void* provider = nullptr;
+    SC_EXPECT(SUCCEEDED(pGsInitRes(&asyncProv, &provider)) && provider != nullptr);
+
+    void* container = nullptr;
+    SC_EXPECT(SUCCEEDED(pGsCreateCont(provider, "sprint43_profile", &container)) && container != nullptr);
+
+    void* upd = nullptr;
+    SC_EXPECT(SUCCEEDED(pGsCreateUpd(container, "Sprint 43 Save", &upd)) && upd != nullptr);
+
+    const std::string payload = "scarlett-sprint43-save-ok";
+    SC_EXPECT(SUCCEEDED(pGsWriteBlob(
+        upd, "slot0", reinterpret_cast<const uint8_t*>(payload.data()), payload.size())));
+
+    LocalAsyncBlock asyncUpd{};
+    asyncUpd.queue = queue;
+    SC_EXPECT(SUCCEEDED(pGsSubmit(upd, &asyncUpd)));
+    while (pQDispatch(queue, 0, 0)) {}
+    while (pQDispatch(queue, 1, 0)) {}
+    SC_EXPECT(SUCCEEDED(pGsSubmitRes(&asyncUpd)));
+    pGsCloseUpd(upd);
+
+    const char* blobNames[] = { "slot0" };
+    LocalAsyncBlock asyncRead{};
+    asyncRead.queue = queue;
+    SC_EXPECT(SUCCEEDED(pGsRead(container, blobNames, 1, &asyncRead)));
+    while (pQDispatch(queue, 0, 0)) {}
+    while (pQDispatch(queue, 1, 0)) {}
+
+    std::vector<uint8_t> readBuf(1024, 0);
+    uint32_t blobCount = 0;
+    SC_EXPECT(SUCCEEDED(pGsReadRes(
+        &asyncRead, readBuf.size(), reinterpret_cast<LocalBlob*>(readBuf.data()), &blobCount)));
+    SC_EXPECT(blobCount == 1);
+    const auto* blob = reinterpret_cast<const LocalBlob*>(readBuf.data());
+    SC_EXPECT(blob->info.size == payload.size());
+    SC_EXPECT(std::memcmp(blob->data, payload.data(), payload.size()) == 0);
+
+    pGsCloseCont(container);
+    pGsCloseProv(provider);
+    pUserClose(user);
+    pQClose(queue);
+    pUninit();
+    FreeLibrary(xgrMod);
+    return true;
+}
+
 bool TestNetworkingShimsE2E() {
     // 1. libHttpClient shim E2E
     HMODULE hcMod = LoadLibraryW(L"shims\\libHttpClient.dll");
@@ -4473,6 +4617,7 @@ int main() {
     RunTest("D3D12XsCmdListComputeDispatchE2E",  TestD3D12XsCmdListComputeDispatchE2E);
     RunTest("XAudio2RuntimePlaybackE2E",         TestXAudio2RuntimePlaybackE2E);
     RunTest("NetworkingShimsE2E",                TestNetworkingShimsE2E);
+    RunTest("XUserAndGameSaveProfileE2E",        TestXUserAndGameSaveProfileE2E);
 
     XGameRuntimeUninitialize();
 
