@@ -1,7 +1,7 @@
 # Scarlett Layer â€” AI Context Snapshot
 
-**Commit:** `1419e6a` (#41) | **Generated:** 2026-11-21 00:42 UTC  
-**Totals:** 61 files (16,656 LOC) | 12 shims | 30 CTest checks
+**Commit:** `8fb22f4` (#43) | **Generated:** 2026-11-21 00:50 UTC  
+**Totals:** 61 files (16,923 LOC) | 12 shims | 31 CTest checks
 
 ---
 
@@ -121,7 +121,7 @@
  1651  src/tests/dummy_title/main.cpp
    59  src/tests/engine_plugin/engine_plugin.cpp
     3  src/tests/engine_plugin/engine_plugin.def
- 3264  src/tests/scarlett_tests/main.cpp
+ 3531  src/tests/scarlett_tests/main.cpp
   242  tools/audit_imports.py
   505  tools/build_wiki.py
   108  tools/test_brief.py
@@ -345,7 +345,7 @@
 - `MimgOp`: kMimgImageSample = 0x20u
 - `InstFormat`: Sopp, Vop1, Vop2, Vop3, Exp, Mubuf, Smem, Vintrp, Mimg
 
-## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 30 total)
+## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 31 total)
 ```cpp
     RunTest("VfsPathTranslation",         TestVfsPathTranslation);
     RunTest("RuntimeAndXUser",            TestRuntimeAndXUser);
@@ -377,9 +377,12 @@
     RunTest("PresentXDescriptorAudit",           TestPresentXDescriptorAudit);
     RunTest("ScarlettXConformanceSuite",         TestScarlettXConformanceSuite);
     RunTest("GameConfigBootParser",              TestGameConfigBootParser);
+    RunTest("Rdna2TexturedDrawE2E",              TestRdna2TexturedDrawE2E);
 ```
 
 ## 6. Recent Git History
+- `8fb22f4 Merge Sprint 31: native MicrosoftGame.Config parser & --boot`
+- `99af35b Sprint 31: native MicrosoftGame.Config parser + loader --boot + CTest #30`
 - `1419e6a Docs: add GitHub README with architecture overview and Sprint 30 progress report`
 - `31b7b29 Merge Sprint 30: ScarlettX ABI conformance suite`
 - `57bc148 Sprint 30: ScarlettX ABI conformance suite + CTest #29`
@@ -388,5 +391,3 @@
 - `5dc706f Merge Sprint 28: RDNA2 IMAGE_SAMPLE texture sampling`
 - `e5717e5 Sprint 28: RDNA2 MIMG IMAGE_SAMPLE decoder + PS HLSL lifter + CTest #27`
 - `90804f6 Merge Sprint 27: Loader PE inspector & XVD container`
-- `1e3654f Sprint 27: Loader --inspect PE auditor + unencrypted XVD container + CTest #26`
-- `ead135e Merge Sprint 26: Retail bring-up shims`
