@@ -1,6 +1,6 @@
 # Scarlett Layer â€” AI Context Snapshot
 
-**Commit:** `0d60944` (#82) | **Generated:** 2026-11-21 05:20 UTC  
+**Commit:** `273f98d` (#83) | **Generated:** 2026-11-21 05:29 UTC  
 **Totals:** 61 files (19,518 LOC) | 12 shims | 49 CTest checks
 
 ---
@@ -435,6 +435,7 @@
 ```
 
 ## 6. Recent Git History
+- `273f98d Docs: Add v1.0.0 Golden Master milestone summary to README`
 - `0d60944 Merge Sprint 50: 50-Sprint Golden Master Capstone (49/49 CTests)`
 - `c40af26 Sprint 50: 50-Sprint Golden Master Capstone — all 9 shims + XVD/Config E2E (CTest #49)`
 - `da17268 Merge Sprint 49: Loader XVD & MicrosoftGame.config E2E (48/48 CTests)`
@@ -444,4 +445,3 @@
 - `48df6a1 Merge Sprint 47: xmem & xg_xs physical memory + BC7 swizzle E2E (46/46 CTests)`
 - `8ed0b9c Sprint 47: xmem & xg_xs physical memory + 64KB_S BC7 swizzle E2E (CTest #46)`
 - `03e18a1 Merge Sprint 46: kernelx & pixevt OS/profiler E2E (45/45 CTests)`
-- `a172169 Sprint 46: Phase 4 kickoff — kernelx & pixevt OS/profiler E2E (CTest #45)`
