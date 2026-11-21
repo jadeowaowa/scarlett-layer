@@ -1,6 +1,6 @@
 # 05 â€” Automated Test Suite & Synthetic Title Index
 
-`scarlett_tests.exe` runs **59 checks** via `loader.exe` under CTest (`ctest --test-dir build`).
+`scarlett_tests.exe` runs **61 checks** via `loader.exe` under CTest (`ctest --test-dir build`).
 
 ## Exact `RunTest` Registration Order (`src/tests/scarlett_tests/main.cpp`)
 ```cpp
@@ -122,6 +122,10 @@
     {"XMemMin16ByteAlignment",             TestXMemMin16ByteAlignment},
 // 59
     {"Pe64ImplicitTlsAndGuestAtExitE2E",   TestPe64ImplicitTlsAndGuestAtExitE2E},
+// 60
+    {"AutoStubThunkSurvivalE2E",           TestAutoStubThunkSurvivalE2E},
+// 61
+    {"LoaderSymbolCoverageAuditE2E",       TestLoaderSymbolCoverageAuditE2E},
 ```
 
 ## Test & Title Files
@@ -129,10 +133,10 @@
 - `src/tests/engine_plugin/engine_plugin.cpp` (59 lines)
 - `src/tests/engine_plugin/engine_plugin.def` (3 lines)
 - `src/tests/scarlett_3d_demo/main.cpp` (328 lines)
-- `src/tests/scarlett_tests/main.cpp` (138 lines)
-- `src/tests/scarlett_tests/test_harness.hpp` (168 lines)
+- `src/tests/scarlett_tests/main.cpp` (140 lines)
+- `src/tests/scarlett_tests/test_harness.hpp` (170 lines)
 - `src/tests/scarlett_tests/tests_d3d12_core.cpp` (1312 lines)
 - `src/tests/scarlett_tests/tests_d3d12_shaders_present.cpp` (1658 lines)
-- `src/tests/scarlett_tests/tests_loader_e2e.cpp` (1179 lines)
+- `src/tests/scarlett_tests/tests_loader_e2e.cpp` (1346 lines)
 - `src/tests/scarlett_tests/tests_runtime_io.cpp` (876 lines)
 - `src/tests/scarlett_tests/tests_storage_swizzle.cpp` (1524 lines)

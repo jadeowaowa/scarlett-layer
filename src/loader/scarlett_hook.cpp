@@ -1,3 +1,4 @@
+#include "auto_stub.hpp"
 #include "common/config.hpp"
 #include "common/stub.hpp"
 
@@ -393,11 +394,52 @@ BOOL WINAPI HookGetModuleHandleExA(DWORD dwFlags, LPCSTR lpModuleName, HMODULE* 
     return g_origGetModuleHandleExA(dwFlags, lpModuleName, phModule);
 }
 
+sc::loader::AutoStubEngine g_autoStubs;
+
+bool TryGetShimDllName(HMODULE hModule, std::string& outDllLower) {
+    if (!hModule || g_shimDirLower.empty()) {
+        return false;
+    }
+    wchar_t pathBuf[MAX_PATH]{};
+    const DWORD len = GetModuleFileNameW(hModule, pathBuf, MAX_PATH);
+    if (len == 0 || len >= MAX_PATH) {
+        return false;
+    }
+    const std::wstring lowerPath = ToLowerW(std::wstring(pathBuf, len));
+    if (lowerPath.rfind(g_shimDirLower, 0) != 0) {
+        return false;
+    }
+    const size_t slash = lowerPath.find_last_of(L"\\/");
+    const std::wstring fileName = (slash == std::wstring::npos) ? lowerPath : lowerPath.substr(slash + 1);
+    outDllLower = WideToUtf8(fileName);
+    return !outDllLower.empty();
+}
+
 FARPROC WINAPI HookGetProcAddress(HMODULE hModule, LPCSTR lpProcName) {
-    if (lpProcName && (reinterpret_cast<uintptr_t>(lpProcName) >> 16) == 0) {
+    const bool isOrdinal = lpProcName && (reinterpret_cast<uintptr_t>(lpProcName) >> 16) == 0;
+    if (isOrdinal) {
         InterlockedIncrement(&g_ordinalLookupCount);
     }
-    return g_origGetProcAddress ? g_origGetProcAddress(hModule, lpProcName) : nullptr;
+    FARPROC resolved = g_origGetProcAddress ? g_origGetProcAddress(hModule, lpProcName) : nullptr;
+    if (resolved || !hModule || !lpProcName || !sc::config::IsAutoStubEnabled()) {
+        return resolved;
+    }
+
+    std::string shimDllLower;
+    if (!TryGetShimDllName(hModule, shimDllLower)) {
+        return nullptr;
+    }
+
+    std::string symName;
+    if (isOrdinal) {
+        char ordBuf[32];
+        std::snprintf(ordBuf, sizeof(ordBuf), "#%u",
+                      static_cast<unsigned>(reinterpret_cast<uintptr_t>(lpProcName) & 0xFFFFu));
+        symName = ordBuf;
+    } else {
+        symName = lpProcName;
+    }
+    return g_autoStubs.GetOrCreate(shimDllLower, symName);
 }
 
 void DiscoverShimsWin32() {
@@ -505,6 +547,11 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID) {
             std::snprintf(buf, sizeof(buf), "-> drained %u isolated guest atexit handler(s)", drained);
             sc::log::Write(sc::log::Level::Info, "scarlett_hook", "DllMain[Detach]", buf);
         }
+        std::string reportPath;
+        if (auto envReport = sc::config::GetEnvPath(L"SCARLETT_STUB_REPORT")) {
+            reportPath = WideToUtf8(envReport->wstring());
+        }
+        g_autoStubs.DumpHotlist(reportPath.empty() ? nullptr : reportPath.c_str(), true);
     }
     return TRUE;
 }
@@ -660,4 +707,23 @@ extern "C" __declspec(dllexport) void WINAPI ScarlettHookFreeImplicitTls(
     if (tlsBlock) {
         std::free(tlsBlock);
     }
+}
+
+extern "C" __declspec(dllexport) void WINAPI ScarlettHookGetAutoStubStats(
+    uint32_t* outUniqueStubs,
+    uint64_t* outTotalCalls) {
+    g_autoStubs.GetStats(outUniqueStubs, outTotalCalls);
+}
+
+extern "C" __declspec(dllexport) void WINAPI ScarlettHookSetAutoStubPolicy(
+    const char* symbolOrKey,
+    uint64_t returnValue) {
+    if (symbolOrKey && symbolOrKey[0] != '\0') {
+        g_autoStubs.SetPolicyOverride(symbolOrKey, returnValue);
+    }
+}
+
+extern "C" __declspec(dllexport) uint32_t WINAPI ScarlettHookDumpAutoStubReport(
+    const char* reportPathUtf8) {
+    return g_autoStubs.DumpHotlist(reportPathUtf8, false);
 }

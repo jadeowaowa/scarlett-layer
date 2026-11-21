@@ -165,4 +165,6 @@ bool TestXMemAlignmentAndInvariants();
 bool TestXMemAndXgXsSwizzleE2E();
 bool TestXMemMin16ByteAlignment();
 bool TestPe64ImplicitTlsAndGuestAtExitE2E();
+bool TestAutoStubThunkSurvivalE2E();
+bool TestLoaderSymbolCoverageAuditE2E();
 bool TestXUserAndGameSaveProfileE2E();

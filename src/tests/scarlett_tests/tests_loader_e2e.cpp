@@ -1177,3 +1177,170 @@ bool TestPe64ImplicitTlsAndGuestAtExitE2E() {
     SC_EXPECT(pRunAtExit() == 0u);
     return true;
 }
+
+bool TestAutoStubThunkSurvivalE2E() {
+    HMODULE hookMod = GetModuleHandleW(L"scarlett_hook.dll");
+    HMODULE xgrMod  = GetModuleHandleW(L"xgameruntime.dll");
+    SC_EXPECT(hookMod != nullptr && xgrMod != nullptr);
+
+    using GetStatsFn  = void(WINAPI*)(uint32_t*, uint64_t*);
+    using SetPolicyFn = void(WINAPI*)(const char*, uint64_t);
+    using DumpRepFn   = uint32_t(WINAPI*)(const char*);
+
+    auto pGetStats  = reinterpret_cast<GetStatsFn>(GetProcAddress(hookMod, "ScarlettHookGetAutoStubStats"));
+    auto pSetPolicy = reinterpret_cast<SetPolicyFn>(GetProcAddress(hookMod, "ScarlettHookSetAutoStubPolicy"));
+    auto pDumpRep   = reinterpret_cast<DumpRepFn>(GetProcAddress(hookMod, "ScarlettHookDumpAutoStubReport"));
+    SC_EXPECT(pGetStats && pSetPolicy && pDumpRep);
+
+    uint32_t beforeUnique = 0;
+    uint64_t beforeCalls  = 0;
+    pGetStats(&beforeUnique, &beforeCalls);
+
+    // 1. Missing named export on a shimmed DLL -> synthesized W^X x64 trampoline returning E_NOTIMPL
+    using SixArgFn = uint64_t(WINAPI*)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+    FARPROC pMissing1 = GetProcAddress(xgrMod, "XUserGetTokenAndSignatureAsync_S64Probe");
+    FARPROC pMissing2 = GetProcAddress(xgrMod, "XUserGetTokenAndSignatureAsync_S64Probe");
+    SC_EXPECT(pMissing1 != nullptr);
+    SC_EXPECT(pMissing1 == pMissing2); // Deduplicated trampoline pointer
+
+    auto fnMissing = reinterpret_cast<SixArgFn>(pMissing1);
+    SC_EXPECT(fnMissing(1, 2, 3, 4, 5, 6) == 0x80004001ULL);
+    SC_EXPECT(fnMissing(7, 8, 9, 10, 11, 12) == 0x80004001ULL);
+
+    // 2. Missing ordinal export -> synthesized trampoline + runtime policy override
+    FARPROC pOrd = GetProcAddress(xgrMod, MAKEINTRESOURCEA(9999));
+    SC_EXPECT(pOrd != nullptr);
+    pSetPolicy("xgameruntime.dll!#9999", 0x1337ULL);
+    auto fnOrd = reinterpret_cast<SixArgFn>(pOrd);
+    SC_EXPECT(fnOrd(0, 0, 0, 0, 0, 0) == 0x1337ULL);
+
+    // 3. PIX-prefixed missing export -> default telemetry policy returns S_OK (0)
+    FARPROC pPix = GetProcAddress(xgrMod, "PIXSyntheticAutoStubS64");
+    SC_EXPECT(pPix != nullptr);
+    auto fnPix = reinterpret_cast<SixArgFn>(pPix);
+    SC_EXPECT(fnPix(0, 0, 0, 0, 0, 0) == 0ULL);
+
+    // 4. Host system DLL miss MUST remain nullptr (never auto-stubbed)
+    HMODULE k32 = GetModuleHandleW(L"kernel32.dll");
+    SC_EXPECT(k32 != nullptr);
+    SC_EXPECT(GetProcAddress(k32, "NonExistentKernel32Symbol_S64Probe") == nullptr);
+
+    // 5. Verify hit-count telemetry & report dump
+    uint32_t afterUnique = 0;
+    uint64_t afterCalls  = 0;
+    pGetStats(&afterUnique, &afterCalls);
+    SC_EXPECT(afterUnique >= beforeUnique + 3u);
+    SC_EXPECT(afterCalls >= beforeCalls + 4u);
+
+    const auto reportPath = sc::vfs::TranslatePath(L"T:\\sprint64_stub_report.tsv");
+    std::filesystem::create_directories(reportPath.parent_path());
+    const uint32_t hotCount = pDumpRep(reportPath.string().c_str());
+    SC_EXPECT(hotCount >= 3u);
+    {
+        std::ifstream in(reportPath);
+        SC_EXPECT(in.good());
+        std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        SC_EXPECT(content.find("xgameruntime.dll!XUserGetTokenAndSignatureAsync_S64Probe") != std::string::npos);
+        SC_EXPECT(content.find("xgameruntime.dll!#9999") != std::string::npos);
+    }
+    std::error_code ec;
+    std::filesystem::remove(reportPath, ec);
+
+    // 6. Verify SCARLETT_AUTO_STUB=0 disables synthesis cleanly
+    SetEnvironmentVariableA("SCARLETT_AUTO_STUB", "0");
+    FARPROC pDisabled = GetProcAddress(xgrMod, "DisabledWhenEnvZero_S64Probe");
+    SetEnvironmentVariableA("SCARLETT_AUTO_STUB", nullptr);
+    SC_EXPECT(pDisabled == nullptr);
+    return true;
+}
+
+bool TestLoaderSymbolCoverageAuditE2E() {
+    // Build a synthetic PE64 importing xmem.dll (1 real export + 1 missing named + 1 missing ordinal)
+    // and kernel32.dll (host system DLL).
+    std::vector<uint8_t> pe(0x600, 0);
+    auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(pe.data());
+    dos->e_magic  = IMAGE_DOS_SIGNATURE;
+    dos->e_lfanew = 0x80;
+
+    auto* nt = reinterpret_cast<IMAGE_NT_HEADERS64*>(pe.data() + 0x80);
+    nt->Signature = IMAGE_NT_SIGNATURE;
+    nt->FileHeader.Machine = IMAGE_FILE_MACHINE_AMD64;
+    nt->FileHeader.NumberOfSections = 1;
+    nt->FileHeader.SizeOfOptionalHeader = sizeof(IMAGE_OPTIONAL_HEADER64);
+    nt->OptionalHeader.Magic = IMAGE_NT_OPTIONAL_HDR64_MAGIC;
+    nt->OptionalHeader.ImageBase = 0x140000000ULL;
+    nt->OptionalHeader.NumberOfRvaAndSizes = IMAGE_NUMBEROF_DIRECTORY_ENTRIES;
+    nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress = 0x1000;
+    nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size = sizeof(IMAGE_IMPORT_DESCRIPTOR) * 3;
+
+    auto* sec = IMAGE_FIRST_SECTION(nt);
+    std::memcpy(sec->Name, ".idata", 6);
+    sec->Misc.VirtualSize = 0x400;
+    sec->VirtualAddress   = 0x1000;
+    sec->SizeOfRawData    = 0x400;
+    sec->PointerToRawData = 0x200;
+
+    auto rvaToPtr = [&](uint32_t rva) -> uint8_t* {
+        return pe.data() + 0x200 + (rva - 0x1000);
+    };
+
+    // Import descriptors at RVA 0x1000 (2 descriptors + null terminator)
+    auto* descs = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(rvaToPtr(0x1000));
+    descs[0].OriginalFirstThunk = 0x1080;
+    descs[0].Name               = 0x1100; // "xmem.dll"
+    descs[0].FirstThunk         = 0x1080;
+
+    descs[1].OriginalFirstThunk = 0x10C0;
+    descs[1].Name               = 0x1120; // "kernel32.dll"
+    descs[1].FirstThunk         = 0x10C0;
+
+    std::memcpy(rvaToPtr(0x1100), "xmem.dll", 9);
+    std::memcpy(rvaToPtr(0x1120), "kernel32.dll", 13);
+
+    // IMAGE_IMPORT_BY_NAME entries (2-byte hint + ASCII name)
+    std::memcpy(rvaToPtr(0x1140) + 2, "XMemAllocDefault", 17);
+    std::memcpy(rvaToPtr(0x1180) + 2, "XMemFutureUnimplementedApi", 27);
+    std::memcpy(rvaToPtr(0x11C0) + 2, "GetCurrentProcessId", 20);
+
+    // Thunk table for xmem.dll at 0x1080: implemented name, missing name, missing ordinal #777, null
+    uint64_t xmemThunks[4] = {
+        0x1140ULL,
+        0x1180ULL,
+        IMAGE_ORDINAL_FLAG64 | 777ULL,
+        0ULL
+    };
+    std::memcpy(rvaToPtr(0x1080), xmemThunks, sizeof(xmemThunks));
+
+    // Thunk table for kernel32.dll at 0x10C0
+    uint64_t k32Thunks[2] = { 0x11C0ULL, 0ULL };
+    std::memcpy(rvaToPtr(0x10C0), k32Thunks, sizeof(k32Thunks));
+
+    const auto probePath = sc::vfs::TranslatePath(L"T:\\sprint64_coverage_probe.exe");
+    std::filesystem::create_directories(probePath.parent_path());
+    {
+        std::ofstream out(probePath, std::ios::binary | std::ios::trunc);
+        SC_EXPECT(out.good());
+        out.write(reinterpret_cast<const char*>(pe.data()), static_cast<std::streamsize>(pe.size()));
+    }
+
+    wchar_t shimDirBuf[MAX_PATH]{};
+    const DWORD shimLen = GetEnvironmentVariableW(L"SCARLETT_SHIM_DIR", shimDirBuf, MAX_PATH);
+    SC_EXPECT(shimLen > 0 && shimLen < MAX_PATH);
+    const std::filesystem::path shimDir(shimDirBuf, shimDirBuf + shimLen);
+
+    const auto cov = sc::loader::InspectPeSymbolCoverage(probePath, shimDir);
+    std::error_code ec;
+    std::filesystem::remove(probePath, ec);
+
+    SC_EXPECT(cov.audit.validPe64);
+    SC_EXPECT(cov.audit.totalImportedSymbols == 4u);
+    SC_EXPECT(cov.audit.ordinalImportCount == 1u);
+    SC_EXPECT(cov.implementedSymbols.size() == 1u);
+    SC_EXPECT(cov.implementedSymbols[0] == "xmem.dll!XMemAllocDefault");
+    SC_EXPECT(cov.autoStubSymbols.size() == 2u);
+    SC_EXPECT(std::find(cov.autoStubSymbols.begin(), cov.autoStubSymbols.end(),
+                        "xmem.dll!XMemFutureUnimplementedApi") != cov.autoStubSymbols.end());
+    SC_EXPECT(std::find(cov.autoStubSymbols.begin(), cov.autoStubSymbols.end(),
+                        "xmem.dll!#777") != cov.autoStubSymbols.end());
+    return true;
+}

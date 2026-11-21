@@ -36,6 +36,29 @@ inline std::optional<std::filesystem::path> GetShimDir() {
     return std::filesystem::path(std::move(buf));
 }
 
+inline bool IsAutoStubEnabled() {
+    char buf[8]{};
+    DWORD len = GetEnvironmentVariableA("SCARLETT_AUTO_STUB", buf, static_cast<DWORD>(sizeof(buf)));
+    if (len == 0) {
+        return true; // Default ON for shimmed DLLs; set SCARLETT_AUTO_STUB=0 to disable
+    }
+    return buf[0] != '0';
+}
+
+inline std::optional<std::filesystem::path> GetEnvPath(const wchar_t* envName) {
+    DWORD len = GetEnvironmentVariableW(envName, nullptr, 0);
+    if (len <= 1) {
+        return std::nullopt;
+    }
+    std::wstring buf(len, L'\0');
+    DWORD written = GetEnvironmentVariableW(envName, buf.data(), len);
+    if (written == 0 || written >= len) {
+        return std::nullopt;
+    }
+    buf.resize(written);
+    return std::filesystem::path(std::move(buf));
+}
+
 inline std::filesystem::path ResolveDataDir(const wchar_t* subdir) {
     if (auto shimDir = GetShimDir()) {
         return shimDir->parent_path() / subdir;

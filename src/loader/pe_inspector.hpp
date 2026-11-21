@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -243,6 +244,208 @@ inline PeImportAuditResult InspectPeImports(
     }
 
     return res;
+}
+
+struct ShimExportTable {
+    std::unordered_set<std::string> names;
+    std::unordered_set<uint16_t>    ordinals;
+};
+
+struct PeSymbolCoverageResult {
+    PeImportAuditResult      audit;
+    std::vector<std::string> implementedSymbols;
+    std::vector<std::string> autoStubSymbols;
+};
+
+namespace detail {
+
+inline ShimExportTable ParsePeExports(const std::filesystem::path& dllPath) {
+    ShimExportTable out{};
+    std::ifstream f(dllPath, std::ios::binary | std::ios::ate);
+    if (!f) return out;
+    const auto fileSize = static_cast<size_t>(f.tellg());
+    if (fileSize < sizeof(IMAGE_DOS_HEADER)) return out;
+    std::vector<uint8_t> buf(fileSize);
+    f.seekg(0);
+    f.read(reinterpret_cast<char*>(buf.data()), static_cast<std::streamsize>(fileSize));
+    if (!f) return out;
+
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(buf.data());
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) return out;
+    const size_t ntOff = static_cast<size_t>(dos->e_lfanew);
+    if (ntOff + sizeof(IMAGE_NT_HEADERS64) > fileSize) return out;
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(buf.data() + ntOff);
+    if (nt->Signature != IMAGE_NT_SIGNATURE ||
+        nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
+        return out;
+    }
+
+    const uint16_t numSections = nt->FileHeader.NumberOfSections;
+    const auto* sections = IMAGE_FIRST_SECTION(nt);
+    const auto& expDir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+    if (expDir.VirtualAddress == 0 || expDir.Size == 0) return out;
+
+    size_t expOff = 0;
+    if (!RvaToFileOffset(expDir.VirtualAddress, sections, numSections, fileSize, expOff) ||
+        expOff + sizeof(IMAGE_EXPORT_DIRECTORY) > fileSize) {
+        return out;
+    }
+    const auto* exp = reinterpret_cast<const IMAGE_EXPORT_DIRECTORY*>(buf.data() + expOff);
+
+    size_t funcsOff = 0;
+    if (exp->AddressOfFunctions != 0 &&
+        RvaToFileOffset(exp->AddressOfFunctions, sections, numSections, fileSize, funcsOff)) {
+        for (DWORD i = 0; i < exp->NumberOfFunctions; ++i) {
+            const size_t off = funcsOff + static_cast<size_t>(i) * sizeof(uint32_t);
+            if (off + sizeof(uint32_t) > fileSize) break;
+            uint32_t fnRva = 0;
+            std::memcpy(&fnRva, buf.data() + off, sizeof(uint32_t));
+            if (fnRva != 0) {
+                out.ordinals.insert(static_cast<uint16_t>(exp->Base + i));
+            }
+        }
+    }
+
+    size_t namesOff = 0;
+    if (exp->AddressOfNames != 0 &&
+        RvaToFileOffset(exp->AddressOfNames, sections, numSections, fileSize, namesOff)) {
+        for (DWORD i = 0; i < exp->NumberOfNames; ++i) {
+            const size_t off = namesOff + static_cast<size_t>(i) * sizeof(uint32_t);
+            if (off + sizeof(uint32_t) > fileSize) break;
+            uint32_t nameRva = 0;
+            std::memcpy(&nameRva, buf.data() + off, sizeof(uint32_t));
+            size_t strOff = 0;
+            if (RvaToFileOffset(nameRva, sections, numSections, fileSize, strOff)) {
+                const char* s = reinterpret_cast<const char*>(buf.data() + strOff);
+                const size_t maxLen = fileSize - strOff;
+                const size_t slen = ::strnlen(s, maxLen);
+                if (slen > 0 && slen < maxLen) {
+                    out.names.emplace(s, slen);
+                }
+            }
+        }
+    }
+    return out;
+}
+
+} // namespace detail
+
+inline PeSymbolCoverageResult InspectPeSymbolCoverage(
+    const std::filesystem::path& pePath,
+    const std::filesystem::path& shimDir) {
+    PeSymbolCoverageResult out{};
+    out.audit = InspectPeImports(pePath, shimDir);
+    if (!out.audit.validPe64) {
+        return out;
+    }
+
+    // Build map of lowercased shim filename -> exported symbol/ordinal sets
+    std::unordered_map<std::string, ShimExportTable> shimExports;
+    std::error_code ec;
+    if (std::filesystem::exists(shimDir, ec)) {
+        for (const auto& entry : std::filesystem::directory_iterator(shimDir, ec)) {
+            if (!entry.is_regular_file()) continue;
+            const std::string lowerName = detail::ToLowerAscii(entry.path().filename().string());
+            if (lowerName.size() > 4 && lowerName.substr(lowerName.size() - 4) == ".dll") {
+                shimExports.emplace(lowerName, detail::ParsePeExports(entry.path()));
+            }
+        }
+    }
+
+    std::ifstream f(pePath, std::ios::binary | std::ios::ate);
+    if (!f) return out;
+    const auto fileSize = static_cast<size_t>(f.tellg());
+    std::vector<uint8_t> buf(fileSize);
+    f.seekg(0);
+    f.read(reinterpret_cast<char*>(buf.data()), static_cast<std::streamsize>(fileSize));
+    if (!f) return out;
+
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(buf.data());
+    const auto* nt  = reinterpret_cast<const IMAGE_NT_HEADERS64*>(buf.data() + dos->e_lfanew);
+    const uint16_t numSections = nt->FileHeader.NumberOfSections;
+    const auto* sections = IMAGE_FIRST_SECTION(nt);
+
+    auto inspectThunksForDll = [&](uint32_t nameRva, uint32_t thunkRva) {
+        size_t nameOff = 0;
+        if (!detail::RvaToFileOffset(nameRva, sections, numSections, fileSize, nameOff)) return;
+        const char* rawDll = reinterpret_cast<const char*>(buf.data() + nameOff);
+        const size_t maxDll = fileSize - nameOff;
+        const size_t dllLen = ::strnlen(rawDll, maxDll);
+        if (dllLen == 0 || dllLen >= maxDll) return;
+        const std::string dllLower = detail::ToLowerAscii(std::string(rawDll, dllLen));
+
+        auto sit = shimExports.find(dllLower);
+        if (sit == shimExports.end()) {
+            return; // Only classify symbol-level coverage for shimmed DLLs
+        }
+        const ShimExportTable& exports = sit->second;
+
+        size_t tOff = 0;
+        if (!detail::RvaToFileOffset(thunkRva, sections, numSections, fileSize, tOff)) return;
+        while (tOff + sizeof(uint64_t) <= fileSize) {
+            uint64_t val = 0;
+            std::memcpy(&val, buf.data() + tOff, sizeof(uint64_t));
+            if (val == 0) break;
+            if ((val & IMAGE_ORDINAL_FLAG64) != 0) {
+                const uint16_t ord = static_cast<uint16_t>(val & 0xFFFFu);
+                const std::string label = dllLower + "!#" + std::to_string(ord);
+                if (exports.ordinals.contains(ord)) {
+                    out.implementedSymbols.push_back(label);
+                } else {
+                    out.autoStubSymbols.push_back(label);
+                }
+            } else {
+                const uint32_t ibnRva = static_cast<uint32_t>(val & 0xFFFFFFFFULL);
+                size_t ibnOff = 0;
+                if (detail::RvaToFileOffset(ibnRva, sections, numSections, fileSize, ibnOff) &&
+                    ibnOff + 2 < fileSize) {
+                    const char* sym = reinterpret_cast<const char*>(buf.data() + ibnOff + 2);
+                    const size_t maxSym = fileSize - (ibnOff + 2);
+                    const size_t symLen = ::strnlen(sym, maxSym);
+                    if (symLen > 0 && symLen < maxSym) {
+                        const std::string symStr(sym, symLen);
+                        const std::string label = dllLower + "!" + symStr;
+                        if (exports.names.contains(symStr)) {
+                            out.implementedSymbols.push_back(label);
+                        } else {
+                            out.autoStubSymbols.push_back(label);
+                        }
+                    }
+                }
+            }
+            tOff += sizeof(uint64_t);
+        }
+    };
+
+    const auto& impDir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+    if (impDir.VirtualAddress != 0 && impDir.Size != 0) {
+        size_t descOff = 0;
+        if (detail::RvaToFileOffset(impDir.VirtualAddress, sections, numSections, fileSize, descOff)) {
+            while (descOff + sizeof(IMAGE_IMPORT_DESCRIPTOR) <= fileSize) {
+                const auto* desc = reinterpret_cast<const IMAGE_IMPORT_DESCRIPTOR*>(buf.data() + descOff);
+                if (desc->Name == 0 && desc->FirstThunk == 0) break;
+                const uint32_t thunkRva = desc->OriginalFirstThunk ? desc->OriginalFirstThunk : desc->FirstThunk;
+                inspectThunksForDll(desc->Name, thunkRva);
+                descOff += sizeof(IMAGE_IMPORT_DESCRIPTOR);
+            }
+        }
+    }
+
+    const auto& delayDir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT];
+    if (delayDir.VirtualAddress != 0 && delayDir.Size != 0) {
+        size_t delayOff = 0;
+        if (detail::RvaToFileOffset(delayDir.VirtualAddress, sections, numSections, fileSize, delayOff)) {
+            while (delayOff + sizeof(IMAGE_DELAYLOAD_DESCRIPTOR) <= fileSize) {
+                const auto* ddesc = reinterpret_cast<const IMAGE_DELAYLOAD_DESCRIPTOR*>(buf.data() + delayOff);
+                if (ddesc->DllNameRVA == 0 && ddesc->ImportAddressTableRVA == 0) break;
+                const uint32_t thunkRva = ddesc->ImportNameTableRVA ? ddesc->ImportNameTableRVA : ddesc->ImportAddressTableRVA;
+                inspectThunksForDll(ddesc->DllNameRVA, thunkRva);
+                delayOff += sizeof(IMAGE_DELAYLOAD_DESCRIPTOR);
+            }
+        }
+    }
+
+    return out;
 }
 
 } // namespace sc::loader

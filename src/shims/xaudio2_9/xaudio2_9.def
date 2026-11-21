@@ -1,3 +1,4 @@
 LIBRARY xaudio2_9
 EXPORTS
-    XAudio2Create = ScarlettXAudio2Create
+    XAudio2Create = ScarlettXAudio2Create @1
+    XAudio2CreateWithVersionInfo = ScarlettXAudio2CreateWithVersionInfo

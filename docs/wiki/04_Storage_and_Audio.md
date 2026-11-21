@@ -39,6 +39,6 @@
 - `DSTORAGE_COMPRESSION_FORMAT`: DSTORAGE_COMPRESSION_FORMAT_NONE = 0, DSTORAGE_COMPRESSION_FORMAT_ZLIB = 1, DSTORAGE_COMPRESSION_FORMAT_BCPACK = 2, DSTORAGE_COMPRESSION_FORMAT_SCARLETT_LZ = 3
 
 ## `xaudio2_9.dll`
-**Files:** `src/shims/xaudio2_9/xaudio2_9.cpp` (652 L), `src/shims/xaudio2_9/xaudio2_9.def` (3 L)
+**Files:** `src/shims/xaudio2_9/xaudio2_9.cpp` (660 L), `src/shims/xaudio2_9/xaudio2_9.def` (4 L)
 
-**DLL Exports (`.def`):** `XAudio2Create = ScarlettXAudio2Create`
+**DLL Exports (`.def`):** `XAudio2Create = ScarlettXAudio2Create @1`, `XAudio2CreateWithVersionInfo = ScarlettXAudio2CreateWithVersionInfo`
