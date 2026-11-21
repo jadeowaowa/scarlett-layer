@@ -2371,6 +2371,267 @@ static size_t CurlTestWriteCb(char* ptr, size_t size, size_t nmemb, void* userda
     return total;
 }
 
+bool TestScarlettTitleBringUpE2E() {
+    using Microsoft::WRL::ComPtr;
+    CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+
+    // 1. GDK Runtime + Offline XUser + XGameSave Provider
+    HMODULE xgrMod = LoadLibraryW(L"shims\\xgameruntime.dll");
+    if (!xgrMod) xgrMod = LoadLibraryW(L"xgameruntime.dll");
+    SC_EXPECT(xgrMod != nullptr);
+
+    struct LocalAsyncBlock {
+        void* queue;
+        void* context;
+        void (CALLBACK* callback)(LocalAsyncBlock*);
+        unsigned char internal[sizeof(void*) * 4];
+    };
+    struct LocalBlobInfo { const char* name; uint32_t size; };
+    struct LocalBlob { LocalBlobInfo info; uint8_t* data; };
+
+    auto pInit        = reinterpret_cast<HRESULT(WINAPI*)(void)>(GetProcAddress(xgrMod, "XGameRuntimeInitialize"));
+    auto pUninit      = reinterpret_cast<void(WINAPI*)(void)>(GetProcAddress(xgrMod, "XGameRuntimeUninitialize"));
+    auto pQCreate     = reinterpret_cast<HRESULT(WINAPI*)(uint32_t, uint32_t, void**)>(GetProcAddress(xgrMod, "XTaskQueueCreate"));
+    auto pQDispatch   = reinterpret_cast<bool(WINAPI*)(void*, uint32_t, uint32_t)>(GetProcAddress(xgrMod, "XTaskQueueDispatch"));
+    auto pQClose      = reinterpret_cast<void(WINAPI*)(void*)>(GetProcAddress(xgrMod, "XTaskQueueCloseHandle"));
+    auto pUserAdd     = reinterpret_cast<HRESULT(WINAPI*)(uint32_t, LocalAsyncBlock*)>(GetProcAddress(xgrMod, "XUserAddAsync"));
+    auto pUserAddRes  = reinterpret_cast<HRESULT(WINAPI*)(LocalAsyncBlock*, void**)>(GetProcAddress(xgrMod, "XUserAddResult"));
+    auto pUserGetId   = reinterpret_cast<HRESULT(WINAPI*)(void*, uint64_t*)>(GetProcAddress(xgrMod, "XUserGetId"));
+    auto pUserClose   = reinterpret_cast<void(WINAPI*)(void*)>(GetProcAddress(xgrMod, "XUserCloseHandle"));
+    auto pGsInit      = reinterpret_cast<HRESULT(WINAPI*)(void*, const char*, bool, LocalAsyncBlock*)>(GetProcAddress(xgrMod, "XGameSaveInitializeProviderAsync"));
+    auto pGsInitRes   = reinterpret_cast<HRESULT(WINAPI*)(LocalAsyncBlock*, void**)>(GetProcAddress(xgrMod, "XGameSaveInitializeProviderResult"));
+    auto pGsCloseProv = reinterpret_cast<void(WINAPI*)(void*)>(GetProcAddress(xgrMod, "XGameSaveCloseProvider"));
+    auto pGsCreateC   = reinterpret_cast<HRESULT(WINAPI*)(void*, const char*, void**)>(GetProcAddress(xgrMod, "XGameSaveCreateContainer"));
+    auto pGsCloseC    = reinterpret_cast<void(WINAPI*)(void*)>(GetProcAddress(xgrMod, "XGameSaveCloseContainer"));
+    auto pGsCreateU   = reinterpret_cast<HRESULT(WINAPI*)(void*, const char*, void**)>(GetProcAddress(xgrMod, "XGameSaveCreateUpdate"));
+    auto pGsCloseU    = reinterpret_cast<void(WINAPI*)(void*)>(GetProcAddress(xgrMod, "XGameSaveCloseUpdate"));
+    auto pGsWrite     = reinterpret_cast<HRESULT(WINAPI*)(void*, const char*, const uint8_t*, size_t)>(GetProcAddress(xgrMod, "XGameSaveSubmitBlobWrite"));
+    auto pGsSubmit    = reinterpret_cast<HRESULT(WINAPI*)(void*, LocalAsyncBlock*)>(GetProcAddress(xgrMod, "XGameSaveSubmitUpdateAsync"));
+    auto pGsSubmitRes = reinterpret_cast<HRESULT(WINAPI*)(LocalAsyncBlock*)>(GetProcAddress(xgrMod, "XGameSaveSubmitUpdateResult"));
+    auto pGsRead      = reinterpret_cast<HRESULT(WINAPI*)(void*, const char**, uint32_t, LocalAsyncBlock*)>(GetProcAddress(xgrMod, "XGameSaveReadBlobDataAsync"));
+    auto pGsReadRes   = reinterpret_cast<HRESULT(WINAPI*)(LocalAsyncBlock*, size_t, LocalBlob*, uint32_t*)>(GetProcAddress(xgrMod, "XGameSaveReadBlobDataResult"));
+    SC_EXPECT(pInit && pUninit && pQCreate && pQDispatch && pQClose &&
+              pUserAdd && pUserAddRes && pUserGetId && pUserClose &&
+              pGsInit && pGsInitRes && pGsCloseProv && pGsCreateC && pGsCloseC &&
+              pGsCreateU && pGsCloseU && pGsWrite && pGsSubmit && pGsSubmitRes && pGsRead && pGsReadRes);
+
+    SC_EXPECT(SUCCEEDED(pInit()));
+    void* queue = nullptr;
+    SC_EXPECT(SUCCEEDED(pQCreate(0, 0, &queue)) && queue != nullptr);
+
+    LocalAsyncBlock abUser{}; abUser.queue = queue;
+    SC_EXPECT(SUCCEEDED(pUserAdd(1, &abUser)));
+    while (pQDispatch(queue, 0, 0)) {}
+    while (pQDispatch(queue, 1, 0)) {}
+    void* user = nullptr;
+    SC_EXPECT(SUCCEEDED(pUserAddRes(&abUser, &user)) && user != nullptr);
+    uint64_t xuid = 0;
+    SC_EXPECT(SUCCEEDED(pUserGetId(user, &xuid)) && xuid != 0);
+
+    // 2. Networking (libHttpClient title config fetch)
+    HMODULE hcMod = LoadLibraryW(L"shims\\libHttpClient.dll");
+    if (!hcMod) hcMod = LoadLibraryW(L"shims\\libHttpClient.GDK.dll");
+    if (!hcMod) hcMod = LoadLibraryW(L"libHttpClient.dll");
+    SC_EXPECT(hcMod != nullptr);
+    auto pHCInit    = reinterpret_cast<HRESULT(WINAPI*)(void*)>(GetProcAddress(hcMod, "HCInitialize"));
+    auto pHCCleanup = reinterpret_cast<void(WINAPI*)(void)>(GetProcAddress(hcMod, "HCCleanup"));
+    auto pHCCreate  = reinterpret_cast<HRESULT(WINAPI*)(void**)>(GetProcAddress(hcMod, "HCHttpCallCreate"));
+    auto pHCClose   = reinterpret_cast<HRESULT(WINAPI*)(void*)>(GetProcAddress(hcMod, "HCHttpCallCloseHandle"));
+    auto pHCSetUrl  = reinterpret_cast<HRESULT(WINAPI*)(void*, const char*, const char*)>(GetProcAddress(hcMod, "HCHttpCallRequestSetUrl"));
+    auto pHCPerform = reinterpret_cast<HRESULT(WINAPI*)(void*, void*)>(GetProcAddress(hcMod, "HCHttpCallPerformAsync"));
+    auto pHCStatus  = reinterpret_cast<HRESULT(WINAPI*)(void*, uint32_t*)>(GetProcAddress(hcMod, "HCHttpCallResponseGetStatusCode"));
+    auto pHCMock    = reinterpret_cast<HRESULT(WINAPI*)(const char*, const char*, uint32_t, const char*)>(GetProcAddress(hcMod, "HCHttpCallRegisterMock"));
+    auto pHCClear   = reinterpret_cast<void(WINAPI*)(void)>(GetProcAddress(hcMod, "HCHttpCallClearMocks"));
+    SC_EXPECT(pHCInit && pHCCleanup && pHCCreate && pHCClose && pHCSetUrl && pHCPerform && pHCStatus && pHCMock && pHCClear);
+
+    SC_EXPECT(SUCCEEDED(pHCInit(nullptr)));
+    pHCClear();
+    SC_EXPECT(SUCCEEDED(pHCMock("GET", "https://scarlett.local/bringup", 200, "{\"title\":\"scarlett-demo\"}")));
+    void* hcCall = nullptr;
+    SC_EXPECT(SUCCEEDED(pHCCreate(&hcCall)));
+    SC_EXPECT(SUCCEEDED(pHCSetUrl(hcCall, "GET", "https://scarlett.local/bringup/manifest")));
+    SC_EXPECT(SUCCEEDED(pHCPerform(hcCall, nullptr)));
+    uint32_t httpStatus = 0;
+    SC_EXPECT(SUCCEEDED(pHCStatus(hcCall, &httpStatus)) && httpStatus == 200);
+    pHCClose(hcCall);
+    pHCClear();
+    pHCCleanup();
+    FreeLibrary(hcMod);
+
+    // 3. Input (GameInput synthetic gamepad poll)
+    HMODULE giMod = LoadLibraryW(L"shims\\gameinput.dll");
+    if (!giMod) giMod = LoadLibraryW(L"gameinput.dll");
+    SC_EXPECT(giMod != nullptr);
+    struct LocalGamepadState { uint32_t buttons; float lt, rt, lx, ly, rx, ry; };
+    struct LocalKeyState { uint32_t scanCode, codePoint; uint8_t vk; bool isDead; };
+    struct ILocalGameInputReading : public IUnknown {
+        virtual uint32_t STDMETHODCALLTYPE GetInputKind() = 0;
+        virtual uint64_t STDMETHODCALLTYPE GetTimestamp() = 0;
+        virtual bool     STDMETHODCALLTYPE GetGamepadState(LocalGamepadState*) = 0;
+        virtual uint32_t STDMETHODCALLTYPE GetKeyCount() = 0;
+        virtual uint32_t STDMETHODCALLTYPE GetKeyState(uint32_t, LocalKeyState*) = 0;
+    };
+    struct ILocalGameInput : public IUnknown {
+        virtual uint64_t STDMETHODCALLTYPE GetCurrentTimestamp() = 0;
+        virtual HRESULT  STDMETHODCALLTYPE GetCurrentReading(uint32_t, void*, ILocalGameInputReading**) = 0;
+    };
+    auto pGICreate   = reinterpret_cast<HRESULT(WINAPI*)(ILocalGameInput**)>(GetProcAddress(giMod, "GameInputCreate"));
+    auto pGISetSynth = reinterpret_cast<void(WINAPI*)(bool, const LocalGamepadState*)>(GetProcAddress(giMod, "ScarlettGameInputSetSyntheticGamepad"));
+    SC_EXPECT(pGICreate && pGISetSynth);
+
+    ILocalGameInput* gi = nullptr;
+    SC_EXPECT(SUCCEEDED(pGICreate(&gi)) && gi != nullptr);
+    LocalGamepadState padIn{ 0x00000004u, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f, 0.0f }; // A button pressed
+    pGISetSynth(true, &padIn);
+    ILocalGameInputReading* reading = nullptr;
+    SC_EXPECT(SUCCEEDED(gi->GetCurrentReading(0x00020000u, nullptr, &reading)) && reading != nullptr);
+    LocalGamepadState padOut{};
+    SC_EXPECT(reading->GetGamepadState(&padOut) && (padOut.buttons & 0x00000004u) != 0);
+    pGISetSynth(false, nullptr);
+    reading->Release();
+    gi->Release();
+    FreeLibrary(giMod);
+
+    // 4. Audio (XAudio2 engine init alongside GPU)
+    HMODULE xaMod = LoadLibraryW(L"shims\\xaudio2_9.dll");
+    if (!xaMod) xaMod = LoadLibraryW(L"xaudio2_9.dll");
+    SC_EXPECT(xaMod != nullptr);
+    auto pXACreate = reinterpret_cast<HRESULT(WINAPI*)(IXAudio2**, UINT32, XAUDIO2_PROCESSOR)>(GetProcAddress(xaMod, "XAudio2Create"));
+    SC_EXPECT(pXACreate != nullptr);
+    IXAudio2* xa = nullptr;
+    SC_EXPECT(SUCCEEDED(pXACreate(&xa, 0, XAUDIO2_DEFAULT_PROCESSOR)) && xa != nullptr);
+
+    // 5. Graphics (D3D12_XS input-driven render-target clear + GPU readback)
+    D3D12XBOX_CREATE_DEVICE_PARAMETERS params{};
+    params.Version = 1;
+    ComPtr<ID3D12DeviceX> devX;
+    SC_EXPECT(SUCCEEDED(D3D12XboxCreateDevice(nullptr, &params, IID_ID3D12DeviceX, reinterpret_cast<void**>(devX.GetAddressOf()))));
+    ComPtr<ID3D12Device> nativeDev;
+    SC_EXPECT(SUCCEEDED(devX->QueryInterface(IID_ScarlettNativeD3D12Device, reinterpret_cast<void**>(nativeDev.GetAddressOf()))));
+
+    D3D12_COMMAND_QUEUE_DESC qd{}; qd.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+    ComPtr<ID3D12CommandQueueX> queueX;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommandQueueX(&qd, queueX.GetAddressOf())));
+    ComPtr<ID3D12CommandAllocator> alloc;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&alloc))));
+    ComPtr<ID3D12GraphicsCommandListX> clX;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, alloc.Get(), nullptr,
+        IID_ID3D12GraphicsCommandListX, reinterpret_cast<void**>(clX.GetAddressOf()))));
+
+    D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc{};
+    rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+    rtvHeapDesc.NumDescriptors = 1;
+    ComPtr<ID3D12DescriptorHeap> rtvHeap;
+    SC_EXPECT(SUCCEEDED(devX->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&rtvHeap))));
+
+    D3D12_HEAP_PROPERTIES defaultHeap{ D3D12_HEAP_TYPE_DEFAULT };
+    D3D12_HEAP_PROPERTIES readbackHeap{ D3D12_HEAP_TYPE_READBACK };
+    D3D12_RESOURCE_DESC rtDesc{};
+    rtDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    rtDesc.Width = 4; rtDesc.Height = 4; rtDesc.DepthOrArraySize = 1; rtDesc.MipLevels = 1;
+    rtDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM; rtDesc.SampleDesc.Count = 1;
+    rtDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+    rtDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+
+    // Green clear triggered by GameInput A-button press
+    D3D12_CLEAR_VALUE clearVal{};
+    clearVal.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    clearVal.Color[0] = 0.0f; clearVal.Color[1] = 1.0f; clearVal.Color[2] = 0.0f; clearVal.Color[3] = 1.0f;
+
+    ComPtr<ID3D12Resource> rtTex;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommittedResource(&defaultHeap, D3D12_HEAP_FLAG_NONE, &rtDesc,
+        D3D12_RESOURCE_STATE_RENDER_TARGET, &clearVal, IID_PPV_ARGS(&rtTex))));
+    D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = rtvHeap->GetCPUDescriptorHandleForHeapStart();
+    nativeDev->CreateRenderTargetView(rtTex.Get(), nullptr, rtvHandle);
+
+    D3D12_RESOURCE_DESC rbDesc{};
+    rbDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    rbDesc.Width = 256 * 4; rbDesc.Height = 1; rbDesc.DepthOrArraySize = 1; rbDesc.MipLevels = 1;
+    rbDesc.SampleDesc.Count = 1; rbDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    ComPtr<ID3D12Resource> rbBuf;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommittedResource(&readbackHeap, D3D12_HEAP_FLAG_NONE, &rbDesc,
+        D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&rbBuf))));
+
+    clX->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+    clX->ClearRenderTargetView(rtvHandle, clearVal.Color, 0, nullptr);
+    D3D12_RESOURCE_BARRIER barrier{};
+    barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    barrier.Transition.pResource = rtTex.Get();
+    barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+    barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
+    barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    clX->ResourceBarrier(1, &barrier);
+
+    D3D12_TEXTURE_COPY_LOCATION srcLoc{ rtTex.Get(), D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX, { 0 } };
+    D3D12_TEXTURE_COPY_LOCATION dstLoc{};
+    dstLoc.pResource = rbBuf.Get();
+    dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    dstLoc.PlacedFootprint.Footprint = { DXGI_FORMAT_R8G8B8A8_UNORM, 4, 4, 1, 256 };
+    clX->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
+    SC_EXPECT(SUCCEEDED(clX->Close()));
+
+    ComPtr<ID3D12Fence> fence;
+    SC_EXPECT(SUCCEEDED(nativeDev->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence))));
+    HANDLE ev = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    SC_EXPECT(ev != nullptr);
+    ID3D12CommandList* lists[] = { clX->GetNativeCommandList() };
+    queueX->ExecuteCommandLists(1, lists);
+    SC_EXPECT(SUCCEEDED(queueX->Signal(fence.Get(), 1)));
+    SC_EXPECT(SUCCEEDED(fence->SetEventOnCompletion(1, ev)));
+    SC_EXPECT(WaitForSingleObject(ev, 5000) == WAIT_OBJECT_0);
+    CloseHandle(ev);
+
+    uint8_t* pRb = nullptr;
+    SC_EXPECT(SUCCEEDED(rbBuf->Map(0, nullptr, reinterpret_cast<void**>(&pRb))));
+    SC_EXPECT(pRb[0] == 0 && pRb[1] == 255 && pRb[2] == 0 && pRb[3] == 255);
+    rbBuf->Unmap(0, nullptr);
+
+    xa->Release();
+    FreeLibrary(xaMod);
+
+    // 6. Persist verified frame state via XGameSave
+    LocalAsyncBlock abProv{}; abProv.queue = queue;
+    SC_EXPECT(SUCCEEDED(pGsInit(user, "00000000-0000-0000-0000-000000000045", false, &abProv)));
+    while (pQDispatch(queue, 0, 0)) {}
+    while (pQDispatch(queue, 1, 0)) {}
+    void* provider = nullptr;
+    SC_EXPECT(SUCCEEDED(pGsInitRes(&abProv, &provider)) && provider != nullptr);
+
+    void* container = nullptr;
+    SC_EXPECT(SUCCEEDED(pGsCreateC(provider, "bringup_frame", &container)) && container != nullptr);
+    void* upd = nullptr;
+    SC_EXPECT(SUCCEEDED(pGsCreateU(container, "Frame 1", &upd)) && upd != nullptr);
+    const std::string stateStr = "frame1:green:ok";
+    SC_EXPECT(SUCCEEDED(pGsWrite(upd, "state", reinterpret_cast<const uint8_t*>(stateStr.data()), stateStr.size())));
+
+    LocalAsyncBlock abSub{}; abSub.queue = queue;
+    SC_EXPECT(SUCCEEDED(pGsSubmit(upd, &abSub)));
+    while (pQDispatch(queue, 0, 0)) {}
+    while (pQDispatch(queue, 1, 0)) {}
+    SC_EXPECT(SUCCEEDED(pGsSubmitRes(&abSub)));
+    pGsCloseU(upd);
+
+    const char* names[] = { "state" };
+    LocalAsyncBlock abRead{}; abRead.queue = queue;
+    SC_EXPECT(SUCCEEDED(pGsRead(container, names, 1, &abRead)));
+    while (pQDispatch(queue, 0, 0)) {}
+    while (pQDispatch(queue, 1, 0)) {}
+    std::vector<uint8_t> readBuf(512, 0);
+    uint32_t blobCount = 0;
+    SC_EXPECT(SUCCEEDED(pGsReadRes(&abRead, readBuf.size(), reinterpret_cast<LocalBlob*>(readBuf.data()), &blobCount)));
+    SC_EXPECT(blobCount == 1);
+    const auto* blob = reinterpret_cast<const LocalBlob*>(readBuf.data());
+    SC_EXPECT(blob->info.size == stateStr.size() && std::memcmp(blob->data, stateStr.data(), stateStr.size()) == 0);
+
+    pGsCloseC(container);
+    pGsCloseProv(provider);
+    pUserClose(user);
+    pQClose(queue);
+    pUninit();
+    FreeLibrary(xgrMod);
+    return true;
+}
+
 bool TestGameInputRuntimePollingE2E() {
     HMODULE giMod = LoadLibraryW(L"shims\\gameinput.dll");
     if (!giMod) giMod = LoadLibraryW(L"gameinput.dll");
@@ -4696,6 +4957,7 @@ int main() {
     RunTest("NetworkingShimsE2E",                TestNetworkingShimsE2E);
     RunTest("XUserAndGameSaveProfileE2E",        TestXUserAndGameSaveProfileE2E);
     RunTest("GameInputRuntimePollingE2E",        TestGameInputRuntimePollingE2E);
+    RunTest("ScarlettTitleBringUpE2E",           TestScarlettTitleBringUpE2E);
 
     XGameRuntimeUninitialize();
 
