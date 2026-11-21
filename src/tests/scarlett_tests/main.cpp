@@ -2615,6 +2615,41 @@ bool TestD3D12Xs3DPerspectiveDepthRenderE2E() {
     SC_EXPECT(overlap[0] == 255 && overlap[1] == 0 && overlap[2] == 64 && overlap[3] == 255);
     SC_EXPECT(farPx[0] == 0 && farPx[1] == 128 && farPx[2] == 255 && farPx[3] == 255);
 
+    // Dump 8x upscaled 512x512 24-bit BMP to build\scarlett_3d_render.bmp
+    {
+        constexpr uint32_t kScale = 8, outW = kW * kScale, outH = kH * kScale;
+        constexpr uint32_t imgBytes = outW * outH * 3;
+        constexpr uint32_t fileBytes = 54 + imgBytes;
+        uint8_t hdr[54]{};
+        hdr[0] = 'B'; hdr[1] = 'M';
+        std::memcpy(hdr + 2,  &fileBytes, 4);
+        uint32_t offBits = 54, dibSize = 40;
+        uint16_t planes = 1, bpp = 24;
+        std::memcpy(hdr + 10, &offBits, 4);
+        std::memcpy(hdr + 14, &dibSize, 4);
+        std::memcpy(hdr + 18, &outW, 4);
+        std::memcpy(hdr + 22, &outH, 4);
+        std::memcpy(hdr + 26, &planes, 2);
+        std::memcpy(hdr + 28, &bpp, 2);
+        std::memcpy(hdr + 34, &imgBytes, 4);
+
+        std::ofstream bmp("E:\\gta\\test\\scarlett-layer\\build\\scarlett_3d_render.bmp", std::ios::binary);
+        if (bmp) {
+            bmp.write(reinterpret_cast<const char*>(hdr), sizeof(hdr));
+            std::vector<uint8_t> row(outW * 3);
+            for (int y = static_cast<int>(outH) - 1; y >= 0; --y) {
+                const uint32_t sy = static_cast<uint32_t>(y) / kScale;
+                for (uint32_t x = 0; x < outW; ++x) {
+                    const uint8_t* p = pixelAt(x / kScale, sy);
+                    row[x * 3 + 0] = p[2]; // B
+                    row[x * 3 + 1] = p[1]; // G
+                    row[x * 3 + 2] = p[0]; // R
+                }
+                bmp.write(reinterpret_cast<const char*>(row.data()), static_cast<std::streamsize>(row.size()));
+            }
+        }
+    }
+
     rbBuf->Unmap(0, nullptr);
     return true;
 }

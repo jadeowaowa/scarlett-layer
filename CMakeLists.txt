@@ -166,6 +166,13 @@ target_link_libraries(scarlett_tests PRIVATE sc_common xgameruntime d3d12_xs gam
 add_dependencies(scarlett_tests pixevt engine_plugin)
 sc_set_runtime_dir(scarlett_tests "${SC_BIN_DIR}/titles/scarlett_tests")
 
+# Live interactive 3D cube demo -> build/bin/titles/scarlett_3d_demo/
+add_executable(scarlett_3d_demo WIN32
+    src/tests/scarlett_3d_demo/main.cpp
+)
+target_link_libraries(scarlett_3d_demo PRIVATE sc_common d3d12_xs d3dcompiler user32 gdi32)
+sc_set_runtime_dir(scarlett_3d_demo "${SC_BIN_DIR}/titles/scarlett_3d_demo")
+
 # Host loader -> build/bin/
 add_executable(loader
     src/loader/main.cpp
