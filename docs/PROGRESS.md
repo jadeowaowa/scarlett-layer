@@ -197,3 +197,6 @@
 
 ## Sprint 47: xmem & xg_xs Physical Memory + 64KB_S BC7 Swizzle E2E
 - Added CTest #46 (`XMemAndXgXsSwizzleE2E`) in `src/tests/scarlett_tests/main.cpp` dynamically loading `shims\xmem.dll` and `shims\xg_xs.dll` to validate 64 KiB-aligned `XALLOC_MEMTYPE_PHYSICAL` allocations paired with `256x256` 3-mip `BC7_UNORM` `64KB_S` macro- and micro-tiled swizzle/detile round-trips (`46 passed, 0 failed`).
+
+## Sprint 48: dstorage_xs Dynamic Velocity Streaming & Status-Array E2E
+- Added CTest #47 (`DStorageVelocityDynamicE2E`) in `src/tests/scarlett_tests/main.cpp` dynamically loading `shims\dstorage_xs.dll` and validating `DStorageSetConfiguration`, `DStorageGetFactory`, high-priority multi-request batching, `IDStorageStatusArrayX` completion, and bit-for-bit memory streaming parity (`47 passed, 0 failed`).
