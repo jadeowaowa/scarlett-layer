@@ -49,6 +49,9 @@ inline constexpr GUID IID_ID3D12DeviceX =
 inline constexpr GUID IID_ID3D12CommandQueueX =
     { 0x5c4a1202, 0x9b70, 0x4d1e, { 0xa1, 0x20, 0x00, 0x53, 0x43, 0x41, 0x52, 0x02 } };
 
+inline constexpr GUID IID_ID3D12GraphicsCommandListX =
+    { 0x5c4a1203, 0x9b70, 0x4d1e, { 0xa1, 0x20, 0x00, 0x53, 0x43, 0x41, 0x52, 0x03 } };
+
 inline constexpr GUID IID_ScarlettNativeD3D12Device =
     { 0x5c4a12F0, 0x9b70, 0x4d1e, { 0xa1, 0x20, 0x00, 0x53, 0x43, 0x41, 0x52, 0xF0 } };
 
@@ -61,6 +64,35 @@ struct ID3D12CommandQueueX : public IUnknown {
         UINT PlaneCount,
         const D3D12XBOX_PRESENT_PLANE_PARAMETERS* pPlaneParameters,
         const D3D12XBOX_PRESENT_PARAMETERS* pPresentParameters) = 0;
+};
+
+struct ID3D12GraphicsCommandListX : public IUnknown {
+    virtual HRESULT STDMETHODCALLTYPE Close() = 0;
+    virtual HRESULT STDMETHODCALLTYPE Reset(
+        ID3D12CommandAllocator* pAllocator,
+        ID3D12PipelineState* pInitialState) = 0;
+    virtual void STDMETHODCALLTYPE SetPipelineState(ID3D12PipelineState* pPipelineState) = 0;
+    virtual void STDMETHODCALLTYPE SetGraphicsRootSignature(ID3D12RootSignature* pRootSignature) = 0;
+    virtual void STDMETHODCALLTYPE SetComputeRootSignature(ID3D12RootSignature* pRootSignature) = 0;
+    virtual void STDMETHODCALLTYPE SetComputeRootShaderResourceView(
+        UINT RootParameterIndex, D3D12_GPU_VIRTUAL_ADDRESS BufferLocation) = 0;
+    virtual void STDMETHODCALLTYPE SetComputeRootUnorderedAccessView(
+        UINT RootParameterIndex, D3D12_GPU_VIRTUAL_ADDRESS BufferLocation) = 0;
+    virtual void STDMETHODCALLTYPE ResourceBarrier(
+        UINT NumBarriers, const D3D12_RESOURCE_BARRIER* pBarriers) = 0;
+    virtual void STDMETHODCALLTYPE CopyBufferRegion(
+        ID3D12Resource* pDstBuffer, UINT64 DstOffset,
+        ID3D12Resource* pSrcBuffer, UINT64 SrcOffset, UINT64 NumBytes) = 0;
+    virtual void STDMETHODCALLTYPE DrawInstanced(
+        UINT VertexCountPerInstance, UINT InstanceCount,
+        UINT StartVertexLocation, UINT StartInstanceLocation) = 0;
+    virtual void STDMETHODCALLTYPE Dispatch(
+        UINT ThreadGroupCountX, UINT ThreadGroupCountY, UINT ThreadGroupCountZ) = 0;
+    virtual void STDMETHODCALLTYPE BeginEvent(UINT Metadata, const void* pData, UINT Size) = 0;
+    virtual void STDMETHODCALLTYPE EndEvent() = 0;
+    virtual void STDMETHODCALLTYPE SetMarker(UINT Metadata, const void* pData, UINT Size) = 0;
+    virtual void STDMETHODCALLTYPE InsertWaitOnPresent(UINT64 PresentToken) = 0;
+    virtual ID3D12GraphicsCommandList* STDMETHODCALLTYPE GetNativeCommandList() = 0;
 };
 
 struct ID3D12DeviceX : public IUnknown {

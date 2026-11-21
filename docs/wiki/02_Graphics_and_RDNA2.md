@@ -1,7 +1,7 @@
 # 02 â€” Graphics (`d3d12_xs`), Surface Tiling (`xg_xs`) & RDNA2 Binary Lifter
 
 ## `d3d12_xs.dll`
-**Files:** `src/shims/d3d12_xs/d3d12_xs.cpp` (1151 L), `src/shims/d3d12_xs/d3d12_xs.def` (4 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (166 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1191 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_translator.hpp` (401 L)
+**Files:** `src/shims/d3d12_xs/d3d12_xs.cpp` (1240 L), `src/shims/d3d12_xs/d3d12_xs.def` (4 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (198 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1191 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_translator.hpp` (401 L)
 
 **DLL Exports (`.def`):** `D3D12XboxCreateDevice`, `D3D12SerializeRootSignature = ScarlettSerializeRootSignature`
 
@@ -13,6 +13,24 @@
 - `[04]` `HRESULT Signal(ID3D12Fence* pFence, UINT64 Value)`
 - `[05]` `HRESULT Wait(ID3D12Fence* pFence, UINT64 Value)`
 - `[06]` `HRESULT PresentX( UINT PlaneCount, const D3D12XBOX_PRESENT_PLANE_PARAMETERS* pPlaneParameters, const D3D12XBOX_PRESENT_PARAMETERS* pPresentParameters)`
+
+**COM Interface `ID3D12GraphicsCommandListX : IUnknown`:**
+- `[03]` `HRESULT Close()`
+- `[04]` `HRESULT Reset( ID3D12CommandAllocator* pAllocator, ID3D12PipelineState* pInitialState)`
+- `[05]` `void SetPipelineState(ID3D12PipelineState* pPipelineState)`
+- `[06]` `void SetGraphicsRootSignature(ID3D12RootSignature* pRootSignature)`
+- `[07]` `void SetComputeRootSignature(ID3D12RootSignature* pRootSignature)`
+- `[08]` `void SetComputeRootShaderResourceView( UINT RootParameterIndex, D3D12_GPU_VIRTUAL_ADDRESS BufferLocation)`
+- `[09]` `void SetComputeRootUnorderedAccessView( UINT RootParameterIndex, D3D12_GPU_VIRTUAL_ADDRESS BufferLocation)`
+- `[10]` `void ResourceBarrier( UINT NumBarriers, const D3D12_RESOURCE_BARRIER* pBarriers)`
+- `[11]` `void CopyBufferRegion( ID3D12Resource* pDstBuffer, UINT64 DstOffset, ID3D12Resource* pSrcBuffer, UINT64 SrcOffset, UINT64 NumBytes)`
+- `[12]` `void DrawInstanced( UINT VertexCountPerInstance, UINT InstanceCount, UINT StartVertexLocation, UINT StartInstanceLocation)`
+- `[13]` `void Dispatch( UINT ThreadGroupCountX, UINT ThreadGroupCountY, UINT ThreadGroupCountZ)`
+- `[14]` `void BeginEvent(UINT Metadata, const void* pData, UINT Size)`
+- `[15]` `void EndEvent()`
+- `[16]` `void SetMarker(UINT Metadata, const void* pData, UINT Size)`
+- `[17]` `void InsertWaitOnPresent(UINT64 PresentToken)`
+- `[18]` `ID3D12GraphicsCommandList* GetNativeCommandList()`
 
 **COM Interface `ID3D12DeviceX : IUnknown`:**
 - `[03]` `HRESULT CreateCommandQueueX( const D3D12_COMMAND_QUEUE_DESC* pDesc, ID3D12CommandQueueX** ppCommandQueue)`

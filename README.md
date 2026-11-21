@@ -4,7 +4,7 @@
 
 **Native Windows/D3D12 binary compatibility & shim layer for Xbox Series X|S (Scarlett / GDK) titles.**
 
-[![Build](https://img.shields.io/badge/build-CMake%20%2B%20Ninja%20%2B%20MSVC-0078D4?style=flat-square)](#build--verify) [![Tests](https://img.shields.io/badge/CTests-35%2F35%20passing-2ea44f?style=flat-square)](#verification-suite) [![Baseline](https://img.shields.io/badge/baseline-sprint--36-8957e5?style=flat-square)](#delivery-timeline) [![Platform](https://img.shields.io/badge/platform-Windows%20x64%20%7C%20D3D12-blue?style=flat-square)](#requirements)
+[![Build](https://img.shields.io/badge/build-CMake%20%2B%20Ninja%20%2B%20MSVC-0078D4?style=flat-square)](#build--verify) [![Tests](https://img.shields.io/badge/CTests-37%2F37%20passing-2ea44f?style=flat-square)](#verification-suite) [![Baseline](https://img.shields.io/badge/baseline-sprint--38-8957e5?style=flat-square)](#delivery-timeline) [![Platform](https://img.shields.io/badge/platform-Windows%20x64%20%7C%20D3D12-blue?style=flat-square)](#requirements)
 
 </div>
 
@@ -55,7 +55,7 @@ cd scarlett-layer
 
 ### Verification Suite
 
-All **35 CTests** run end-to-end on real D3D12 hardware, including:
+All **37 CTests** run end-to-end on real D3D12 hardware, including:
 - **`Rdna2TexturedDrawE2E`** — Binary RDNA2 `MIMG IMAGE_SAMPLE` PS -> HLSL -> `ps_5_0` GPU textured draw + RGBA readback.
 - **`Rdna2ComputeDispatchE2E`** — Binary RDNA2 `MUBUF` load/store CS -> SCXS -> `cs_5_0` GPU `Dispatch` + 64-uint UAV readback.
 - **`DStorageGpuBufferAndFenceE2E`** — Async 4 KB VFS file -> D3D12 `DEFAULT` buffer + `ID3D12Fence` + readback.
