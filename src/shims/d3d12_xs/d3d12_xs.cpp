@@ -342,7 +342,11 @@ public:
         ID3D12CommandList* lists[] = { m_copyCmdList.Get() };
         m_queue->ExecuteCommandLists(1, lists);
 
-        hr = m_swapChain->Present(1, 0);
+        char headlessEnv[8]{};
+        const bool isHeadless =
+            GetEnvironmentVariableA("SCARLETT_HEADLESS", headlessEnv, sizeof(headlessEnv)) > 0 &&
+            headlessEnv[0] == '1';
+        hr = m_swapChain->Present(isHeadless ? 0u : 1u, 0);
         if (FAILED(hr)) {
             return hr;
         }
@@ -372,11 +376,17 @@ private:
         RECT rc{ 0, 0, static_cast<LONG>(width), static_cast<LONG>(height) };
         AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
 
+        char headlessEnv[8]{};
+        const bool isHeadless =
+            GetEnvironmentVariableA("SCARLETT_HEADLESS", headlessEnv, sizeof(headlessEnv)) > 0 &&
+            headlessEnv[0] == '1';
+        const DWORD winStyle = isHeadless ? WS_OVERLAPPEDWINDOW : (WS_OVERLAPPEDWINDOW | WS_VISIBLE);
+
         m_hwnd = CreateWindowExW(
             0,
             kWindowClassName,
             L"Scarlett Layer - Xbox Series X [Compute UAV + SCXS + PSO Cache]",
-            WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+            winStyle,
             CW_USEDEFAULT, CW_USEDEFAULT,
             rc.right - rc.left, rc.bottom - rc.top,
             nullptr, nullptr, hInst, &m_windowClosed);
@@ -436,7 +446,7 @@ private:
         m_fenceEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
 
         char info[128];
-        std::snprintf(info, sizeof(info), "-> created %ux%u DXGI Flip-Discard swapchain for PresentX", width, height);
+        std::snprintf(info, sizeof(info), "-> created %ux%u DXGI Flip-Discard swapchain for PresentX (%s)", width, height, isHeadless ? "headless" : "windowed");
         sc::log::Write(sc::log::Level::Info, "d3d12_xs", "InitPresentationPipeline", info);
         return S_OK;
     }
@@ -1024,7 +1034,8 @@ public:
     HRESULT STDMETHODCALLTYPE SetFrameIntervalX(
         IDXGIOutput* /*pOutput*/, uint32_t PeriodInMicroseconds,
         uint32_t /*MaxLatency*/, uint32_t /*Flags*/) override {
-        m_framePeriodUs = PeriodInMicroseconds;
+        m_framePeriodUs.store(PeriodInMicroseconds, std::memory_order_relaxed);
+        m_lastFrameQpc.store(0, std::memory_order_relaxed);
         char buf[96];
         double hz = (PeriodInMicroseconds > 0) ? (1000000.0 / PeriodInMicroseconds) : 0.0;
         std::snprintf(buf, sizeof(buf), "-> interval=%u us (%.1f Hz)", PeriodInMicroseconds, hz);
@@ -1042,8 +1053,39 @@ public:
     }
 
     HRESULT STDMETHODCALLTYPE WaitFrameEventX(
-        D3D12XBOX_FRAME_EVENT /*Event*/, DWORD /*TimeoutInMilliseconds*/,
-        HANDLE /*hEvent*/, D3D12XBOX_FRAME_PIPELINE_TOKEN* pToken) override {
+        D3D12XBOX_FRAME_EVENT /*Event*/, DWORD TimeoutInMilliseconds,
+        HANDLE hEvent, D3D12XBOX_FRAME_PIPELINE_TOKEN* pToken) override {
+        if (hEvent) {
+            DWORD waitRes = WaitForSingleObject(hEvent, TimeoutInMilliseconds);
+            if (waitRes == WAIT_TIMEOUT) {
+                return HRESULT_FROM_WIN32(ERROR_TIMEOUT);
+            }
+        }
+
+        const uint32_t periodUs = m_framePeriodUs.load(std::memory_order_relaxed);
+        if (periodUs > 0) {
+            LARGE_INTEGER freq{}, now{};
+            QueryPerformanceFrequency(&freq);
+            QueryPerformanceCounter(&now);
+            const int64_t periodTicks = (freq.QuadPart * static_cast<int64_t>(periodUs)) / 1000000LL;
+            const int64_t prevTicks = m_lastFrameQpc.load(std::memory_order_relaxed);
+
+            if (prevTicks != 0) {
+                const int64_t targetTicks = prevTicks + periodTicks;
+                while (now.QuadPart < targetTicks) {
+                    const int64_t remTicks = targetTicks - now.QuadPart;
+                    const DWORD remMs = static_cast<DWORD>((remTicks * 1000LL) / freq.QuadPart);
+                    if (remMs > 1) {
+                        Sleep(remMs - 1);
+                    } else {
+                        SwitchToThread();
+                    }
+                    QueryPerformanceCounter(&now);
+                }
+            }
+            m_lastFrameQpc.store(now.QuadPart, std::memory_order_relaxed);
+        }
+
         if (pToken) {
             *pToken = m_nextToken.fetch_add(1, std::memory_order_relaxed);
         }
@@ -1233,7 +1275,8 @@ private:
     uint64_t m_xlatHits{0};
     uint64_t m_xlatMisses{0};
 
-    uint32_t m_framePeriodUs{16667};
+    std::atomic<uint32_t> m_framePeriodUs{16667};
+    std::atomic<int64_t>  m_lastFrameQpc{0};
     std::atomic<D3D12XBOX_FRAME_PIPELINE_TOKEN> m_nextToken{1};
 };
 

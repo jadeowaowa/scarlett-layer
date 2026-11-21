@@ -226,3 +226,7 @@
 - Fixed `ScarlettWndProc` / `PumpMessages` in `src/shims/d3d12_xs/d3d12_xs.cpp` to scope message pumping to `m_hwnd` and avoid posting thread-wide `WM_QUIT` on swapchain teardown.
 - Upgraded `src/tests/scarlett_3d_demo/main.cpp` to present directly on the GPU via `ID3D12CommandQueueX::PresentX` (DXGI Flip-Discard swapchain), removing CPU readback and GDI blitting.
 - Added CTest #54 (`D3D12XsPresentXSwapChainE2E`) in `src/tests/scarlett_tests/main.cpp` verifying `PresentX` argument validation and multi-frame hardware DXGI swapchain presentation (`54 passed, 0 failed`).
+
+## Sprint 57: Headless PresentX Mode (SCARLETT_HEADLESS=1)
+- Added `SCARLETT_HEADLESS=1` support in `src/shims/d3d12_xs/d3d12_xs.cpp` (`InitPresentationPipeline` / `PresentX`), omitting `WS_VISIBLE` and presenting with `syncInterval=0` to eliminate CTest window popups and DWM recomposition hitches while preserving windowed VSync for interactive demos.
+- Configured `scarlett_shim_suite` in `CMakeLists.txt` with `ENVIRONMENT "SCARLETT_HEADLESS=1"` and added CTest #56 (`D3D12XsHeadlessPresentXModeE2E`) in `src/tests/scarlett_tests/main.cpp` (`56 passed, 0 failed`).
