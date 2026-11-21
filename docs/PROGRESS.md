@@ -142,3 +142,8 @@
 - Added keyboard-to-virtual-gamepad fallback (WASD -> Left Stick, Arrows -> D-pad, Space/Enter -> A, Esc -> Menu, Shift -> Right Trigger) in `src/shims/gameinput/gameinput.cpp` when no physical XInput controller #0 is connected.
 - Exported `ScarlettGameInputSetSyntheticGamepad` (`@2` in `gameinput.def`) for deterministic gamepad state injection.
 - Added CTest #32 (`GameInputLivePolling`) verifying `IGameInput::GetCurrentReading`, `GetGamepadState` parity, and monotonic timestamps (`32 passed, 0 failed`). Phase 1 complete.
+
+## Sprint 34: Dynamic GetModuleHandleA/W & GetModuleHandleExA/W Redirects
+- Hooked `GetModuleHandleA`, `GetModuleHandleW`, `GetModuleHandleExA`, and `GetModuleHandleExW` in `src/loader/scarlett_hook.cpp` (with safe pass-through for `GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS` and `nullptr`).
+- Redirected runtime Scarlett DLL handle probes to the loaded `shims\` binaries alongside existing `LoadLibrary*` hooks.
+- Added CTest #33 (`DynamicLoaderHooks`) verifying `GetModuleHandle*`, `FROM_ADDRESS` pass-through, and dynamic `LoadLibraryW` + `GetProcAddress` resolution (`33 passed, 0 failed`).

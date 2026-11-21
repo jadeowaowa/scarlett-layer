@@ -16,7 +16,11 @@ namespace {
 using LoadLibraryAFn   = HMODULE(WINAPI*)(LPCSTR);
 using LoadLibraryWFn   = HMODULE(WINAPI*)(LPCWSTR);
 using LoadLibraryExAFn = HMODULE(WINAPI*)(LPCSTR, HANDLE, DWORD);
-using LoadLibraryExWFn = HMODULE(WINAPI*)(LPCWSTR, HANDLE, DWORD);
+using LoadLibraryExWFn     = HMODULE(WINAPI*)(LPCWSTR, HANDLE, DWORD);
+using GetModuleHandleAFn   = HMODULE(WINAPI*)(LPCSTR);
+using GetModuleHandleWFn   = HMODULE(WINAPI*)(LPCWSTR);
+using GetModuleHandleExAFn = BOOL(WINAPI*)(DWORD, LPCSTR, HMODULE*);
+using GetModuleHandleExWFn = BOOL(WINAPI*)(DWORD, LPCWSTR, HMODULE*);
 using K32EnumProcessModulesFn = BOOL(WINAPI*)(HANDLE, HMODULE*, DWORD, LPDWORD);
 
 HMODULE          g_selfModule         = nullptr;
@@ -24,7 +28,11 @@ HMODULE          g_exeModule          = nullptr;
 LoadLibraryAFn   g_origLoadLibraryA   = nullptr;
 LoadLibraryWFn   g_origLoadLibraryW   = nullptr;
 LoadLibraryExAFn g_origLoadLibraryExA = nullptr;
-LoadLibraryExWFn g_origLoadLibraryExW = nullptr;
+LoadLibraryExWFn     g_origLoadLibraryExW     = nullptr;
+GetModuleHandleAFn   g_origGetModuleHandleA   = nullptr;
+GetModuleHandleWFn   g_origGetModuleHandleW   = nullptr;
+GetModuleHandleExAFn g_origGetModuleHandleExA = nullptr;
+GetModuleHandleExWFn g_origGetModuleHandleExW = nullptr;
 
 std::wstring g_shimDirLower;
 std::wstring g_winDirLower;
@@ -134,6 +142,10 @@ HMODULE WINAPI HookLoadLibraryW(LPCWSTR lpLibFileName);
 HMODULE WINAPI HookLoadLibraryA(LPCSTR lpLibFileName);
 HMODULE WINAPI HookLoadLibraryExW(LPCWSTR lpLibFileName, HANDLE hFile, DWORD dwFlags);
 HMODULE WINAPI HookLoadLibraryExA(LPCSTR lpLibFileName, HANDLE hFile, DWORD dwFlags);
+HMODULE WINAPI HookGetModuleHandleW(LPCWSTR lpModuleName);
+HMODULE WINAPI HookGetModuleHandleA(LPCSTR lpModuleName);
+BOOL    WINAPI HookGetModuleHandleExW(DWORD dwFlags, LPCWSTR lpModuleName, HMODULE* phModule);
+BOOL    WINAPI HookGetModuleHandleExA(DWORD dwFlags, LPCSTR lpModuleName, HMODULE* phModule);
 
 uint32_t PatchModuleIat(HMODULE mod) {
     if (!mod) {
@@ -179,6 +191,14 @@ uint32_t PatchModuleIat(HMODULE mod) {
                 replacement = reinterpret_cast<void*>(&HookLoadLibraryExW);
             } else if (std::strcmp(ibn->Name, "LoadLibraryExA") == 0) {
                 replacement = reinterpret_cast<void*>(&HookLoadLibraryExA);
+            } else if (std::strcmp(ibn->Name, "GetModuleHandleW") == 0) {
+                replacement = reinterpret_cast<void*>(&HookGetModuleHandleW);
+            } else if (std::strcmp(ibn->Name, "GetModuleHandleA") == 0) {
+                replacement = reinterpret_cast<void*>(&HookGetModuleHandleA);
+            } else if (std::strcmp(ibn->Name, "GetModuleHandleExW") == 0) {
+                replacement = reinterpret_cast<void*>(&HookGetModuleHandleExW);
+            } else if (std::strcmp(ibn->Name, "GetModuleHandleExA") == 0) {
+                replacement = reinterpret_cast<void*>(&HookGetModuleHandleExA);
             }
 
             if (replacement) {
@@ -304,6 +324,50 @@ HMODULE WINAPI HookLoadLibraryExA(LPCSTR lpLibFileName, HANDLE hFile, DWORD dwFl
     return mod;
 }
 
+HMODULE WINAPI HookGetModuleHandleW(LPCWSTR lpModuleName) {
+    if (lpModuleName) {
+        std::wstring key = NormalizeDllKeyW(lpModuleName);
+        auto it = g_shimsWide.find(key);
+        if (it != g_shimsWide.end()) {
+            return g_origGetModuleHandleW(it->second.c_str());
+        }
+    }
+    return g_origGetModuleHandleW(lpModuleName);
+}
+
+HMODULE WINAPI HookGetModuleHandleA(LPCSTR lpModuleName) {
+    if (lpModuleName) {
+        std::string key = NormalizeDllKeyA(lpModuleName);
+        auto it = g_shimsAnsi.find(key);
+        if (it != g_shimsAnsi.end()) {
+            return g_origGetModuleHandleA(it->second.c_str());
+        }
+    }
+    return g_origGetModuleHandleA(lpModuleName);
+}
+
+BOOL WINAPI HookGetModuleHandleExW(DWORD dwFlags, LPCWSTR lpModuleName, HMODULE* phModule) {
+    if (lpModuleName && (dwFlags & GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS) == 0) {
+        std::wstring key = NormalizeDllKeyW(lpModuleName);
+        auto it = g_shimsWide.find(key);
+        if (it != g_shimsWide.end()) {
+            return g_origGetModuleHandleExW(dwFlags, it->second.c_str(), phModule);
+        }
+    }
+    return g_origGetModuleHandleExW(dwFlags, lpModuleName, phModule);
+}
+
+BOOL WINAPI HookGetModuleHandleExA(DWORD dwFlags, LPCSTR lpModuleName, HMODULE* phModule) {
+    if (lpModuleName && (dwFlags & GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS) == 0) {
+        std::string key = NormalizeDllKeyA(lpModuleName);
+        auto it = g_shimsAnsi.find(key);
+        if (it != g_shimsAnsi.end()) {
+            return g_origGetModuleHandleExA(dwFlags, it->second.c_str(), phModule);
+        }
+    }
+    return g_origGetModuleHandleExA(dwFlags, lpModuleName, phModule);
+}
+
 void DiscoverShimsWin32() {
     wchar_t winBuf[MAX_PATH]{};
     UINT winLen = GetWindowsDirectoryW(winBuf, MAX_PATH);
@@ -385,7 +449,11 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID) {
             g_origLoadLibraryA   = reinterpret_cast<LoadLibraryAFn>(GetProcAddress(k32, "LoadLibraryA"));
             g_origLoadLibraryW   = reinterpret_cast<LoadLibraryWFn>(GetProcAddress(k32, "LoadLibraryW"));
             g_origLoadLibraryExA = reinterpret_cast<LoadLibraryExAFn>(GetProcAddress(k32, "LoadLibraryExA"));
-            g_origLoadLibraryExW = reinterpret_cast<LoadLibraryExWFn>(GetProcAddress(k32, "LoadLibraryExW"));
+            g_origLoadLibraryExW     = reinterpret_cast<LoadLibraryExWFn>(GetProcAddress(k32, "LoadLibraryExW"));
+            g_origGetModuleHandleA   = reinterpret_cast<GetModuleHandleAFn>(GetProcAddress(k32, "GetModuleHandleA"));
+            g_origGetModuleHandleW   = reinterpret_cast<GetModuleHandleWFn>(GetProcAddress(k32, "GetModuleHandleW"));
+            g_origGetModuleHandleExA = reinterpret_cast<GetModuleHandleExAFn>(GetProcAddress(k32, "GetModuleHandleExA"));
+            g_origGetModuleHandleExW = reinterpret_cast<GetModuleHandleExWFn>(GetProcAddress(k32, "GetModuleHandleExW"));
         }
 
         DiscoverShimsWin32();
