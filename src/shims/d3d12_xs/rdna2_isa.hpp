@@ -88,6 +88,10 @@ enum VintrpOp : uint8_t {
     kVintrpMovF32 = 0x02u
 };
 
+enum MimgOp : uint8_t {
+    kMimgImageSample = 0x20u
+};
+
 enum class InstFormat : uint8_t {
     Sopp,
     Vop1,
@@ -96,7 +100,8 @@ enum class InstFormat : uint8_t {
     Exp,
     Mubuf,
     Smem,
-    Vintrp
+    Vintrp,
+    Mimg
 };
 
 struct DecodedInst {
@@ -136,6 +141,14 @@ struct DecodedInst {
     uint8_t    vintrpAttr{0};
     uint8_t    vintrpChan{0};
     uint8_t    vintrpVsrc{0};
+
+    // MIMG fields
+    uint8_t    mimgDmask{0};
+    uint8_t    mimgDim{0};
+    uint8_t    mimgVaddr{0};
+    uint8_t    mimgVdata{0};
+    uint8_t    mimgSrsrc{0};
+    uint8_t    mimgSsamp{0};
 };
 
 struct DecodedProgram {
@@ -267,6 +280,22 @@ inline void AppendVintrpMov(
     words.push_back(w0);
 }
 
+inline void AppendMimgImageSample(
+    std::vector<uint32_t>& words,
+    uint8_t vdata, uint8_t vaddr, uint8_t srsrc, uint8_t ssamp,
+    uint8_t dmask = 0xFu, uint8_t dim = 1u) {
+    const uint32_t w0 = (0x3Cu << 26)
+                      | (static_cast<uint32_t>(kMimgImageSample) << 18)
+                      | ((static_cast<uint32_t>(dmask) & 0xFu) << 8)
+                      | ((static_cast<uint32_t>(dim) & 0x7u) << 3);
+    const uint32_t w1 = ((static_cast<uint32_t>(ssamp) & 0x1Fu) << 21)
+                      | ((static_cast<uint32_t>(srsrc) & 0x1Fu) << 16)
+                      | (static_cast<uint32_t>(vdata) << 8)
+                      | static_cast<uint32_t>(vaddr);
+    words.push_back(w0);
+    words.push_back(w1);
+}
+
 // ============================================================================
 // Binary RDNA2 Decoder
 // ============================================================================
@@ -286,6 +315,30 @@ inline bool DecodeProgram(
     while (pc < wordCount) {
         const uint32_t w0 = words[pc++];
         DecodedInst inst{};
+
+        if ((w0 >> 26) == 0x3Cu) {
+            if (pc >= wordCount) {
+                outError = "truncated 64-bit MIMG instruction";
+                return false;
+            }
+            const uint32_t w1 = words[pc++];
+            inst.format    = InstFormat::Mimg;
+            inst.opcode    = static_cast<uint16_t>((w0 >> 18) & 0xFFu);
+            inst.mimgDmask = static_cast<uint8_t>((w0 >> 8) & 0xFu);
+            inst.mimgDim   = static_cast<uint8_t>((w0 >> 3) & 0x7u);
+            inst.mimgVaddr = static_cast<uint8_t>(w1 & 0xFFu);
+            inst.mimgVdata = static_cast<uint8_t>((w1 >> 8) & 0xFFu);
+            inst.mimgSrsrc = static_cast<uint8_t>((w1 >> 16) & 0x1Fu);
+            inst.mimgSsamp = static_cast<uint8_t>((w1 >> 21) & 0x1Fu);
+            if (inst.opcode != kMimgImageSample) {
+                char buf[64];
+                std::snprintf(buf, sizeof(buf), "unsupported MIMG opcode 0x%02X", inst.opcode);
+                outError = buf;
+                return false;
+            }
+            outProg.insts.push_back(inst);
+            continue;
+        }
 
         if ((w0 >> 23) == 0x17Fu) {
             inst.format = InstFormat::Sopp;
@@ -759,6 +812,7 @@ inline bool LiftPixelShaderToHlsl(
     std::set<uint8_t> usedSgprs;
     std::set<uint8_t> usedParams;
     bool hasSmem = false;
+    bool hasMimg = false;
 
     auto markSrc = [&](uint16_t s) {
         if (s <= kSrcSgprMax) {
@@ -795,6 +849,19 @@ inline bool LiftPixelShaderToHlsl(
                 usedVgprs.insert(i.vdst);
                 usedParams.insert(i.vintrpAttr);
                 break;
+            case InstFormat::Mimg: {
+                hasMimg = true;
+                usedVgprs.insert(i.mimgVaddr);
+                usedVgprs.insert(static_cast<uint8_t>(i.mimgVaddr + 1u));
+                uint8_t dstIdx = 0;
+                for (int c = 0; c < 4; ++c) {
+                    if ((i.mimgDmask & (1u << c)) != 0u) {
+                        usedVgprs.insert(static_cast<uint8_t>(i.mimgVdata + dstIdx));
+                        ++dstIdx;
+                    }
+                }
+                break;
+            }
             case InstFormat::Exp:
                 for (int c = 0; c < 4; ++c) {
                     if ((i.expEn & (1u << c)) != 0) {
@@ -821,6 +888,21 @@ inline bool LiftPixelShaderToHlsl(
                   + std::to_string(i.vintrpAttr) + "." + kChans[i.vintrpChan & 3u] + ";\n";
             continue;
         }
+        if (i.format == InstFormat::Mimg && i.opcode == kMimgImageSample) {
+            body += "    {\n        float4 _s = gTex0.Sample(gSamp0, float2(v"
+                  + std::to_string(i.mimgVaddr) + ", v"
+                  + std::to_string(static_cast<uint8_t>(i.mimgVaddr + 1u)) + "));\n";
+            uint8_t dstIdx = 0;
+            for (int c = 0; c < 4; ++c) {
+                if ((i.mimgDmask & (1u << c)) != 0u) {
+                    body += "        v" + std::to_string(static_cast<uint8_t>(i.mimgVdata + dstIdx))
+                          + " = _s." + kChans[c] + ";\n";
+                    ++dstIdx;
+                }
+            }
+            body += "    }\n";
+            continue;
+        }
         if (i.format == InstFormat::Exp && i.expTarget == kExpTargetMrt0) {
             hasMrt0Export = true;
             std::string ch[4];
@@ -845,6 +927,9 @@ inline bool LiftPixelShaderToHlsl(
     outHlsl.clear();
     if (hasSmem) {
         outHlsl += "cbuffer Cb0 : register(b0) {\n    float4 gCb0[16];\n};\n";
+    }
+    if (hasMimg) {
+        outHlsl += "Texture2D<float4> gTex0 : register(t0);\nSamplerState gSamp0 : register(s0);\n";
     }
     if (usedParams.empty()) {
         outHlsl += "float4 PSMain(float4 svPos : SV_POSITION) : SV_TARGET {\n";

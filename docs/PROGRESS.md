@@ -112,3 +112,8 @@
 - Added `src/loader/pe_inspector.hpp` to audit PE64 import tables against `build/bin/shims/` and classify imports into Shimmed, System (including MSVC Debug/Release CRTs), and Missing.
 - Added `loader.exe --inspect <target.exe>` and `--inspect-xvd <file.xvd>` CLI modes in `src/loader/main.cpp`.
 - Added CTest #26 (`LoaderInspectAndXvdMount`) verifying PE64 import auditing and unencrypted/encrypted XVD handling (`26 passed, 0 failed`).
+
+## Sprint 28: RDNA2 IMAGE_SAMPLE (MIMG) Texture Sampling
+- Added GFX10.3 MIMG `IMAGE_SAMPLE` (`0x3C` / opcode `0x20`) encoding (`AppendMimgImageSample`) and binary decoding in `src/shims/d3d12_xs/rdna2_isa.hpp`.
+- Extended `LiftPixelShaderToHlsl` to emit `Texture2D<float4> gTex0 : register(t0)` and `SamplerState gSamp0 : register(s0)` declarations and lower MIMG `IMAGE_SAMPLE` into `gTex0.Sample(gSamp0, float2(...))` with `dmask` channel routing.
+- Added CTest #27 (`Rdna2ImageSampleShader`) verifying binary decode, HLSL lifting, and `D3DCompile` (`ps_5_0`) bytecode compilation (`27 passed, 0 failed`).

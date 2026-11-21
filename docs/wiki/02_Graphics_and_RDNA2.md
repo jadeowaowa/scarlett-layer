@@ -1,7 +1,7 @@
 # 02 â€” Graphics (`d3d12_xs`), Surface Tiling (`xg_xs`) & RDNA2 Binary Lifter
 
 ## `d3d12_xs.dll`
-**Files:** `src/shims/d3d12_xs/d3d12_xs.cpp` (1123 L), `src/shims/d3d12_xs/d3d12_xs.def` (4 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (166 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1085 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_translator.hpp` (364 L)
+**Files:** `src/shims/d3d12_xs/d3d12_xs.cpp` (1123 L), `src/shims/d3d12_xs/d3d12_xs.def` (4 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (166 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1170 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_translator.hpp` (364 L)
 
 **DLL Exports (`.def`):** `D3D12XboxCreateDevice`, `D3D12SerializeRootSignature = ScarlettSerializeRootSignature`
 
@@ -45,7 +45,8 @@
 - `MubufOp`: kMubufStoreDword = 0x1Cu
 - `SmemOp`: kSmemLoadDword = 0x00u, kSmemLoadDwordX2 = 0x01u, kSmemLoadDwordX4 = 0x02u
 - `VintrpOp`: kVintrpP1F32 = 0x00u, kVintrpP2F32 = 0x01u, kVintrpMovF32 = 0x02u
-- `InstFormat`: Sopp, Vop1, Vop2, Vop3, Exp, Mubuf, Smem, Vintrp
+- `MimgOp`: kMimgImageSample = 0x20u
+- `InstFormat`: Sopp, Vop1, Vop2, Vop3, Exp, Mubuf, Smem, Vintrp, Mimg
 - `ShaderContainerKind`: None = 0, Dxbc = 1, Dxil = 2, Scxs = 3, Unknown = 4
 - `ScxsShaderStage`: Pixel = 0, Vertex = 1, Geometry = 2, Hull = 3, Domain = 4, Compute = 5, Mesh = 6, Amplification = 7
 - `ScxsTargetArch`: Unknown = 0, Rdna2Scarlett = 1, HostReference = 2

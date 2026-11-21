@@ -2363,6 +2363,50 @@ static size_t TestXCurlWriteCb(char* ptr, size_t size, size_t nmemb, void* userd
     return size * nmemb;
 }
 
+bool TestRdna2ImageSampleShader() {
+    using namespace sc::d3d12::rdna2;
+
+    // Build RDNA2 PS:
+    //   v0 = param0.x (U), v1 = param0.y (V)
+    //   v2..v5 = image_sample(v0..v1, t0, s0, dmask=0xF)
+    //   exp mrt0, v2, v3, v4, v5 (done)
+    //   s_endpgm
+    std::vector<uint32_t> isa;
+    AppendVintrpMov(isa, 0, 0, 0);
+    AppendVintrpMov(isa, 1, 0, 1);
+    AppendMimgImageSample(isa, 2, 0, 0, 0, 0xFu, 1u);
+    AppendExp(isa, kExpTargetMrt0, 0xFu, 2, 3, 4, 5, true, true);
+    AppendSopp(isa, kSoppEndpgm);
+
+    DecodedProgram prog{};
+    std::string err;
+    SC_EXPECT(DecodeProgram(isa.data(), isa.size() * sizeof(uint32_t), prog, err));
+    SC_EXPECT(prog.insts.size() == 5u);
+    SC_EXPECT(prog.insts[2].format == InstFormat::Mimg);
+    SC_EXPECT(prog.insts[2].opcode == kMimgImageSample);
+    SC_EXPECT(prog.insts[2].mimgDmask == 0xFu);
+    SC_EXPECT(prog.insts[2].mimgVdata == 2u);
+    SC_EXPECT(prog.insts[2].mimgVaddr == 0u);
+
+    std::string hlsl;
+    SC_EXPECT(LiftPixelShaderToHlsl(prog, hlsl, err));
+    SC_EXPECT(hlsl.find("Texture2D<float4> gTex0 : register(t0);") != std::string::npos);
+    SC_EXPECT(hlsl.find("SamplerState gSamp0 : register(s0);") != std::string::npos);
+    SC_EXPECT(hlsl.find("gTex0.Sample(gSamp0, float2(v0, v1))") != std::string::npos);
+
+    // Compile lifted HLSL to real DXBC ps_5_0 bytecode
+    ID3DBlob* bytecode = nullptr;
+    ID3DBlob* errors = nullptr;
+    HRESULT hr = D3DCompile(
+        hlsl.data(), hlsl.size(), "rdna2_image_sample_ps.hlsl",
+        nullptr, nullptr, "PSMain", "ps_5_0", 0, 0, &bytecode, &errors);
+    if (errors) errors->Release();
+    SC_EXPECT(SUCCEEDED(hr) && bytecode != nullptr && bytecode->GetBufferSize() > 0);
+    bytecode->Release();
+
+    return true;
+}
+
 bool TestLoaderInspectAndXvdMount() {
     // 1. PE64 import auditor on scarlett_tests.exe itself
     wchar_t selfBuf[MAX_PATH]{};
@@ -2928,6 +2972,7 @@ int main() {
     RunTest("DStorageDeviceXBridgeAndMipChain",  TestDStorageDeviceXBridgeAndMipChain);
     RunTest("RetailBringUpShims",                TestRetailBringUpShims);
     RunTest("LoaderInspectAndXvdMount",          TestLoaderInspectAndXvdMount);
+    RunTest("Rdna2ImageSampleShader",            TestRdna2ImageSampleShader);
 
     XGameRuntimeUninitialize();
 

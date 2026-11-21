@@ -1,7 +1,7 @@
 # Scarlett Layer â€” AI Context Snapshot
 
-**Commit:** `ead135e` (#32) | **Generated:** 2026-11-21 00:15 UTC  
-**Totals:** 60 files (16,013 LOC) | 12 shims | 26 CTest checks
+**Commit:** `90804f6` (#34) | **Generated:** 2026-11-21 00:19 UTC  
+**Totals:** 60 files (16,143 LOC) | 12 shims | 27 CTest checks
 
 ---
 
@@ -80,7 +80,7 @@
  1123  src/shims/d3d12_xs/d3d12_xs.cpp
     4  src/shims/d3d12_xs/d3d12_xs.def
   166  src/shims/d3d12_xs/d3d12_xs.hpp
- 1085  src/shims/d3d12_xs/rdna2_isa.hpp
+ 1170  src/shims/d3d12_xs/rdna2_isa.hpp
   201  src/shims/d3d12_xs/shader_inspector.hpp
   364  src/shims/d3d12_xs/shader_translator.hpp
  1269  src/shims/dstorage_xs/dstorage_xs.cpp
@@ -120,7 +120,7 @@
  1651  src/tests/dummy_title/main.cpp
    59  src/tests/engine_plugin/engine_plugin.cpp
     3  src/tests/engine_plugin/engine_plugin.def
- 2936  src/tests/scarlett_tests/main.cpp
+ 2981  src/tests/scarlett_tests/main.cpp
   242  tools/audit_imports.py
   505  tools/build_wiki.py
   108  tools/test_brief.py
@@ -141,7 +141,7 @@
 - `HRESULT WINAPI ApuFree(void* virtualAddress)`
 
 ## `d3d12_xs.dll`
-**Files:** `src/shims/d3d12_xs/d3d12_xs.cpp` (1123 L), `src/shims/d3d12_xs/d3d12_xs.def` (4 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (166 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1085 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_translator.hpp` (364 L)
+**Files:** `src/shims/d3d12_xs/d3d12_xs.cpp` (1123 L), `src/shims/d3d12_xs/d3d12_xs.def` (4 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (166 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1170 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_translator.hpp` (364 L)
 
 **DLL Exports (`.def`):** `D3D12XboxCreateDevice`, `D3D12SerializeRootSignature = ScarlettSerializeRootSignature`
 
@@ -341,9 +341,10 @@
 - `MubufOp`: kMubufStoreDword = 0x1Cu
 - `SmemOp`: kSmemLoadDword = 0x00u, kSmemLoadDwordX2 = 0x01u, kSmemLoadDwordX4 = 0x02u
 - `VintrpOp`: kVintrpP1F32 = 0x00u, kVintrpP2F32 = 0x01u, kVintrpMovF32 = 0x02u
-- `InstFormat`: Sopp, Vop1, Vop2, Vop3, Exp, Mubuf, Smem, Vintrp
+- `MimgOp`: kMimgImageSample = 0x20u
+- `InstFormat`: Sopp, Vop1, Vop2, Vop3, Exp, Mubuf, Smem, Vintrp, Mimg
 
-## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 26 total)
+## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 27 total)
 ```cpp
     RunTest("VfsPathTranslation",         TestVfsPathTranslation);
     RunTest("RuntimeAndXUser",            TestRuntimeAndXUser);
@@ -371,9 +372,12 @@
     RunTest("DStorageDeviceXBridgeAndMipChain",  TestDStorageDeviceXBridgeAndMipChain);
     RunTest("RetailBringUpShims",                TestRetailBringUpShims);
     RunTest("LoaderInspectAndXvdMount",          TestLoaderInspectAndXvdMount);
+    RunTest("Rdna2ImageSampleShader",            TestRdna2ImageSampleShader);
 ```
 
 ## 6. Recent Git History
+- `90804f6 Merge Sprint 27: Loader PE inspector & XVD container`
+- `1e3654f Sprint 27: Loader --inspect PE auditor + unencrypted XVD container + CTest #26`
 - `ead135e Merge Sprint 26: Retail bring-up shims`
 - `5d4f624 Sprint 26: Retail bring-up shims (GameInput @1, AcpHal, libHttpClient.GDK, XCurl) + CTest #25`
 - `e998915 tools: add VS BuildTools ctest fallback to verify.bat`
@@ -382,5 +386,3 @@
 - `2c95bab Sprint 23: DirectStorage direct-to-VRAM GPU buffer streaming + CTest #22`
 - `9ab0d99 Tools: add directory-safe build.bat wrapper for Hermes Desktop`
 - `c4b8cc0 Sprint 22: xg_xs RDNA2 64KB_S swizzling and BC1/BC3/BC7 block compression`
-- `f8fcebf Tools: add test_brief.py and --slim mode for AI_CONTEXT_SNAPSHOT.md`
-- `116f183 Tools: add zero-dependency wiki generator (build_wiki.py), INVARIANTS.md, and AI context snapshot`
