@@ -160,3 +160,8 @@
 - Added `GetShaderCachePath(stage, payloadFnv1a)` and disk cache read/write fast paths to `Rdna2IsaTranslator::Translate` in `src/shims/d3d12_xs/shader_translator.hpp`.
 - Warm hits bypass ISA decoding, HLSL lifting, and `D3DCompile`, returning cached DXBC directly with `SCXS(RDNA2-ISA/DISK-CACHE)->`.
 - Added CTest #36 (`ShaderDiskCacheE2E`) in `src/tests/scarlett_tests/main.cpp` verifying cold miss -> disk write -> warm cache hit with exact byte-for-byte DXBC parity (`36 passed, 0 failed`).
+
+## Sprint 38: ID3D12GraphicsCommandListX Wrapper Parity & GPU Execution E2E
+- Added `IID_ID3D12GraphicsCommandListX` and `ID3D12GraphicsCommandListX` interface in `src/shims/d3d12_xs/d3d12_xs.hpp`.
+- Implemented `ScarlettGraphicsCommandListX` in `src/shims/d3d12_xs/d3d12_xs.cpp` and wired `ScarlettDeviceX::CreateCommandList` to return it when `IID_ID3D12GraphicsCommandListX` is requested.
+- Added CTest #37 (`D3D12XsCommandListWrapperE2E`) in `src/tests/scarlett_tests/main.cpp`, recording `BeginEvent`, `CopyBufferRegion` (4 KB), `SetMarker`, `InsertWaitOnPresent`, and `EndEvent`, executing via `ID3D12CommandQueueX`, and verifying exact 4096-byte GPU readback (`37 passed, 0 failed`).

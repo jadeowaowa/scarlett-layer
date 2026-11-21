@@ -1,7 +1,7 @@
 # Scarlett Layer â€” AI Context Snapshot
 
-**Commit:** `110b00e` (#54) | **Generated:** 2026-11-21 01:18 UTC  
-**Totals:** 61 files (17,500 LOC) | 12 shims | 36 CTest checks
+**Commit:** `94dddef` (#56) | **Generated:** 2026-11-21 02:25 UTC  
+**Totals:** 61 files (17,703 LOC) | 12 shims | 37 CTest checks
 
 ---
 
@@ -78,9 +78,9 @@
   105  src/shims/acphal/acphal.cpp
     7  src/shims/acphal/acphal.def
    33  src/shims/acphal/acphal.hpp
- 1151  src/shims/d3d12_xs/d3d12_xs.cpp
+ 1240  src/shims/d3d12_xs/d3d12_xs.cpp
     4  src/shims/d3d12_xs/d3d12_xs.def
-  166  src/shims/d3d12_xs/d3d12_xs.hpp
+  198  src/shims/d3d12_xs/d3d12_xs.hpp
  1191  src/shims/d3d12_xs/rdna2_isa.hpp
   201  src/shims/d3d12_xs/shader_inspector.hpp
   401  src/shims/d3d12_xs/shader_translator.hpp
@@ -121,7 +121,7 @@
  1651  src/tests/dummy_title/main.cpp
    59  src/tests/engine_plugin/engine_plugin.cpp
     3  src/tests/engine_plugin/engine_plugin.def
- 3936  src/tests/scarlett_tests/main.cpp
+ 4018  src/tests/scarlett_tests/main.cpp
   242  tools/audit_imports.py
   505  tools/build_wiki.py
   108  tools/test_brief.py
@@ -142,7 +142,7 @@
 - `HRESULT WINAPI ApuFree(void* virtualAddress)`
 
 ## `d3d12_xs.dll`
-**Files:** `src/shims/d3d12_xs/d3d12_xs.cpp` (1151 L), `src/shims/d3d12_xs/d3d12_xs.def` (4 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (166 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1191 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_translator.hpp` (401 L)
+**Files:** `src/shims/d3d12_xs/d3d12_xs.cpp` (1240 L), `src/shims/d3d12_xs/d3d12_xs.def` (4 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (198 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1191 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_translator.hpp` (401 L)
 
 **DLL Exports (`.def`):** `D3D12XboxCreateDevice`, `D3D12SerializeRootSignature = ScarlettSerializeRootSignature`
 
@@ -154,6 +154,24 @@
 - `[04]` `HRESULT Signal(ID3D12Fence* pFence, UINT64 Value)`
 - `[05]` `HRESULT Wait(ID3D12Fence* pFence, UINT64 Value)`
 - `[06]` `HRESULT PresentX( UINT PlaneCount, const D3D12XBOX_PRESENT_PLANE_PARAMETERS* pPlaneParameters, const D3D12XBOX_PRESENT_PARAMETERS* pPresentParameters)`
+
+**COM Interface `ID3D12GraphicsCommandListX : IUnknown`:**
+- `[03]` `HRESULT Close()`
+- `[04]` `HRESULT Reset( ID3D12CommandAllocator* pAllocator, ID3D12PipelineState* pInitialState)`
+- `[05]` `void SetPipelineState(ID3D12PipelineState* pPipelineState)`
+- `[06]` `void SetGraphicsRootSignature(ID3D12RootSignature* pRootSignature)`
+- `[07]` `void SetComputeRootSignature(ID3D12RootSignature* pRootSignature)`
+- `[08]` `void SetComputeRootShaderResourceView( UINT RootParameterIndex, D3D12_GPU_VIRTUAL_ADDRESS BufferLocation)`
+- `[09]` `void SetComputeRootUnorderedAccessView( UINT RootParameterIndex, D3D12_GPU_VIRTUAL_ADDRESS BufferLocation)`
+- `[10]` `void ResourceBarrier( UINT NumBarriers, const D3D12_RESOURCE_BARRIER* pBarriers)`
+- `[11]` `void CopyBufferRegion( ID3D12Resource* pDstBuffer, UINT64 DstOffset, ID3D12Resource* pSrcBuffer, UINT64 SrcOffset, UINT64 NumBytes)`
+- `[12]` `void DrawInstanced( UINT VertexCountPerInstance, UINT InstanceCount, UINT StartVertexLocation, UINT StartInstanceLocation)`
+- `[13]` `void Dispatch( UINT ThreadGroupCountX, UINT ThreadGroupCountY, UINT ThreadGroupCountZ)`
+- `[14]` `void BeginEvent(UINT Metadata, const void* pData, UINT Size)`
+- `[15]` `void EndEvent()`
+- `[16]` `void SetMarker(UINT Metadata, const void* pData, UINT Size)`
+- `[17]` `void InsertWaitOnPresent(UINT64 PresentToken)`
+- `[18]` `ID3D12GraphicsCommandList* GetNativeCommandList()`
 
 **COM Interface `ID3D12DeviceX : IUnknown`:**
 - `[03]` `HRESULT CreateCommandQueueX( const D3D12_COMMAND_QUEUE_DESC* pDesc, ID3D12CommandQueueX** ppCommandQueue)`
@@ -346,7 +364,7 @@
 - `MimgOp`: kMimgImageSample = 0x20u
 - `InstFormat`: Sopp, Vop1, Vop2, Vop3, Exp, Mubuf, Smem, Vintrp, Mimg
 
-## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 36 total)
+## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 37 total)
 ```cpp
     RunTest("VfsPathTranslation",         TestVfsPathTranslation);
     RunTest("RuntimeAndXUser",            TestRuntimeAndXUser);
@@ -384,9 +402,12 @@
     RunTest("DStorageGpuBufferAndFenceE2E",      TestDStorageGpuBufferAndFenceE2E);
     RunTest("Rdna2ComputeDispatchE2E",           TestRdna2ComputeDispatchE2E);
     RunTest("ShaderDiskCacheE2E",                TestShaderDiskCacheE2E);
+    RunTest("D3D12XsCommandListWrapperE2E",      TestD3D12XsCommandListWrapperE2E);
 ```
 
 ## 6. Recent Git History
+- `94dddef Merge Sprint 37: Disk-backed RDNA2-to-DXBC shader cache`
+- `8713ddc Sprint 37: Disk-backed RDNA2-to-DXBC shader cache + CTest #36`
 - `110b00e docs: overhaul README.md with architecture, subsystem matrix, and delivery timeline`
 - `b35f5a9 Merge Sprint 36: RDNA2 compute shader lifter & GPU Dispatch E2E`
 - `81fd6b2 Sprint 36: RDNA2 MUBUF load/store compute lifter + GPU Dispatch E2E (CTest #35)`
@@ -395,5 +416,3 @@
 - `9896241 Merge Sprint 34: dynamic GetModuleHandle* redirects`
 - `ee78b09 Sprint 34: GetModuleHandle* IAT hooks in scarlett_hook.dll + CTest #33`
 - `8338e20 Merge Sprint 33: live GameInput polling & keyboard fallback`
-- `ccf15f0 Sprint 33: live GameInput keyboard-to-gamepad fallback + synthetic override + CTest #32`
-- `9d2e1cf Merge Sprint 32: RDNA2 IMAGE_SAMPLE E2E GPU draw`

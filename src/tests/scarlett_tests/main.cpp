@@ -2364,6 +2364,87 @@ static size_t TestXCurlWriteCb(char* ptr, size_t size, size_t nmemb, void* userd
     return size * nmemb;
 }
 
+bool TestD3D12XsCommandListWrapperE2E() {
+    using Microsoft::WRL::ComPtr;
+
+    D3D12XBOX_CREATE_DEVICE_PARAMETERS params{};
+    params.Version = 1;
+    ComPtr<ID3D12DeviceX> devX;
+    SC_EXPECT(SUCCEEDED(D3D12XboxCreateDevice(
+        nullptr, &params, IID_ID3D12DeviceX, reinterpret_cast<void**>(devX.GetAddressOf()))));
+
+    D3D12_COMMAND_QUEUE_DESC qd{};
+    qd.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+    ComPtr<ID3D12CommandQueueX> queueX;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommandQueueX(&qd, queueX.GetAddressOf())));
+
+    ComPtr<ID3D12CommandAllocator> alloc;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&alloc))));
+
+    ComPtr<ID3D12GraphicsCommandListX> clX;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommandList(
+        0, D3D12_COMMAND_LIST_TYPE_DIRECT, alloc.Get(), nullptr,
+        IID_ID3D12GraphicsCommandListX, reinterpret_cast<void**>(clX.GetAddressOf()))));
+    SC_EXPECT(clX->GetNativeCommandList() != nullptr);
+
+    constexpr size_t kBytes = 4096;
+    D3D12_HEAP_PROPERTIES uploadHeap{ D3D12_HEAP_TYPE_UPLOAD };
+    D3D12_HEAP_PROPERTIES readbackHeap{ D3D12_HEAP_TYPE_READBACK };
+    D3D12_RESOURCE_DESC desc{};
+    desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    desc.Width = kBytes;
+    desc.Height = 1;
+    desc.DepthOrArraySize = 1;
+    desc.MipLevels = 1;
+    desc.SampleDesc.Count = 1;
+    desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+    ComPtr<ID3D12Resource> srcBuf, dstBuf;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommittedResource(
+        &uploadHeap, D3D12_HEAP_FLAG_NONE, &desc,
+        D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&srcBuf))));
+    SC_EXPECT(SUCCEEDED(devX->CreateCommittedResource(
+        &readbackHeap, D3D12_HEAP_FLAG_NONE, &desc,
+        D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&dstBuf))));
+
+    std::vector<uint8_t> expected(kBytes);
+    for (size_t i = 0; i < kBytes; ++i) expected[i] = static_cast<uint8_t>((i * 53u + 19u) & 0xFFu);
+    uint8_t* pSrc = nullptr;
+    SC_EXPECT(SUCCEEDED(srcBuf->Map(0, nullptr, reinterpret_cast<void**>(&pSrc))));
+    std::memcpy(pSrc, expected.data(), kBytes);
+    srcBuf->Unmap(0, nullptr);
+
+    const char* marker = "Sprint38CmdListX";
+    clX->BeginEvent(0, marker, static_cast<UINT>(std::strlen(marker) + 1));
+    clX->CopyBufferRegion(dstBuf.Get(), 0, srcBuf.Get(), 0, kBytes);
+    clX->SetMarker(0, marker, static_cast<UINT>(std::strlen(marker) + 1));
+    clX->InsertWaitOnPresent(1);
+    clX->EndEvent();
+    SC_EXPECT(SUCCEEDED(clX->Close()));
+
+    ComPtr<ID3D12Device> nativeDev;
+    SC_EXPECT(SUCCEEDED(devX->QueryInterface(IID_ScarlettNativeD3D12Device,
+                                             reinterpret_cast<void**>(nativeDev.GetAddressOf()))));
+    ComPtr<ID3D12Fence> fence;
+    SC_EXPECT(SUCCEEDED(nativeDev->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence))));
+    HANDLE ev = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    SC_EXPECT(ev != nullptr);
+
+    ID3D12CommandList* lists[] = { clX->GetNativeCommandList() };
+    queueX->ExecuteCommandLists(1, lists);
+    SC_EXPECT(SUCCEEDED(queueX->Signal(fence.Get(), 1)));
+    SC_EXPECT(SUCCEEDED(fence->SetEventOnCompletion(1, ev)));
+    SC_EXPECT(WaitForSingleObject(ev, 5000) == WAIT_OBJECT_0);
+    CloseHandle(ev);
+
+    uint8_t* pDst = nullptr;
+    SC_EXPECT(SUCCEEDED(dstBuf->Map(0, nullptr, reinterpret_cast<void**>(&pDst))));
+    const bool match = (std::memcmp(pDst, expected.data(), kBytes) == 0);
+    dstBuf->Unmap(0, nullptr);
+    SC_EXPECT(match);
+    return true;
+}
+
 bool TestShaderDiskCacheE2E() {
     using namespace sc::d3d12;
     using namespace sc::d3d12::rdna2;
@@ -3928,6 +4009,7 @@ int main() {
     RunTest("DStorageGpuBufferAndFenceE2E",      TestDStorageGpuBufferAndFenceE2E);
     RunTest("Rdna2ComputeDispatchE2E",           TestRdna2ComputeDispatchE2E);
     RunTest("ShaderDiskCacheE2E",                TestShaderDiskCacheE2E);
+    RunTest("D3D12XsCommandListWrapperE2E",      TestD3D12XsCommandListWrapperE2E);
 
     XGameRuntimeUninitialize();
 

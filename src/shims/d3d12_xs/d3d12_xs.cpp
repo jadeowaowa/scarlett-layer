@@ -486,6 +486,83 @@ private:
     bool m_windowClosed{false};
 };
 
+class ScarlettGraphicsCommandListX final : public ID3D12GraphicsCommandListX {
+public:
+    explicit ScarlettGraphicsCommandListX(ID3D12GraphicsCommandList* nativeCl)
+        : m_cmdList(nativeCl) {}
+
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppvObject) override {
+        if (!ppvObject) return E_POINTER;
+        *ppvObject = nullptr;
+        if (IsEqualIID(riid, IID_IUnknown) || IsEqualIID(riid, IID_ID3D12GraphicsCommandListX)) {
+            *ppvObject = static_cast<ID3D12GraphicsCommandListX*>(this);
+            AddRef();
+            return S_OK;
+        }
+        return m_cmdList ? m_cmdList->QueryInterface(riid, ppvObject) : E_NOINTERFACE;
+    }
+
+    ULONG STDMETHODCALLTYPE AddRef() override { return ++m_refs; }
+    ULONG STDMETHODCALLTYPE Release() override {
+        ULONG r = --m_refs;
+        if (r == 0) delete this;
+        return r;
+    }
+
+    HRESULT STDMETHODCALLTYPE Close() override { return m_cmdList->Close(); }
+    HRESULT STDMETHODCALLTYPE Reset(ID3D12CommandAllocator* pAllocator, ID3D12PipelineState* pInitialState) override {
+        return m_cmdList->Reset(pAllocator, pInitialState);
+    }
+    void STDMETHODCALLTYPE SetPipelineState(ID3D12PipelineState* pPipelineState) override {
+        m_cmdList->SetPipelineState(pPipelineState);
+    }
+    void STDMETHODCALLTYPE SetGraphicsRootSignature(ID3D12RootSignature* pRootSignature) override {
+        m_cmdList->SetGraphicsRootSignature(pRootSignature);
+    }
+    void STDMETHODCALLTYPE SetComputeRootSignature(ID3D12RootSignature* pRootSignature) override {
+        m_cmdList->SetComputeRootSignature(pRootSignature);
+    }
+    void STDMETHODCALLTYPE SetComputeRootShaderResourceView(UINT idx, D3D12_GPU_VIRTUAL_ADDRESS addr) override {
+        m_cmdList->SetComputeRootShaderResourceView(idx, addr);
+    }
+    void STDMETHODCALLTYPE SetComputeRootUnorderedAccessView(UINT idx, D3D12_GPU_VIRTUAL_ADDRESS addr) override {
+        m_cmdList->SetComputeRootUnorderedAccessView(idx, addr);
+    }
+    void STDMETHODCALLTYPE ResourceBarrier(UINT num, const D3D12_RESOURCE_BARRIER* pBarriers) override {
+        m_cmdList->ResourceBarrier(num, pBarriers);
+    }
+    void STDMETHODCALLTYPE CopyBufferRegion(
+        ID3D12Resource* pDstBuffer, UINT64 DstOffset,
+        ID3D12Resource* pSrcBuffer, UINT64 SrcOffset, UINT64 NumBytes) override {
+        m_cmdList->CopyBufferRegion(pDstBuffer, DstOffset, pSrcBuffer, SrcOffset, NumBytes);
+    }
+    void STDMETHODCALLTYPE DrawInstanced(UINT vtx, UINT inst, UINT startVtx, UINT startInst) override {
+        m_cmdList->DrawInstanced(vtx, inst, startVtx, startInst);
+    }
+    void STDMETHODCALLTYPE Dispatch(UINT x, UINT y, UINT z) override {
+        m_cmdList->Dispatch(x, y, z);
+    }
+    void STDMETHODCALLTYPE BeginEvent(UINT Metadata, const void* pData, UINT Size) override {
+        m_cmdList->BeginEvent(Metadata, pData, Size);
+    }
+    void STDMETHODCALLTYPE EndEvent() override {
+        m_cmdList->EndEvent();
+    }
+    void STDMETHODCALLTYPE SetMarker(UINT Metadata, const void* pData, UINT Size) override {
+        m_cmdList->SetMarker(Metadata, pData, Size);
+    }
+    void STDMETHODCALLTYPE InsertWaitOnPresent(UINT64 /*PresentToken*/) override {
+        // Scarlett flip-queue wait; host PresentX synchronizes via DXGI swapchain
+    }
+    ID3D12GraphicsCommandList* STDMETHODCALLTYPE GetNativeCommandList() override {
+        return m_cmdList.Get();
+    }
+
+private:
+    std::atomic<ULONG> m_refs{1};
+    Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_cmdList;
+};
+
 class ScarlettDeviceX final : public ID3D12DeviceX {
 public:
     ScarlettDeviceX(
@@ -565,6 +642,18 @@ public:
         UINT nodeMask, D3D12_COMMAND_LIST_TYPE type,
         ID3D12CommandAllocator* pCommandAllocator, ID3D12PipelineState* pInitialState,
         REFIID riid, void** ppCommandList) override {
+        if (IsEqualIID(riid, IID_ID3D12GraphicsCommandListX)) {
+            if (!ppCommandList) return E_POINTER;
+            *ppCommandList = nullptr;
+            Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> nativeCl;
+            HRESULT hr = m_device->CreateCommandList(
+                nodeMask, type, pCommandAllocator, pInitialState, IID_PPV_ARGS(&nativeCl));
+            if (FAILED(hr)) return hr;
+            auto* wrapped = new ScarlettGraphicsCommandListX(nativeCl.Get());
+            hr = wrapped->QueryInterface(riid, ppCommandList);
+            wrapped->Release();
+            return hr;
+        }
         return m_device->CreateCommandList(nodeMask, type, pCommandAllocator, pInitialState, riid, ppCommandList);
     }
 
