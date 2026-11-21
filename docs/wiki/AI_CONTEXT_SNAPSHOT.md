@@ -1,7 +1,7 @@
 # Scarlett Layer â€” AI Context Snapshot
 
-**Commit:** `9896241` (#49) | **Generated:** 2026-11-21 01:03 UTC  
-**Totals:** 61 files (17,240 LOC) | 12 shims | 34 CTest checks
+**Commit:** `2dcbd9d` (#51) | **Generated:** 2026-11-21 01:08 UTC  
+**Totals:** 61 files (17,418 LOC) | 12 shims | 35 CTest checks
 
 ---
 
@@ -81,7 +81,7 @@
  1151  src/shims/d3d12_xs/d3d12_xs.cpp
     4  src/shims/d3d12_xs/d3d12_xs.def
   166  src/shims/d3d12_xs/d3d12_xs.hpp
- 1170  src/shims/d3d12_xs/rdna2_isa.hpp
+ 1191  src/shims/d3d12_xs/rdna2_isa.hpp
   201  src/shims/d3d12_xs/shader_inspector.hpp
   364  src/shims/d3d12_xs/shader_translator.hpp
  1269  src/shims/dstorage_xs/dstorage_xs.cpp
@@ -121,7 +121,7 @@
  1651  src/tests/dummy_title/main.cpp
    59  src/tests/engine_plugin/engine_plugin.cpp
     3  src/tests/engine_plugin/engine_plugin.def
- 3734  src/tests/scarlett_tests/main.cpp
+ 3891  src/tests/scarlett_tests/main.cpp
   242  tools/audit_imports.py
   505  tools/build_wiki.py
   108  tools/test_brief.py
@@ -142,7 +142,7 @@
 - `HRESULT WINAPI ApuFree(void* virtualAddress)`
 
 ## `d3d12_xs.dll`
-**Files:** `src/shims/d3d12_xs/d3d12_xs.cpp` (1151 L), `src/shims/d3d12_xs/d3d12_xs.def` (4 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (166 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1170 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_translator.hpp` (364 L)
+**Files:** `src/shims/d3d12_xs/d3d12_xs.cpp` (1151 L), `src/shims/d3d12_xs/d3d12_xs.def` (4 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (166 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1191 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_translator.hpp` (364 L)
 
 **DLL Exports (`.def`):** `D3D12XboxCreateDevice`, `D3D12SerializeRootSignature = ScarlettSerializeRootSignature`
 
@@ -340,13 +340,13 @@
 - `Vop1Op`: kVop1Nop = 0x00u, kVop1MovB32 = 0x01u, kVop1RcpF32 = 0x2Au, kVop1SqrtF32 = 0x33u
 - `Vop2Op`: kVop2AddF32 = 0x03u, kVop2SubF32 = 0x04u, kVop2SubRevF32 = 0x05u, kVop2MulF32 = 0x08u, kVop2MinF32 = 0x0Fu, kVop2MaxF32 = 0x10u, kVop2AddNcU32 = 0x25u, kVop2FmacF32 = 0x2Bu
 - `Vop3Op`: kVop3MadF32 = 0x141u, kVop3FmaF32 = 0x14Bu, kVop3Min3F32 = 0x150u, kVop3Max3F32 = 0x151u, kVop3Med3F32 = 0x152u, kVop3MulLoU32 = 0x169u
-- `MubufOp`: kMubufStoreDword = 0x1Cu
+- `MubufOp`: kMubufLoadDword = 0x14u, kMubufStoreDword = 0x1Cu
 - `SmemOp`: kSmemLoadDword = 0x00u, kSmemLoadDwordX2 = 0x01u, kSmemLoadDwordX4 = 0x02u
 - `VintrpOp`: kVintrpP1F32 = 0x00u, kVintrpP2F32 = 0x01u, kVintrpMovF32 = 0x02u
 - `MimgOp`: kMimgImageSample = 0x20u
 - `InstFormat`: Sopp, Vop1, Vop2, Vop3, Exp, Mubuf, Smem, Vintrp, Mimg
 
-## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 34 total)
+## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 35 total)
 ```cpp
     RunTest("VfsPathTranslation",         TestVfsPathTranslation);
     RunTest("RuntimeAndXUser",            TestRuntimeAndXUser);
@@ -382,9 +382,12 @@
     RunTest("GameInputLivePolling",              TestGameInputLivePolling);
     RunTest("DynamicLoaderHooks",                TestDynamicLoaderHooks);
     RunTest("DStorageGpuBufferAndFenceE2E",      TestDStorageGpuBufferAndFenceE2E);
+    RunTest("Rdna2ComputeDispatchE2E",           TestRdna2ComputeDispatchE2E);
 ```
 
 ## 6. Recent Git History
+- `2dcbd9d Merge Sprint 35: DStorage GPU buffer streaming & fence E2E`
+- `53a16f5 Sprint 35: DStorage GPU buffer streaming + fence E2E test (CTest #34)`
 - `9896241 Merge Sprint 34: dynamic GetModuleHandle* redirects`
 - `ee78b09 Sprint 34: GetModuleHandle* IAT hooks in scarlett_hook.dll + CTest #33`
 - `8338e20 Merge Sprint 33: live GameInput polling & keyboard fallback`
@@ -393,5 +396,3 @@
 - `20de7c3 Sprint 32: RDNA2 IMAGE_SAMPLE E2E GPU draw test + AppendExp fix + CTest #31`
 - `8fb22f4 Merge Sprint 31: native MicrosoftGame.Config parser & --boot`
 - `99af35b Sprint 31: native MicrosoftGame.Config parser + loader --boot + CTest #30`
-- `1419e6a Docs: add GitHub README with architecture overview and Sprint 30 progress report`
-- `31b7b29 Merge Sprint 30: ScarlettX ABI conformance suite`

@@ -73,6 +73,7 @@ enum Vop3Op : uint16_t {
 };
 
 enum MubufOp : uint8_t {
+    kMubufLoadDword  = 0x14u,
     kMubufStoreDword = 0x1Cu
 };
 
@@ -243,6 +244,18 @@ inline void AppendExpMrt0(
     uint8_t vsrc0, uint8_t vsrc1, uint8_t vsrc2, uint8_t vsrc3,
     uint8_t enMask = 0xFu, bool done = true, bool vm = true) {
     AppendExp(words, kExpTargetMrt0, vsrc0, vsrc1, vsrc2, vsrc3, enMask, done, vm);
+}
+
+inline void AppendMubufLoadDword(
+    std::vector<uint32_t>& words, uint8_t vdata, uint8_t vaddr, uint8_t srsrc = 0) {
+    const uint32_t w0 = (0x38u << 26)
+                      | (static_cast<uint32_t>(kMubufLoadDword) << 18)
+                      | (1u << 12); // offen=1
+    const uint32_t w1 = static_cast<uint32_t>(vaddr)
+                      | (static_cast<uint32_t>(vdata) << 8)
+                      | (static_cast<uint32_t>(srsrc & 0x1Fu) << 16);
+    words.push_back(w0);
+    words.push_back(w1);
 }
 
 inline void AppendMubufStoreDword(
@@ -464,7 +477,7 @@ inline bool DecodeProgram(
             inst.mubufSrsrc  = static_cast<uint8_t>((w1 >> 16) & 0x1Fu);
             inst.mubufVdata  = static_cast<uint8_t>((w1 >> 8) & 0xFFu);
             inst.mubufVaddr  = static_cast<uint8_t>(w1 & 0xFFu);
-            if (inst.opcode != kMubufStoreDword) {
+            if (inst.opcode != kMubufStoreDword && inst.opcode != kMubufLoadDword) {
                 char buf[64];
                 std::snprintf(buf, sizeof(buf), "unsupported MUBUF opcode 0x%02X", inst.opcode);
                 outError = buf;
@@ -1122,6 +1135,7 @@ inline bool LiftComputeShaderToHlsl(
     }
 
     std::string body;
+    bool hasBufferLoad = false;
     bool hasBufferStore = false;
 
     for (const auto& i : prog.insts) {
@@ -1143,6 +1157,9 @@ inline bool LiftComputeShaderToHlsl(
             if (!FormatOperandUintHlsl(i.src0, false, 0, s0, outError) ||
                 !FormatOperandUintHlsl(i.src1, false, 0, s1, outError)) return false;
             body += "    u" + std::to_string(i.vdst) + " = (" + s0 + " * " + s1 + ");\n";
+        } else if (i.format == InstFormat::Mubuf && i.opcode == kMubufLoadDword) {
+            hasBufferLoad = true;
+            body += "    u" + std::to_string(i.mubufVdata) + " = gIn[u" + std::to_string(i.mubufVaddr) + "];\n";
         } else if (i.format == InstFormat::Mubuf && i.opcode == kMubufStoreDword) {
             hasBufferStore = true;
             body += "    gOut[u" + std::to_string(i.mubufVaddr) + "] = u" + std::to_string(i.mubufVdata) + ";\n";
@@ -1154,7 +1171,11 @@ inline bool LiftComputeShaderToHlsl(
         return false;
     }
 
-    outHlsl =
+    outHlsl.clear();
+    if (hasBufferLoad) {
+        outHlsl += "StructuredBuffer<uint> gIn : register(t0);\n";
+    }
+    outHlsl +=
         "RWStructuredBuffer<uint> gOut : register(u0);\n"
         "[numthreads(64, 1, 1)]\n"
         "void CSMain(uint3 dtid : SV_DispatchThreadID) {\n";
