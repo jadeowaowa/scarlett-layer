@@ -1,5 +1,7 @@
 #include "common/stub.hpp"
 #include "pe_patcher.hpp"
+#include "pe_inspector.hpp"
+#include "common/xvd_container.hpp"
 
 #include <cstdio>
 #include <filesystem>
@@ -51,6 +53,42 @@ int wmain(int argc, wchar_t* argv[]) {
     const std::filesystem::path loaderDir = GetExecutableDir();
     const std::filesystem::path shimDir = loaderDir / L"shims";
     const std::filesystem::path hookDll = loaderDir / L"scarlett_hook.dll";
+
+    if (argc >= 3 && std::wstring_view(argv[1]) == L"--inspect") {
+        const std::filesystem::path pePath = std::filesystem::absolute(argv[2]);
+        const auto audit = sc::loader::InspectPeImports(pePath, shimDir);
+        if (!audit.validPe64) {
+            std::fprintf(stderr, "[inspect] ERROR: %s\n", audit.error.c_str());
+            return 1;
+        }
+        std::printf("[inspect] PE64: %s (%zu imported symbols)\n",
+                    pePath.string().c_str(), audit.totalImportedSymbols);
+        std::printf("  Shimmed (%zu):", audit.shimmedImports.size());
+        for (const auto& d : audit.shimmedImports) std::printf(" %s", d.c_str());
+        std::printf("\n  System  (%zu):", audit.systemImports.size());
+        for (const auto& d : audit.systemImports) std::printf(" %s", d.c_str());
+        std::printf("\n  Missing (%zu):", audit.missingImports.size());
+        for (const auto& d : audit.missingImports) std::printf(" %s", d.c_str());
+        std::printf("\n");
+        return 0;
+    }
+
+    if (argc >= 3 && std::wstring_view(argv[1]) == L"--inspect-xvd") {
+        const std::filesystem::path xvdPath = std::filesystem::absolute(argv[2]);
+        sc::vfs::XvdContainer xvd;
+        std::string err;
+        if (!xvd.Open(xvdPath, err)) {
+            std::fprintf(stderr, "[inspect-xvd] ERROR: %s\n", err.c_str());
+            return 1;
+        }
+        const auto& h = xvd.Header();
+        std::printf("[inspect-xvd] OK: %s | ver=%u | driveSize=%llu | userDataOff=0x%llX | userDataLen=%llu\n",
+                    xvdPath.string().c_str(), h.formatVersion,
+                    static_cast<unsigned long long>(h.driveSize),
+                    static_cast<unsigned long long>(h.userDataOffset),
+                    static_cast<unsigned long long>(h.userDataLength));
+        return 0;
+    }
 
     std::filesystem::path targetPath = (argc > 1)
         ? std::filesystem::absolute(argv[1])

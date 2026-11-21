@@ -10,6 +10,8 @@
 #include "shims/acphal/acphal.hpp"
 #include "shims/libhttpclient/libhttpclient.hpp"
 #include "shims/xcurl/xcurl.hpp"
+#include "common/xvd_container.hpp"
+#include "loader/pe_inspector.hpp"
 #include "shims/pixevt/pixevt.hpp"
 #include "shims/xmem/xmem.hpp"
 #include "shims/kernelx/kernelx.hpp"
@@ -2361,6 +2363,71 @@ static size_t TestXCurlWriteCb(char* ptr, size_t size, size_t nmemb, void* userd
     return size * nmemb;
 }
 
+bool TestLoaderInspectAndXvdMount() {
+    // 1. PE64 import auditor on scarlett_tests.exe itself
+    wchar_t selfBuf[MAX_PATH]{};
+    GetModuleFileNameW(nullptr, selfBuf, MAX_PATH);
+    std::filesystem::path selfPath(selfBuf);
+
+    wchar_t shimDirBuf[MAX_PATH]{};
+    DWORD shimLen = GetEnvironmentVariableW(L"SCARLETT_SHIM_DIR", shimDirBuf, MAX_PATH);
+    SC_EXPECT(shimLen > 0);
+    std::filesystem::path shimDir(shimDirBuf);
+
+    const auto audit = sc::loader::InspectPeImports(selfPath, shimDir);
+    SC_EXPECT(audit.validPe64);
+    SC_EXPECT(audit.totalImportedSymbols > 0);
+    SC_EXPECT(audit.missingImports.empty());
+
+    auto hasShimmed = [&](const char* target) {
+        std::string t = sc::loader::detail::ToLowerAscii(target);
+        for (const auto& s : audit.shimmedImports) {
+            if (sc::loader::detail::ToLowerAscii(s) == t) return true;
+        }
+        return false;
+    };
+    SC_EXPECT(hasShimmed("d3d12_xs.dll"));
+    SC_EXPECT(hasShimmed("xg_xs.dll"));
+    SC_EXPECT(hasShimmed("acphal.dll"));
+    SC_EXPECT(hasShimmed("libhttpclient.gdk.dll"));
+    SC_EXPECT(hasShimmed("xcurl.dll"));
+
+    // 2. Unencrypted XVD container mount + ReadUserData round-trip
+    const std::filesystem::path tmpDir = std::filesystem::temp_directory_path();
+    const std::filesystem::path validXvd = tmpDir / L"scarlett_test_valid.xvd";
+    const std::filesystem::path encXvd   = tmpDir / L"scarlett_test_enc.xvd";
+
+    const std::string payloadStr = "SCARLETT_XVD_VFS_PAYLOAD_OK";
+    std::vector<uint8_t> payload(payloadStr.begin(), payloadStr.end());
+    auto validImg = sc::vfs::XvdContainer::BuildSyntheticUnencryptedXvd(payload, 1u, 0u);
+    {
+        std::ofstream out(validXvd, std::ios::binary);
+        out.write(reinterpret_cast<const char*>(validImg.data()), static_cast<std::streamsize>(validImg.size()));
+    }
+
+    sc::vfs::XvdContainer xvd;
+    std::string err;
+    SC_EXPECT(xvd.Open(validXvd, err));
+    SC_EXPECT(xvd.Header().magic == "msft-xvd");
+    SC_EXPECT(xvd.Header().userDataLength == payload.size());
+    std::vector<uint8_t> readBack;
+    SC_EXPECT(xvd.ReadUserData(0, payload.size(), readBack, err));
+    SC_EXPECT(readBack == payload);
+
+    // 3. Encrypted XVD must be cleanly rejected
+    auto encImg = sc::vfs::XvdContainer::BuildSyntheticUnencryptedXvd(payload, 1u, sc::vfs::kXvdFlagEncrypted);
+    {
+        std::ofstream out(encXvd, std::ios::binary);
+        out.write(reinterpret_cast<const char*>(encImg.data()), static_cast<std::streamsize>(encImg.size()));
+    }
+    SC_EXPECT(!xvd.Open(encXvd, err));
+
+    std::error_code ec;
+    std::filesystem::remove(validXvd, ec);
+    std::filesystem::remove(encXvd, ec);
+    return true;
+}
+
 bool TestRetailBringUpShims() {
     // 1. GameInput.dll ordinal #1 export check
     HMODULE hGi = LoadLibraryW(L"gameinput.dll");
@@ -2860,6 +2927,7 @@ int main() {
     RunTest("DStorageGpuTextureStreaming",       TestDStorageGpuTextureStreaming);
     RunTest("DStorageDeviceXBridgeAndMipChain",  TestDStorageDeviceXBridgeAndMipChain);
     RunTest("RetailBringUpShims",                TestRetailBringUpShims);
+    RunTest("LoaderInspectAndXvdMount",          TestLoaderInspectAndXvdMount);
 
     XGameRuntimeUninitialize();
 
