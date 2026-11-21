@@ -127,3 +127,8 @@
 - Verified retail COM vtable slot conformance on `gameinput.dll` (`IGameInput` slots 3/4, `IGameInputReading` slots 3/4) matching ScarlettX's `test_gameinput.cpp`.
 - Verified `xgameruntime.dll` initialization, device-type reporting, and manual `XTaskQueue` dispatch lifecycle.
 - Audited all 4 ScarlettX synthetic game manifests (`hello_scarlett`, `iat_probe`, `rt_showcase`, `scarlett_arena`) when present (`29 passed, 0 failed`).
+
+## Sprint 31: Native MicrosoftGame.Config Parser & Package Boot
+- Added header-only `src/loader/game_config.hpp` parsing `<Identity>`, `<TitleId>`, `<ShellVisuals>`, and `<Executable>` from GDK `MicrosoftGame.Config` manifests.
+- Wired `loader.exe --inspect-package <dir>` and `loader.exe --boot <dir> [args...]` into `src/loader/main.cpp` to auto-resolve title executables and forward arguments into the injection pipeline.
+- Added CTest #30 (`GameConfigBootParser`) verifying synthetic manifest round-trips, error handling, and all 4 ScarlettX synthetic game manifests (`30 passed, 0 failed`).
