@@ -1,7 +1,7 @@
 # Scarlett Layer â€” AI Context Snapshot
 
-**Commit:** `2dcbd9d` (#51) | **Generated:** 2026-11-21 01:08 UTC  
-**Totals:** 61 files (17,418 LOC) | 12 shims | 35 CTest checks
+**Commit:** `110b00e` (#54) | **Generated:** 2026-11-21 01:18 UTC  
+**Totals:** 61 files (17,500 LOC) | 12 shims | 36 CTest checks
 
 ---
 
@@ -83,7 +83,7 @@
   166  src/shims/d3d12_xs/d3d12_xs.hpp
  1191  src/shims/d3d12_xs/rdna2_isa.hpp
   201  src/shims/d3d12_xs/shader_inspector.hpp
-  364  src/shims/d3d12_xs/shader_translator.hpp
+  401  src/shims/d3d12_xs/shader_translator.hpp
  1269  src/shims/dstorage_xs/dstorage_xs.cpp
     4  src/shims/dstorage_xs/dstorage_xs.def
   181  src/shims/dstorage_xs/dstorage_xs.hpp
@@ -121,7 +121,7 @@
  1651  src/tests/dummy_title/main.cpp
    59  src/tests/engine_plugin/engine_plugin.cpp
     3  src/tests/engine_plugin/engine_plugin.def
- 3891  src/tests/scarlett_tests/main.cpp
+ 3936  src/tests/scarlett_tests/main.cpp
   242  tools/audit_imports.py
   505  tools/build_wiki.py
   108  tools/test_brief.py
@@ -142,7 +142,7 @@
 - `HRESULT WINAPI ApuFree(void* virtualAddress)`
 
 ## `d3d12_xs.dll`
-**Files:** `src/shims/d3d12_xs/d3d12_xs.cpp` (1151 L), `src/shims/d3d12_xs/d3d12_xs.def` (4 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (166 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1191 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_translator.hpp` (364 L)
+**Files:** `src/shims/d3d12_xs/d3d12_xs.cpp` (1151 L), `src/shims/d3d12_xs/d3d12_xs.def` (4 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (166 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1191 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_translator.hpp` (401 L)
 
 **DLL Exports (`.def`):** `D3D12XboxCreateDevice`, `D3D12SerializeRootSignature = ScarlettSerializeRootSignature`
 
@@ -346,7 +346,7 @@
 - `MimgOp`: kMimgImageSample = 0x20u
 - `InstFormat`: Sopp, Vop1, Vop2, Vop3, Exp, Mubuf, Smem, Vintrp, Mimg
 
-## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 35 total)
+## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 36 total)
 ```cpp
     RunTest("VfsPathTranslation",         TestVfsPathTranslation);
     RunTest("RuntimeAndXUser",            TestRuntimeAndXUser);
@@ -383,9 +383,13 @@
     RunTest("DynamicLoaderHooks",                TestDynamicLoaderHooks);
     RunTest("DStorageGpuBufferAndFenceE2E",      TestDStorageGpuBufferAndFenceE2E);
     RunTest("Rdna2ComputeDispatchE2E",           TestRdna2ComputeDispatchE2E);
+    RunTest("ShaderDiskCacheE2E",                TestShaderDiskCacheE2E);
 ```
 
 ## 6. Recent Git History
+- `110b00e docs: overhaul README.md with architecture, subsystem matrix, and delivery timeline`
+- `b35f5a9 Merge Sprint 36: RDNA2 compute shader lifter & GPU Dispatch E2E`
+- `81fd6b2 Sprint 36: RDNA2 MUBUF load/store compute lifter + GPU Dispatch E2E (CTest #35)`
 - `2dcbd9d Merge Sprint 35: DStorage GPU buffer streaming & fence E2E`
 - `53a16f5 Sprint 35: DStorage GPU buffer streaming + fence E2E test (CTest #34)`
 - `9896241 Merge Sprint 34: dynamic GetModuleHandle* redirects`
@@ -393,6 +397,3 @@
 - `8338e20 Merge Sprint 33: live GameInput polling & keyboard fallback`
 - `ccf15f0 Sprint 33: live GameInput keyboard-to-gamepad fallback + synthetic override + CTest #32`
 - `9d2e1cf Merge Sprint 32: RDNA2 IMAGE_SAMPLE E2E GPU draw`
-- `20de7c3 Sprint 32: RDNA2 IMAGE_SAMPLE E2E GPU draw test + AppendExp fix + CTest #31`
-- `8fb22f4 Merge Sprint 31: native MicrosoftGame.Config parser & --boot`
-- `99af35b Sprint 31: native MicrosoftGame.Config parser + loader --boot + CTest #30`
