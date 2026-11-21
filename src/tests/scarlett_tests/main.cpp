@@ -12,6 +12,7 @@
 #include "shims/xcurl/xcurl.hpp"
 #include "common/xvd_container.hpp"
 #include "loader/pe_inspector.hpp"
+#include "loader/game_config.hpp"
 #include "shims/pixevt/pixevt.hpp"
 #include "shims/xmem/xmem.hpp"
 #include "shims/kernelx/kernelx.hpp"
@@ -2363,6 +2364,57 @@ static size_t TestXCurlWriteCb(char* ptr, size_t size, size_t nmemb, void* userd
     return size * nmemb;
 }
 
+bool TestGameConfigBootParser() {
+    // 1. Synthetic MicrosoftGame.Config round-trip
+    const auto tmpDir = std::filesystem::temp_directory_path() / "scarlett_gameconfig_test";
+    std::error_code ec;
+    std::filesystem::remove_all(tmpDir, ec);
+    std::filesystem::create_directories(tmpDir, ec);
+
+    const auto cfgPath = tmpDir / "MicrosoftGame.Config";
+    {
+        std::ofstream ofs(cfgPath);
+        ofs << "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+            << "<Game configVersion=\"1\">\n"
+            << "  <Identity Name=\"ScarlettTestTitle\" Publisher=\"CN=Test\" Version=\"1.2.3.0\" />\n"
+            << "  <TitleId>1234ABCD</TitleId>\n"
+            << "  <ExecutableList>\n"
+            << "    <Executable Name=\"game_main.exe\" Id=\"Game\" />\n"
+            << "  </ExecutableList>\n"
+            << "  <ShellVisuals DefaultDisplayName=\"Scarlett Test Title\" />\n"
+            << "</Game>\n";
+    }
+
+    const auto parsed = sc::loader::ParseGameConfig(tmpDir);
+    SC_EXPECT(parsed.valid);
+    SC_EXPECT(parsed.identityName == "ScarlettTestTitle");
+    SC_EXPECT(parsed.version == "1.2.3.0");
+    SC_EXPECT(parsed.titleId == "1234ABCD");
+    SC_EXPECT(parsed.displayName == "Scarlett Test Title");
+    SC_EXPECT(parsed.executableName == "game_main.exe");
+    SC_EXPECT(parsed.executableId == "Game");
+    SC_EXPECT(parsed.executablePath == tmpDir / "game_main.exe");
+
+    // 2. Reject missing directory cleanly
+    const auto bad = sc::loader::ParseGameConfig(tmpDir / "does_not_exist");
+    SC_EXPECT(!bad.valid && !bad.error.empty());
+
+    std::filesystem::remove_all(tmpDir, ec);
+
+    // 3. Validate all 4 ScarlettX synthetic game manifests when sibling repo is present
+    const std::filesystem::path sxSynthRoot = "E:\\gta\\test\\ScarlettX\\tests\\synthetic_games";
+    if (std::filesystem::exists(sxSynthRoot)) {
+        const char* kTitles[] = { "hello_scarlett", "iat_probe", "rt_showcase", "scarlett_arena" };
+        for (const char* title : kTitles) {
+            const auto pkg = sc::loader::ParseGameConfig(sxSynthRoot / title);
+            SC_EXPECT(pkg.valid);
+            SC_EXPECT(!pkg.executableName.empty());
+        }
+    }
+
+    return true;
+}
+
 bool TestScarlettXConformanceSuite() {
     // 1. Raw COM vtable ABI conformance against gameinput.dll (matches ScarlettX test_gameinput.cpp)
     HMODULE giMod = LoadLibraryW(L"gameinput.dll");
@@ -3203,6 +3255,7 @@ int main() {
     RunTest("Rdna2ImageSampleShader",            TestRdna2ImageSampleShader);
     RunTest("PresentXDescriptorAudit",           TestPresentXDescriptorAudit);
     RunTest("ScarlettXConformanceSuite",         TestScarlettXConformanceSuite);
+    RunTest("GameConfigBootParser",              TestGameConfigBootParser);
 
     XGameRuntimeUninitialize();
 

@@ -1,7 +1,7 @@
 # Scarlett Layer â€” AI Context Snapshot
 
-**Commit:** `ea01f6d` (#38) | **Generated:** 2026-11-21 00:30 UTC  
-**Totals:** 60 files (16,401 LOC) | 12 shims | 29 CTest checks
+**Commit:** `1419e6a` (#41) | **Generated:** 2026-11-21 00:42 UTC  
+**Totals:** 61 files (16,656 LOC) | 12 shims | 30 CTest checks
 
 ---
 
@@ -69,7 +69,8 @@
    43  src/common/stub.hpp
    76  src/common/vfs.hpp
   161  src/common/xvd_container.hpp
-  166  src/loader/main.cpp
+  172  src/loader/game_config.hpp
+  196  src/loader/main.cpp
   177  src/loader/pe_inspector.hpp
   396  src/loader/pe_patcher.cpp
    19  src/loader/pe_patcher.hpp
@@ -120,7 +121,7 @@
  1651  src/tests/dummy_title/main.cpp
    59  src/tests/engine_plugin/engine_plugin.cpp
     3  src/tests/engine_plugin/engine_plugin.def
- 3211  src/tests/scarlett_tests/main.cpp
+ 3264  src/tests/scarlett_tests/main.cpp
   242  tools/audit_imports.py
   505  tools/build_wiki.py
   108  tools/test_brief.py
@@ -344,7 +345,7 @@
 - `MimgOp`: kMimgImageSample = 0x20u
 - `InstFormat`: Sopp, Vop1, Vop2, Vop3, Exp, Mubuf, Smem, Vintrp, Mimg
 
-## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 29 total)
+## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 30 total)
 ```cpp
     RunTest("VfsPathTranslation",         TestVfsPathTranslation);
     RunTest("RuntimeAndXUser",            TestRuntimeAndXUser);
@@ -375,9 +376,13 @@
     RunTest("Rdna2ImageSampleShader",            TestRdna2ImageSampleShader);
     RunTest("PresentXDescriptorAudit",           TestPresentXDescriptorAudit);
     RunTest("ScarlettXConformanceSuite",         TestScarlettXConformanceSuite);
+    RunTest("GameConfigBootParser",              TestGameConfigBootParser);
 ```
 
 ## 6. Recent Git History
+- `1419e6a Docs: add GitHub README with architecture overview and Sprint 30 progress report`
+- `31b7b29 Merge Sprint 30: ScarlettX ABI conformance suite`
+- `57bc148 Sprint 30: ScarlettX ABI conformance suite + CTest #29`
 - `ea01f6d Merge Sprint 29: PresentX & descriptor-handle audit`
 - `21dc0e0 Sprint 29: PresentX CopyTextureRegion fallback + descriptor-handle audit + CTest #28`
 - `5dc706f Merge Sprint 28: RDNA2 IMAGE_SAMPLE texture sampling`
@@ -385,6 +390,3 @@
 - `90804f6 Merge Sprint 27: Loader PE inspector & XVD container`
 - `1e3654f Sprint 27: Loader --inspect PE auditor + unencrypted XVD container + CTest #26`
 - `ead135e Merge Sprint 26: Retail bring-up shims`
-- `5d4f624 Sprint 26: Retail bring-up shims (GameInput @1, AcpHal, libHttpClient.GDK, XCurl) + CTest #25`
-- `e998915 tools: add VS BuildTools ctest fallback to verify.bat`
-- `fc60b8d Sprint 25: d3d12_xs <-> dstorage_xs bridge, mip-chain streaming + CTest #24`

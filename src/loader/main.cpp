@@ -1,6 +1,7 @@
 #include "common/stub.hpp"
 #include "pe_patcher.hpp"
 #include "pe_inspector.hpp"
+#include "game_config.hpp"
 #include "common/xvd_container.hpp"
 
 #include <cstdio>
@@ -90,9 +91,38 @@ int wmain(int argc, wchar_t* argv[]) {
         return 0;
     }
 
-    std::filesystem::path targetPath = (argc > 1)
-        ? std::filesystem::absolute(argv[1])
-        : (loaderDir / L"titles" / L"dummy_title" / L"dummy_title.exe");
+    if (argc >= 3 && std::wstring_view(argv[1]) == L"--inspect-package") {
+        const auto pkg = sc::loader::ParseGameConfig(argv[2]);
+        if (!pkg.valid) {
+            std::fprintf(stderr, "[package] ERROR: %s\n", pkg.error.c_str());
+            return 1;
+        }
+        std::printf("[package] Identity:   %s (%s)\n", pkg.identityName.c_str(), pkg.version.c_str());
+        std::printf("[package] TitleId:    %s\n", pkg.titleId.c_str());
+        std::printf("[package] Display:    %s\n", pkg.displayName.c_str());
+        std::printf("[package] Executable: %s (exists=%s)\n",
+                    pkg.executablePath.string().c_str(),
+                    std::filesystem::exists(pkg.executablePath) ? "yes" : "no");
+        return 0;
+    }
+
+    int firstArgIdx = 2;
+    std::filesystem::path targetPath;
+    if (argc >= 3 && std::wstring_view(argv[1]) == L"--boot") {
+        const auto pkg = sc::loader::ParseGameConfig(argv[2]);
+        if (!pkg.valid) {
+            std::fprintf(stderr, "[boot] ERROR: %s\n", pkg.error.c_str());
+            return 1;
+        }
+        targetPath = pkg.executablePath;
+        firstArgIdx = 3;
+        std::printf("[boot] Package: %s (TitleId=%s) -> %s\n",
+                    pkg.identityName.c_str(), pkg.titleId.c_str(), targetPath.string().c_str());
+    } else {
+        targetPath = (argc > 1)
+            ? std::filesystem::absolute(argv[1])
+            : (loaderDir / L"titles" / L"dummy_title" / L"dummy_title.exe");
+    }
 
     if (!std::filesystem::exists(targetPath)) {
         std::string err = "Target executable not found: " + targetPath.string();
@@ -101,7 +131,7 @@ int wmain(int argc, wchar_t* argv[]) {
     }
 
     std::wstring cmdLine = L"\"" + targetPath.wstring() + L"\"";
-    for (int i = 2; i < argc; ++i) {
+    for (int i = firstArgIdx; i < argc; ++i) {
         cmdLine += L" \"";
         cmdLine += argv[i];
         cmdLine += L"\"";
