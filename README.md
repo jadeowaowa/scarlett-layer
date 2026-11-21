@@ -75,3 +75,17 @@ All **49 CTests** run end-to-end on real D3D12 hardware, including:
 ## Documentation
 
 Sprint-by-sprint engineering logs live in [`docs/PROGRESS.md`](docs/PROGRESS.md).
+
+---
+
+## v1.0.0 Golden Master Milestone (50 Sprints Complete)
+
+**Scarlett Layer v1.0.0** (`v1.0.0-scarlett-layer`) completes all four development phases across **50 incremental sprints**, validated end-to-end by **49/49 automated CTests** with zero D3D12 validation errors and zero memory leaks.
+
+| Subsystem | Coverage |
+|---|---|
+| **Loader & Packaging** | Suspended-process PE import rewriting, APC injection, recursive IAT hooking, unencrypted XVD mounting, `MicrosoftGame.Config` parsing, and `G:\` / `T:\` / `S:\` VFS redirection |
+| **Graphics & Shaders** | `d3d12_xs` swapchain-less `PresentX` bridge, async `COMPUTE` queues, disk-backed PSO cache, and clean-room AMD RDNA2 (GFX10.3) VS/PS/CS shader lifter |
+| **Memory & Swizzle** | `xmem` 64 KiB physical allocations + `xg_xs` `64KB_S` BC7 macro/micro-tiled surface translation |
+| **Streaming** | `dstorage_xs` Velocity async queues, `SCLZ` decompression, and direct-to-VRAM GPU buffer/texture/mip-chain streaming |
+| **Runtime, Input, Audio & OS** | `xgameruntime` (`XUser` + `XGameSave`), `gameinput`, `xaudio2_9` (IMA-ADPCM), `libHttpClient`/`XCurl`, `kernelx` (13.5 GiB budget, 7c/14t topology), and `pixevt` |
