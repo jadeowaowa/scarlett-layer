@@ -166,7 +166,9 @@ LRESULT CALLBACK ScarlettWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             DestroyWindow(hwnd);
             return 0;
         case WM_DESTROY:
-            PostQuitMessage(0);
+            if (closedFlag) {
+                *closedFlag = true;
+            }
             return 0;
         default:
             break;
@@ -440,13 +442,13 @@ private:
     }
 
     void PumpMessages() {
+        if (!m_hwnd) {
+            return;
+        }
         MSG msg{};
-        while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+        while (PeekMessageW(&msg, m_hwnd, 0, 0, PM_REMOVE)) {
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
-            if (msg.message == WM_QUIT) {
-                m_windowClosed = true;
-            }
         }
     }
 

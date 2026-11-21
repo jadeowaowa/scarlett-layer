@@ -221,3 +221,8 @@
 
 ## Sprint 54: COM Vtable ABI Conformance
 - Added CTest #53 (`D3D12XsComVtableAbiConformanceE2E`) in `src/tests/scarlett_tests/main.cpp` validating raw x64 MSVC COM vtable slot layouts, direct vtable-pointer invocation (`IUnknown` slots 0-2, `ID3D12GraphicsCommandListX::Close` slot 3, `ID3D12CommandQueueX::Signal` slot 4), `IUnknown` identity/reflexivity, monotonic ref-counting, and `E_NOINTERFACE` null-out semantics (`53 passed, 0 failed`).
+
+## Sprint 55: Zero-Readback GPU PresentX & DXGI SwapChain E2E
+- Fixed `ScarlettWndProc` / `PumpMessages` in `src/shims/d3d12_xs/d3d12_xs.cpp` to scope message pumping to `m_hwnd` and avoid posting thread-wide `WM_QUIT` on swapchain teardown.
+- Upgraded `src/tests/scarlett_3d_demo/main.cpp` to present directly on the GPU via `ID3D12CommandQueueX::PresentX` (DXGI Flip-Discard swapchain), removing CPU readback and GDI blitting.
+- Added CTest #54 (`D3D12XsPresentXSwapChainE2E`) in `src/tests/scarlett_tests/main.cpp` verifying `PresentX` argument validation and multi-frame hardware DXGI swapchain presentation (`54 passed, 0 failed`).

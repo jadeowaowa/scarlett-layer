@@ -2371,6 +2371,47 @@ static size_t CurlTestWriteCb(char* ptr, size_t size, size_t nmemb, void* userda
     return total;
 }
 
+bool TestD3D12XsPresentXSwapChainE2E() {
+    using Microsoft::WRL::ComPtr;
+
+    D3D12XBOX_CREATE_DEVICE_PARAMETERS devParams{};
+    devParams.Version = 1;
+    ComPtr<ID3D12DeviceX> devX;
+    SC_EXPECT(SUCCEEDED(D3D12XboxCreateDevice(nullptr, &devParams, IID_ID3D12DeviceX,
+        reinterpret_cast<void**>(devX.GetAddressOf()))));
+
+    D3D12_COMMAND_QUEUE_DESC qd{};
+    qd.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+    ComPtr<ID3D12CommandQueueX> queueX;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommandQueueX(&qd, queueX.GetAddressOf())));
+
+    // 1. Invalid arguments must return E_INVALIDARG
+    SC_EXPECT(queueX->PresentX(0, nullptr, nullptr) == E_INVALIDARG);
+
+    // 2. Create 128x128 RGBA8 render target in PRESENT state and present 3 frames via DXGI SwapChain
+    D3D12_HEAP_PROPERTIES defHeap{ D3D12_HEAP_TYPE_DEFAULT };
+    D3D12_RESOURCE_DESC rtDesc{};
+    rtDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    rtDesc.Width = 128; rtDesc.Height = 128; rtDesc.DepthOrArraySize = 1; rtDesc.MipLevels = 1;
+    rtDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM; rtDesc.SampleDesc.Count = 1;
+    rtDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+    ComPtr<ID3D12Resource> rtTex;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommittedResource(&defHeap, D3D12_HEAP_FLAG_NONE, &rtDesc,
+        D3D12_RESOURCE_STATE_PRESENT, nullptr, IID_PPV_ARGS(&rtTex))));
+
+    ID3D12Resource* resArr[] = { rtTex.Get() };
+    D3D12XBOX_PRESENT_PLANE_PARAMETERS plane{};
+    plane.ResourceCount = 1;
+    plane.ppResources   = resArr;
+    D3D12XBOX_PRESENT_PARAMETERS params{};
+
+    for (uint32_t frame = 0; frame < 3; ++frame) {
+        HRESULT hr = queueX->PresentX(1, &plane, &params);
+        SC_EXPECT(hr == S_OK);
+    }
+    return true;
+}
+
 bool TestD3D12XsComVtableAbiConformanceE2E() {
     using Microsoft::WRL::ComPtr;
 
@@ -6226,6 +6267,7 @@ int main() {
     RunTest("RuntimeDelayLoadAndOrdinalHookE2E", TestRuntimeDelayLoadAndOrdinalHookE2E);
     RunTest("D3D12Xs3DPerspectiveDepthRenderE2E", TestD3D12Xs3DPerspectiveDepthRenderE2E);
     RunTest("D3D12XsComVtableAbiConformanceE2E",  TestD3D12XsComVtableAbiConformanceE2E);
+    RunTest("D3D12XsPresentXSwapChainE2E",        TestD3D12XsPresentXSwapChainE2E);
 
     XGameRuntimeUninitialize();
 
