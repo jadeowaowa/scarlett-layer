@@ -2363,6 +2363,79 @@ static size_t TestXCurlWriteCb(char* ptr, size_t size, size_t nmemb, void* userd
     return size * nmemb;
 }
 
+bool TestScarlettXConformanceSuite() {
+    // 1. Raw COM vtable ABI conformance against gameinput.dll (matches ScarlettX test_gameinput.cpp)
+    HMODULE giMod = LoadLibraryW(L"gameinput.dll");
+    if (!giMod) {
+        wchar_t exePath[MAX_PATH]{};
+        GetModuleFileNameW(nullptr, exePath, MAX_PATH);
+        std::filesystem::path shimDll =
+            std::filesystem::path(exePath).parent_path().parent_path().parent_path() / "shims" / "gameinput.dll";
+        giMod = LoadLibraryW(shimDll.c_str());
+    }
+    SC_EXPECT(giMod != nullptr);
+
+    using PfnGameInputCreate = HRESULT(WINAPI*)(void**);
+    auto pGameInputCreate = reinterpret_cast<PfnGameInputCreate>(GetProcAddress(giMod, "GameInputCreate"));
+    SC_EXPECT(pGameInputCreate != nullptr);
+
+    void* gi = nullptr;
+    SC_EXPECT(SUCCEEDED(pGameInputCreate(&gi)) && gi != nullptr);
+
+    void** giVtbl = *reinterpret_cast<void***>(gi);
+    using PfnRelease = ULONG(STDMETHODCALLTYPE*)(void*);
+    using PfnGetCurrentTimestamp = uint64_t(STDMETHODCALLTYPE*)(void*);
+    using PfnGetCurrentReading = HRESULT(STDMETHODCALLTYPE*)(void*, uint32_t, void*, void**);
+
+    // Slot 3: GetCurrentTimestamp, Slot 4: GetCurrentReading (retail GameInput.dll ABI)
+    const uint64_t ts = reinterpret_cast<PfnGetCurrentTimestamp>(giVtbl[3])(gi);
+    SC_EXPECT(ts > 0);
+
+    constexpr uint32_t kKindGamepad = 0x00020000u;
+    void* reading = nullptr;
+    HRESULT hrRead = reinterpret_cast<PfnGetCurrentReading>(giVtbl[4])(gi, kKindGamepad, nullptr, &reading);
+    if (SUCCEEDED(hrRead) && reading != nullptr) {
+        void** rdVtbl = *reinterpret_cast<void***>(reading);
+        using PfnGetInputKind = uint32_t(STDMETHODCALLTYPE*)(void*);
+        using PfnGetTimestamp = uint64_t(STDMETHODCALLTYPE*)(void*);
+        SC_EXPECT(reinterpret_cast<PfnGetInputKind>(rdVtbl[3])(reading) == kKindGamepad);
+        SC_EXPECT(reinterpret_cast<PfnGetTimestamp>(rdVtbl[4])(reading) > 0);
+        reinterpret_cast<PfnRelease>(rdVtbl[2])(reading);
+    } else {
+        // GAMEINPUT_E_READING_NOT_FOUND is valid when no physical gamepad is connected
+        SC_EXPECT(hrRead == static_cast<HRESULT>(0x838A0002L));
+    }
+    reinterpret_cast<PfnRelease>(giVtbl[2])(gi);
+    FreeLibrary(giMod);
+
+    // 2. xgameruntime.dll ABI conformance (matches ScarlettX test_xgameruntime_abi.cpp)
+    SC_EXPECT(SUCCEEDED(XGameRuntimeInitialize()));
+    SC_EXPECT(XSystemGetDeviceType() != XSystemDeviceType::Unknown);
+
+    XTaskQueueHandle queue = nullptr;
+    SC_EXPECT(SUCCEEDED(XTaskQueueCreate(
+        XTaskQueueDispatchMode::Manual, XTaskQueueDispatchMode::Manual, &queue)) && queue != nullptr);
+    XTaskQueueDispatch(queue, XTaskQueuePort::Work, 0);
+    XTaskQueueCloseHandle(queue);
+    XGameRuntimeUninitialize();
+
+    // 3. ScarlettX synthetic game manifest audit (if sibling repo is present)
+    const std::filesystem::path sxSynthRoot = "E:\\gta\\test\\ScarlettX\\tests\\synthetic_games";
+    if (std::filesystem::exists(sxSynthRoot)) {
+        const char* kTitles[] = { "hello_scarlett", "iat_probe", "rt_showcase", "scarlett_arena" };
+        for (const char* title : kTitles) {
+            const auto cfgPath = sxSynthRoot / title / "MicrosoftGame.Config";
+            SC_EXPECT(std::filesystem::exists(cfgPath));
+            std::ifstream ifs(cfgPath);
+            std::string xml((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+            SC_EXPECT(xml.find("<Game") != std::string::npos);
+            SC_EXPECT(xml.find("Executable") != std::string::npos);
+        }
+    }
+
+    return true;
+}
+
 bool TestPresentXDescriptorAudit() {
     D3D12XBOX_CREATE_DEVICE_PARAMETERS params{};
     params.Version = D3D12_SDK_VERSION;
@@ -3129,6 +3202,7 @@ int main() {
     RunTest("LoaderInspectAndXvdMount",          TestLoaderInspectAndXvdMount);
     RunTest("Rdna2ImageSampleShader",            TestRdna2ImageSampleShader);
     RunTest("PresentXDescriptorAudit",           TestPresentXDescriptorAudit);
+    RunTest("ScarlettXConformanceSuite",         TestScarlettXConformanceSuite);
 
     XGameRuntimeUninitialize();
 
