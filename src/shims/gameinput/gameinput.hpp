@@ -79,4 +79,5 @@ struct IGameInput : public IUnknown {
 
 extern "C" {
     HRESULT WINAPI GameInputCreate(IGameInput** gameInput);
+    void WINAPI ScarlettGameInputSetSyntheticGamepad(bool enabled, const GameInputGamepadState* state);
 }

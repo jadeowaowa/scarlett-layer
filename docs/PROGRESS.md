@@ -137,3 +137,8 @@
 - Added CTest #31 (`Rdna2TexturedDrawE2E`) in `src/tests/scarlett_tests/main.cpp`.
 - Decoded binary RDNA2 `MIMG IMAGE_SAMPLE` pixel shader, lifted to HLSL, compiled to `ps_5_0`, bound a `2x2` `RGBA8` `Texture2D` SRV + static `SamplerState`, drew a fullscreen triangle on D3D12 hardware, and verified exact `(40, 180, 240, 255)` RGBA pixel readback.
 - Fixed `AppendExp` argument order (`v0..v3, en, done, compr`) in both `TestRdna2ImageSampleShader` and `TestRdna2TexturedDrawE2E` (`31 passed, 0 failed`).
+
+## Sprint 33: Live Host Input Polling & Keyboard-to-Gamepad Fallback
+- Added keyboard-to-virtual-gamepad fallback (WASD -> Left Stick, Arrows -> D-pad, Space/Enter -> A, Esc -> Menu, Shift -> Right Trigger) in `src/shims/gameinput/gameinput.cpp` when no physical XInput controller #0 is connected.
+- Exported `ScarlettGameInputSetSyntheticGamepad` (`@2` in `gameinput.def`) for deterministic gamepad state injection.
+- Added CTest #32 (`GameInputLivePolling`) verifying `IGameInput::GetCurrentReading`, `GetGamepadState` parity, and monotonic timestamps (`32 passed, 0 failed`). Phase 1 complete.

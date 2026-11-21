@@ -2364,6 +2364,45 @@ static size_t TestXCurlWriteCb(char* ptr, size_t size, size_t nmemb, void* userd
     return size * nmemb;
 }
 
+bool TestGameInputLivePolling() {
+    IGameInput* gi = nullptr;
+    SC_EXPECT(SUCCEEDED(GameInputCreate(&gi)) && gi != nullptr);
+
+    const uint64_t t0 = gi->GetCurrentTimestamp();
+    SC_EXPECT(t0 > 0);
+
+    GameInputGamepadState injected{};
+    injected.buttons = 0x00000010u | 0x00000100u; // A + DPadUp
+    injected.leftTrigger = 0.25f;
+    injected.rightTrigger = 0.75f;
+    injected.leftThumbstickX = -0.5f;
+    injected.leftThumbstickY = 1.0f;
+    injected.rightThumbstickX = 0.5f;
+    injected.rightThumbstickY = -0.25f;
+
+    ScarlettGameInputSetSyntheticGamepad(true, &injected);
+
+    IGameInputReading* reading = nullptr;
+    const HRESULT hr = gi->GetCurrentReading(GameInputKindGamepad, nullptr, &reading);
+    SC_EXPECT(SUCCEEDED(hr) && reading != nullptr);
+    SC_EXPECT(reading->GetTimestamp() >= t0);
+
+    GameInputGamepadState out{};
+    SC_EXPECT(reading->GetGamepadState(&out));
+    SC_EXPECT(out.buttons == injected.buttons);
+    SC_EXPECT(std::fabs(out.leftTrigger - 0.25f) < 1e-5f);
+    SC_EXPECT(std::fabs(out.rightTrigger - 0.75f) < 1e-5f);
+    SC_EXPECT(std::fabs(out.leftThumbstickX - (-0.5f)) < 1e-5f);
+    SC_EXPECT(std::fabs(out.leftThumbstickY - 1.0f) < 1e-5f);
+    SC_EXPECT(std::fabs(out.rightThumbstickX - 0.5f) < 1e-5f);
+    SC_EXPECT(std::fabs(out.rightThumbstickY - (-0.25f)) < 1e-5f);
+
+    reading->Release();
+    ScarlettGameInputSetSyntheticGamepad(false, nullptr);
+    gi->Release();
+    return true;
+}
+
 bool TestRdna2TexturedDrawE2E() {
     using namespace sc::d3d12::rdna2;
     using Microsoft::WRL::ComPtr;
@@ -3523,6 +3562,7 @@ int main() {
     RunTest("ScarlettXConformanceSuite",         TestScarlettXConformanceSuite);
     RunTest("GameConfigBootParser",              TestGameConfigBootParser);
     RunTest("Rdna2TexturedDrawE2E",              TestRdna2TexturedDrawE2E);
+    RunTest("GameInputLivePolling",              TestGameInputLivePolling);
 
     XGameRuntimeUninitialize();
 

@@ -1,3 +1,4 @@
 LIBRARY gameinput
 EXPORTS
     GameInputCreate @1
+    ScarlettGameInputSetSyntheticGamepad @2

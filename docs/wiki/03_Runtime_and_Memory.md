@@ -43,12 +43,13 @@
 - `XMemAllocatorId`: XALLOC_ID_DEFAULT = 0, XALLOC_ID_TEXTURE_TILED = 10, XALLOC_ID_TEXTURE_UPLOAD = 11, XALLOC_ID_AUDIO_PCM = 20
 
 ## `gameinput.dll`
-**Files:** `src/shims/gameinput/gameinput.cpp` (277 L), `src/shims/gameinput/gameinput.def` (3 L), `src/shims/gameinput/gameinput.hpp` (82 L)
+**Files:** `src/shims/gameinput/gameinput.cpp` (321 L), `src/shims/gameinput/gameinput.def` (4 L), `src/shims/gameinput/gameinput.hpp` (83 L)
 
-**DLL Exports (`.def`):** `GameInputCreate @1`
+**DLL Exports (`.def`):** `GameInputCreate @1`, `ScarlettGameInputSetSyntheticGamepad @2`
 
 **C Entrypoints:**
 - `HRESULT WINAPI GameInputCreate(IGameInput** gameInput)`
+- `void WINAPI ScarlettGameInputSetSyntheticGamepad(bool enabled, const GameInputGamepadState* state)`
 
 **COM Interface `IGameInputReading : IUnknown`:**
 - `[03]` `GameInputKind GetInputKind()`

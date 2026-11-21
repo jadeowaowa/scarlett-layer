@@ -139,6 +139,10 @@ private:
     std::vector<GameInputKeyState> m_keys;
 };
 
+SRWLOCK g_synthLock = SRWLOCK_INIT;
+bool g_synthEnabled = false;
+GameInputGamepadState g_synthState{};
+
 class ScarlettGameInput final : public IGameInput {
 public:
     ScarlettGameInput() {
@@ -194,21 +198,50 @@ public:
         std::vector<GameInputKeyState> keys;
 
         if ((inputKind & GameInputKindGamepad) != 0) {
-            XINPUT_STATE xi{};
-            if (XInputGetState(0, &xi) == ERROR_SUCCESS) {
+            bool usedSynthetic = false;
+            AcquireSRWLockShared(&g_synthLock);
+            if (g_synthEnabled) {
+                gp = g_synthState;
+                usedSynthetic = true;
+            }
+            ReleaseSRWLockShared(&g_synthLock);
+
+            if (usedSynthetic) {
                 hasGamepad = true;
                 resolvedKind |= GameInputKindGamepad;
-                gp.buttons          = MapXInputButtons(xi.Gamepad.wButtons);
-                gp.leftTrigger      = static_cast<float>(xi.Gamepad.bLeftTrigger) / 255.0f;
-                gp.rightTrigger     = static_cast<float>(xi.Gamepad.bRightTrigger) / 255.0f;
-                gp.leftThumbstickX  = NormalizeAxis(xi.Gamepad.sThumbLX, XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE);
-                gp.leftThumbstickY  = NormalizeAxis(xi.Gamepad.sThumbLY, XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE);
-                gp.rightThumbstickX = NormalizeAxis(xi.Gamepad.sThumbRX, XINPUT_GAMEPAD_RIGHT_THUMB_DEADZONE);
-                gp.rightThumbstickY = NormalizeAxis(xi.Gamepad.sThumbRY, XINPUT_GAMEPAD_RIGHT_THUMB_DEADZONE);
+            } else {
+                XINPUT_STATE xi{};
+                if (XInputGetState(0, &xi) == ERROR_SUCCESS) {
+                    hasGamepad = true;
+                    resolvedKind |= GameInputKindGamepad;
+                    gp.buttons          = MapXInputButtons(xi.Gamepad.wButtons);
+                    gp.leftTrigger      = static_cast<float>(xi.Gamepad.bLeftTrigger) / 255.0f;
+                    gp.rightTrigger     = static_cast<float>(xi.Gamepad.bRightTrigger) / 255.0f;
+                    gp.leftThumbstickX  = NormalizeAxis(xi.Gamepad.sThumbLX, XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE);
+                    gp.leftThumbstickY  = NormalizeAxis(xi.Gamepad.sThumbLY, XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE);
+                    gp.rightThumbstickX = NormalizeAxis(xi.Gamepad.sThumbRX, XINPUT_GAMEPAD_RIGHT_THUMB_DEADZONE);
+                    gp.rightThumbstickY = NormalizeAxis(xi.Gamepad.sThumbRY, XINPUT_GAMEPAD_RIGHT_THUMB_DEADZONE);
 
-                if (!m_loggedGamepad.exchange(true, std::memory_order_relaxed)) {
-                    sc::log::Write(sc::log::Level::Info, "gameinput", "GetCurrentReading",
-                                   "-> detected active XInput controller #0");
+                    if (!m_loggedGamepad.exchange(true, std::memory_order_relaxed)) {
+                        sc::log::Write(sc::log::Level::Info, "gameinput", "GetCurrentReading",
+                                       "-> detected active XInput controller #0");
+                    }
+                } else if (IsCurrentProcessForeground()) {
+                    // Virtual gamepad fallback from host keyboard
+                    hasGamepad = true;
+                    resolvedKind |= GameInputKindGamepad;
+                    if ((GetAsyncKeyState('W') & 0x8000) != 0) gp.leftThumbstickY += 1.0f;
+                    if ((GetAsyncKeyState('S') & 0x8000) != 0) gp.leftThumbstickY -= 1.0f;
+                    if ((GetAsyncKeyState('D') & 0x8000) != 0) gp.leftThumbstickX += 1.0f;
+                    if ((GetAsyncKeyState('A') & 0x8000) != 0) gp.leftThumbstickX -= 1.0f;
+                    if ((GetAsyncKeyState(VK_UP) & 0x8000) != 0)    gp.buttons |= 0x00000100u; // DPadUp
+                    if ((GetAsyncKeyState(VK_DOWN) & 0x8000) != 0)  gp.buttons |= 0x00000200u; // DPadDown
+                    if ((GetAsyncKeyState(VK_LEFT) & 0x8000) != 0)  gp.buttons |= 0x00000400u; // DPadLeft
+                    if ((GetAsyncKeyState(VK_RIGHT) & 0x8000) != 0) gp.buttons |= 0x00000800u; // DPadRight
+                    if ((GetAsyncKeyState(VK_SPACE) & 0x8000) != 0 ||
+                        (GetAsyncKeyState(VK_RETURN) & 0x8000) != 0) gp.buttons |= 0x00000010u; // A
+                    if ((GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0) gp.buttons |= 0x00000004u; // Menu
+                    if ((GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0)  gp.rightTrigger = 1.0f;
                 }
             }
         }
@@ -253,6 +286,17 @@ private:
 };
 
 } // namespace
+
+extern "C" void WINAPI ScarlettGameInputSetSyntheticGamepad(bool enabled, const GameInputGamepadState* state) {
+    AcquireSRWLockExclusive(&g_synthLock);
+    g_synthEnabled = enabled;
+    if (enabled && state) {
+        g_synthState = *state;
+    } else {
+        g_synthState = {};
+    }
+    ReleaseSRWLockExclusive(&g_synthLock);
+}
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID) {
     if (reason == DLL_PROCESS_ATTACH) {
