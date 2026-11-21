@@ -21,6 +21,7 @@ using GetModuleHandleAFn   = HMODULE(WINAPI*)(LPCSTR);
 using GetModuleHandleWFn   = HMODULE(WINAPI*)(LPCWSTR);
 using GetModuleHandleExAFn = BOOL(WINAPI*)(DWORD, LPCSTR, HMODULE*);
 using GetModuleHandleExWFn = BOOL(WINAPI*)(DWORD, LPCWSTR, HMODULE*);
+using GetProcAddressFn     = FARPROC(WINAPI*)(HMODULE, LPCSTR);
 using K32EnumProcessModulesFn = BOOL(WINAPI*)(HANDLE, HMODULE*, DWORD, LPDWORD);
 
 HMODULE          g_selfModule         = nullptr;
@@ -33,6 +34,9 @@ GetModuleHandleAFn   g_origGetModuleHandleA   = nullptr;
 GetModuleHandleWFn   g_origGetModuleHandleW   = nullptr;
 GetModuleHandleExAFn g_origGetModuleHandleExA = nullptr;
 GetModuleHandleExWFn g_origGetModuleHandleExW = nullptr;
+GetProcAddressFn     g_origGetProcAddress     = nullptr;
+volatile LONG        g_delayPatchedCount      = 0;
+volatile LONG        g_ordinalLookupCount     = 0;
 
 std::wstring g_shimDirLower;
 std::wstring g_winDirLower;
@@ -146,6 +150,7 @@ HMODULE WINAPI HookGetModuleHandleW(LPCWSTR lpModuleName);
 HMODULE WINAPI HookGetModuleHandleA(LPCSTR lpModuleName);
 BOOL    WINAPI HookGetModuleHandleExW(DWORD dwFlags, LPCWSTR lpModuleName, HMODULE* phModule);
 BOOL    WINAPI HookGetModuleHandleExA(DWORD dwFlags, LPCSTR lpModuleName, HMODULE* phModule);
+FARPROC WINAPI HookGetProcAddress(HMODULE hModule, LPCSTR lpProcName);
 
 uint32_t PatchModuleIat(HMODULE mod) {
     if (!mod) {
@@ -162,45 +167,27 @@ uint32_t PatchModuleIat(HMODULE mod) {
         return 0;
     }
 
-    const auto& importDir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
-    if (importDir.VirtualAddress == 0 || importDir.Size == 0) {
-        return 0;
-    }
+    auto resolveHook = [](const char* name) -> void* {
+        if (std::strcmp(name, "LoadLibraryW") == 0)         return reinterpret_cast<void*>(&HookLoadLibraryW);
+        if (std::strcmp(name, "LoadLibraryA") == 0)         return reinterpret_cast<void*>(&HookLoadLibraryA);
+        if (std::strcmp(name, "LoadLibraryExW") == 0)       return reinterpret_cast<void*>(&HookLoadLibraryExW);
+        if (std::strcmp(name, "LoadLibraryExA") == 0)       return reinterpret_cast<void*>(&HookLoadLibraryExA);
+        if (std::strcmp(name, "GetModuleHandleW") == 0)     return reinterpret_cast<void*>(&HookGetModuleHandleW);
+        if (std::strcmp(name, "GetModuleHandleA") == 0)     return reinterpret_cast<void*>(&HookGetModuleHandleA);
+        if (std::strcmp(name, "GetModuleHandleExW") == 0)   return reinterpret_cast<void*>(&HookGetModuleHandleExW);
+        if (std::strcmp(name, "GetModuleHandleExA") == 0)   return reinterpret_cast<void*>(&HookGetModuleHandleExA);
+        if (std::strcmp(name, "GetProcAddress") == 0)       return reinterpret_cast<void*>(&HookGetProcAddress);
+        return nullptr;
+    };
 
-    uint32_t patched = 0;
-    auto* desc = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(base + importDir.VirtualAddress);
-    for (; desc->Name != 0 || desc->FirstThunk != 0; ++desc) {
-        if (desc->OriginalFirstThunk == 0 || desc->FirstThunk == 0) {
-            continue;
-        }
-        auto* origThunk = reinterpret_cast<IMAGE_THUNK_DATA64*>(base + desc->OriginalFirstThunk);
-        auto* iatThunk  = reinterpret_cast<IMAGE_THUNK_DATA64*>(base + desc->FirstThunk);
-
+    auto patchThunkTable = [&](IMAGE_THUNK_DATA64* origThunk, IMAGE_THUNK_DATA64* iatThunk, bool isDelay) -> uint32_t {
+        uint32_t count = 0;
         for (; origThunk->u1.AddressOfData != 0; ++origThunk, ++iatThunk) {
             if (IMAGE_SNAP_BY_ORDINAL64(origThunk->u1.Ordinal)) {
                 continue;
             }
             auto* ibn = reinterpret_cast<IMAGE_IMPORT_BY_NAME*>(base + origThunk->u1.AddressOfData);
-            void* replacement = nullptr;
-
-            if (std::strcmp(ibn->Name, "LoadLibraryW") == 0) {
-                replacement = reinterpret_cast<void*>(&HookLoadLibraryW);
-            } else if (std::strcmp(ibn->Name, "LoadLibraryA") == 0) {
-                replacement = reinterpret_cast<void*>(&HookLoadLibraryA);
-            } else if (std::strcmp(ibn->Name, "LoadLibraryExW") == 0) {
-                replacement = reinterpret_cast<void*>(&HookLoadLibraryExW);
-            } else if (std::strcmp(ibn->Name, "LoadLibraryExA") == 0) {
-                replacement = reinterpret_cast<void*>(&HookLoadLibraryExA);
-            } else if (std::strcmp(ibn->Name, "GetModuleHandleW") == 0) {
-                replacement = reinterpret_cast<void*>(&HookGetModuleHandleW);
-            } else if (std::strcmp(ibn->Name, "GetModuleHandleA") == 0) {
-                replacement = reinterpret_cast<void*>(&HookGetModuleHandleA);
-            } else if (std::strcmp(ibn->Name, "GetModuleHandleExW") == 0) {
-                replacement = reinterpret_cast<void*>(&HookGetModuleHandleExW);
-            } else if (std::strcmp(ibn->Name, "GetModuleHandleExA") == 0) {
-                replacement = reinterpret_cast<void*>(&HookGetModuleHandleExA);
-            }
-
+            void* replacement = resolveHook(ibn->Name);
             if (replacement) {
                 DWORD oldProt = 0;
                 if (VirtualProtect(&iatThunk->u1.Function, sizeof(ULONG_PTR),
@@ -209,11 +196,46 @@ uint32_t PatchModuleIat(HMODULE mod) {
                     DWORD restoreProt = 0;
                     VirtualProtect(&iatThunk->u1.Function, sizeof(ULONG_PTR),
                                    oldProt, &restoreProt);
-                    ++patched;
+                    ++count;
+                    if (isDelay) {
+                        InterlockedIncrement(&g_delayPatchedCount);
+                    }
                 }
             }
         }
+        return count;
+    };
+
+    uint32_t patched = 0;
+
+    // 1. Standard IAT (IMAGE_DIRECTORY_ENTRY_IMPORT)
+    const auto& importDir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+    if (importDir.VirtualAddress != 0 && importDir.Size != 0) {
+        auto* desc = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(base + importDir.VirtualAddress);
+        for (; desc->Name != 0 || desc->FirstThunk != 0; ++desc) {
+            if (desc->OriginalFirstThunk == 0 || desc->FirstThunk == 0) {
+                continue;
+            }
+            auto* origThunk = reinterpret_cast<IMAGE_THUNK_DATA64*>(base + desc->OriginalFirstThunk);
+            auto* iatThunk  = reinterpret_cast<IMAGE_THUNK_DATA64*>(base + desc->FirstThunk);
+            patched += patchThunkTable(origThunk, iatThunk, false);
+        }
     }
+
+    // 2. Delay-Load IAT (IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT)
+    const auto& delayDir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT];
+    if (delayDir.VirtualAddress != 0 && delayDir.Size != 0) {
+        auto* ddesc = reinterpret_cast<IMAGE_DELAYLOAD_DESCRIPTOR*>(base + delayDir.VirtualAddress);
+        for (; ddesc->DllNameRVA != 0 || ddesc->ImportAddressTableRVA != 0; ++ddesc) {
+            if (ddesc->ImportNameTableRVA == 0 || ddesc->ImportAddressTableRVA == 0) {
+                continue;
+            }
+            auto* origThunk = reinterpret_cast<IMAGE_THUNK_DATA64*>(base + ddesc->ImportNameTableRVA);
+            auto* iatThunk  = reinterpret_cast<IMAGE_THUNK_DATA64*>(base + ddesc->ImportAddressTableRVA);
+            patched += patchThunkTable(origThunk, iatThunk, true);
+        }
+    }
+
     return patched;
 }
 
@@ -368,6 +390,13 @@ BOOL WINAPI HookGetModuleHandleExA(DWORD dwFlags, LPCSTR lpModuleName, HMODULE* 
     return g_origGetModuleHandleExA(dwFlags, lpModuleName, phModule);
 }
 
+FARPROC WINAPI HookGetProcAddress(HMODULE hModule, LPCSTR lpProcName) {
+    if (lpProcName && (reinterpret_cast<uintptr_t>(lpProcName) >> 16) == 0) {
+        InterlockedIncrement(&g_ordinalLookupCount);
+    }
+    return g_origGetProcAddress ? g_origGetProcAddress(hModule, lpProcName) : nullptr;
+}
+
 void DiscoverShimsWin32() {
     wchar_t winBuf[MAX_PATH]{};
     UINT winLen = GetWindowsDirectoryW(winBuf, MAX_PATH);
@@ -454,6 +483,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID) {
             g_origGetModuleHandleW   = reinterpret_cast<GetModuleHandleWFn>(GetProcAddress(k32, "GetModuleHandleW"));
             g_origGetModuleHandleExA = reinterpret_cast<GetModuleHandleExAFn>(GetProcAddress(k32, "GetModuleHandleExA"));
             g_origGetModuleHandleExW = reinterpret_cast<GetModuleHandleExWFn>(GetProcAddress(k32, "GetModuleHandleExW"));
+            g_origGetProcAddress     = reinterpret_cast<GetProcAddressFn>(GetProcAddress(k32, "GetProcAddress"));
         }
 
         DiscoverShimsWin32();
@@ -466,4 +496,15 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID) {
         sc::log::Write(sc::log::Level::Info, "scarlett_hook", "DllMain", buf);
     }
     return TRUE;
+}
+
+extern "C" __declspec(dllexport) uint32_t WINAPI ScarlettHookPatchModuleForTest(HMODULE mod) {
+    return PatchModuleIat(mod);
+}
+
+extern "C" __declspec(dllexport) void WINAPI ScarlettHookGetRuntimeStats(
+    uint32_t* outDelayPatched,
+    uint32_t* outOrdinalLookups) {
+    if (outDelayPatched)   *outDelayPatched   = static_cast<uint32_t>(g_delayPatchedCount);
+    if (outOrdinalLookups) *outOrdinalLookups = static_cast<uint32_t>(g_ordinalLookupCount);
 }
