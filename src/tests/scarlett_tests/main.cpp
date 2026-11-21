@@ -1070,7 +1070,7 @@ bool TestD3D12ComputePsoAndUavExecution() {
     ComPtr<ID3D12Resource> uavBuf;
     SC_EXPECT(SUCCEEDED(deviceX->CreateCommittedResource(
         &defaultHeap, D3D12_HEAP_FLAG_NONE, &uavBufDesc,
-        D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&uavBuf))));
+        D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&uavBuf))));
 
     D3D12_RESOURCE_DESC rbDesc = uavBufDesc;
     rbDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
@@ -1264,10 +1264,12 @@ bool TestRdna2IsaDecoderAndGpuExecution() {
     rtDesc.SampleDesc.Count = 1;
     rtDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
 
+    D3D12_CLEAR_VALUE rtClear{};
+    rtClear.Format = rtDesc.Format;
     ComPtr<ID3D12Resource> rtTex;
     SC_EXPECT(SUCCEEDED(deviceX->CreateCommittedResource(
         &defaultHeap, D3D12_HEAP_FLAG_NONE, &rtDesc,
-        D3D12_RESOURCE_STATE_RENDER_TARGET, nullptr, IID_PPV_ARGS(&rtTex))));
+        D3D12_RESOURCE_STATE_RENDER_TARGET, &rtClear, IID_PPV_ARGS(&rtTex))));
 
     D3D12_RESOURCE_DESC rbDesc{};
     rbDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
@@ -1831,8 +1833,10 @@ bool TestRdna2VertexAndPixelPipelineWithCbv() {
     rtDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
     rtDesc.SampleDesc.Count = 1;
     rtDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+    D3D12_CLEAR_VALUE rtClear{};
+    rtClear.Format = rtDesc.Format;
     SC_EXPECT(SUCCEEDED(deviceX->CreateCommittedResource(&defHeap, D3D12_HEAP_FLAG_NONE, &rtDesc,
-        D3D12_RESOURCE_STATE_RENDER_TARGET, nullptr, IID_PPV_ARGS(&rtTex))));
+        D3D12_RESOURCE_STATE_RENDER_TARGET, &rtClear, IID_PPV_ARGS(&rtTex))));
 
     D3D12_RESOURCE_DESC rbDesc = makeBufDesc(kRbBytes);
     SC_EXPECT(SUCCEEDED(deviceX->CreateCommittedResource(&rbHeap, D3D12_HEAP_FLAG_NONE, &rbDesc,
@@ -4653,7 +4657,7 @@ bool TestD3D12XsCmdListComputeDispatchE2E() {
 
     ComPtr<ID3D12Resource> inBuf, outBuf, rbBuf;
     SC_EXPECT(SUCCEEDED(devX->CreateCommittedResource(&uploadHeap, D3D12_HEAP_FLAG_NONE, &inDesc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&inBuf))));
-    SC_EXPECT(SUCCEEDED(devX->CreateCommittedResource(&defaultHeap, D3D12_HEAP_FLAG_NONE, &outDesc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&outBuf))));
+    SC_EXPECT(SUCCEEDED(devX->CreateCommittedResource(&defaultHeap, D3D12_HEAP_FLAG_NONE, &outDesc, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&outBuf))));
     SC_EXPECT(SUCCEEDED(devX->CreateCommittedResource(&readbackHeap, D3D12_HEAP_FLAG_NONE, &inDesc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&rbBuf))));
 
     uint32_t* pIn = nullptr;
@@ -5064,7 +5068,7 @@ bool TestRdna2ComputeDispatchE2E() {
         D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&inBuf))));
     SC_EXPECT(SUCCEEDED(dev->CreateCommittedResource(
         &defaultHeap, D3D12_HEAP_FLAG_NONE, &outDesc,
-        D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&outBuf))));
+        D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&outBuf))));
     SC_EXPECT(SUCCEEDED(dev->CreateCommittedResource(
         &readbackHeap, D3D12_HEAP_FLAG_NONE, &inDesc,
         D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&rbBuf))));
@@ -5495,10 +5499,12 @@ VSOut VSMain(uint id : SV_VertexID) {
     rtDesc.Height = 64;
     rtDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
 
+    D3D12_CLEAR_VALUE rtClear{};
+    rtClear.Format = rtDesc.Format;
     ComPtr<ID3D12Resource> rtTex;
     SC_EXPECT(SUCCEEDED(dev->CreateCommittedResource(
         &defaultHeap, D3D12_HEAP_FLAG_NONE, &rtDesc,
-        D3D12_RESOURCE_STATE_RENDER_TARGET, nullptr, IID_PPV_ARGS(&rtTex))));
+        D3D12_RESOURCE_STATE_RENDER_TARGET, &rtClear, IID_PPV_ARGS(&rtTex))));
 
     D3D12_RESOURCE_DESC rbDesc = upDesc;
     rbDesc.Width = 64 * 256; // 64 rows * 256 bytes/row (64 * 4 = 256)

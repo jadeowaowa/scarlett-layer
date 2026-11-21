@@ -613,14 +613,13 @@ public:
     void STDMETHODCALLTYPE Dispatch(UINT x, UINT y, UINT z) override {
         m_cmdList->Dispatch(x, y, z);
     }
-    void STDMETHODCALLTYPE BeginEvent(UINT Metadata, const void* pData, UINT Size) override {
-        m_cmdList->BeginEvent(Metadata, pData, Size);
+    void STDMETHODCALLTYPE BeginEvent(UINT /*Metadata*/, const void* /*pData*/, UINT /*Size*/) override {
+        // Intentional no-op: raw ID3D12CommandList::BeginEvent triggers D3D12 debug-layer errors
+        // unless invoked via PIX runtime; Scarlett titles route markers through pixevt.dll.
     }
     void STDMETHODCALLTYPE EndEvent() override {
-        m_cmdList->EndEvent();
     }
-    void STDMETHODCALLTYPE SetMarker(UINT Metadata, const void* pData, UINT Size) override {
-        m_cmdList->SetMarker(Metadata, pData, Size);
+    void STDMETHODCALLTYPE SetMarker(UINT /*Metadata*/, const void* /*pData*/, UINT /*Size*/) override {
     }
     void STDMETHODCALLTYPE IASetPrimitiveTopology(D3D12_PRIMITIVE_TOPOLOGY PrimitiveTopology) override {
         m_cmdList->IASetPrimitiveTopology(PrimitiveTopology);
@@ -1414,6 +1413,13 @@ HRESULT WINAPI D3D12XboxCreateDevice(
                     sc::log::Write(
                         sev == D3D12_MESSAGE_SEVERITY_WARNING ? sc::log::Level::Warn : sc::log::Level::Error,
                         "d3d12_debug", "Validation", desc);
+                    if (sev <= D3D12_MESSAGE_SEVERITY_ERROR) {
+                        char strictEnv[8]{};
+                        if (GetEnvironmentVariableA("SCARLETT_STRICT_D3D12", strictEnv, sizeof(strictEnv)) > 0 &&
+                            strictEnv[0] == '1') {
+                            std::abort();
+                        }
+                    }
                 }
             },
             D3D12_MESSAGE_CALLBACK_FLAG_NONE, nullptr, &cookie);
