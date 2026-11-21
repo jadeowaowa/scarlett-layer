@@ -12,6 +12,8 @@
 #include <d3d12.h>
 #include <d3dcompiler.h>
 #include <wrl/client.h>
+#include <filesystem>
+#include <fstream>
 
 namespace sc::d3d12 {
 
@@ -72,6 +74,13 @@ inline const char* ScxsStageName(uint16_t stage) {
         case ScxsShaderStage::Amplification: return "AS";
         default:                             return "UNK";
     }
+}
+
+inline std::filesystem::path GetShaderCachePath(uint16_t stage, uint32_t payloadFnv1a) {
+    char fileName[64];
+    std::snprintf(fileName, sizeof(fileName), "scxs_%s_%08X.dxbc",
+                  ScxsStageName(stage), payloadFnv1a);
+    return std::filesystem::temp_directory_path() / "scarlett-layer-shader-cache" / fileName;
 }
 
 inline bool IsScxsContainer(const D3D12_SHADER_BYTECODE& bc) {
@@ -182,6 +191,24 @@ public:
         }
 
         const auto stage = static_cast<ScxsShaderStage>(hdr.stage);
+        const std::filesystem::path cachePath = GetShaderCachePath(hdr.stage, hdr.payloadFnv1a);
+        {
+            std::error_code ec;
+            if (std::filesystem::exists(cachePath, ec) && std::filesystem::file_size(cachePath, ec) > 0) {
+                std::ifstream ifs(cachePath, std::ios::binary);
+                if (ifs.good()) {
+                    const auto sz = static_cast<size_t>(std::filesystem::file_size(cachePath, ec));
+                    out.bytecode.resize(sz);
+                    if (ifs.read(reinterpret_cast<char*>(out.bytecode.data()), static_cast<std::streamsize>(sz))) {
+                        out.translatorName = Name();
+                        out.wasTranslated = true;
+                        out.sourceTag = "SCXS(RDNA2-ISA/DISK-CACHE)->";
+                        return S_OK;
+                    }
+                    out.bytecode.clear();
+                }
+            }
+        }
         std::string liftedHlsl;
         const char* srcName = "rdna2_lifted_ps.hlsl";
         const char* entry   = "PSMain";
@@ -223,6 +250,16 @@ public:
 
         const auto* dxbcBytes = static_cast<const uint8_t*>(dxbcBlob->GetBufferPointer());
         out.bytecode.assign(dxbcBytes, dxbcBytes + dxbcBlob->GetBufferSize());
+        {
+            std::error_code ec;
+            std::filesystem::create_directories(cachePath.parent_path(), ec);
+            std::ofstream ofs(cachePath, std::ios::binary | std::ios::trunc);
+            if (ofs.good() && !out.bytecode.empty()) {
+                ofs.write(reinterpret_cast<const char*>(out.bytecode.data()),
+                          static_cast<std::streamsize>(out.bytecode.size()));
+            }
+        }
+
         out.translatorName = Name();
         out.wasTranslated = true;
 

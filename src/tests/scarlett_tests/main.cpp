@@ -2364,6 +2364,50 @@ static size_t TestXCurlWriteCb(char* ptr, size_t size, size_t nmemb, void* userd
     return size * nmemb;
 }
 
+bool TestShaderDiskCacheE2E() {
+    using namespace sc::d3d12;
+    using namespace sc::d3d12::rdna2;
+
+    std::vector<uint32_t> isa;
+    AppendMubufLoadDword(isa, 1, 0, 0);
+    AppendVop2LiteralU32(isa, kVop2AddNcU32, 2, 42u, 1);
+    AppendMubufStoreDword(isa, 2, 0, 0);
+    AppendSopp(isa, kSoppEndpgm);
+
+    auto scxs = BuildScxsContainer(
+        ScxsShaderStage::Compute,
+        ScxsTargetArch::Rdna2Scarlett,
+        ScxsPayloadFormat::Rdna2Isa,
+        isa.data(), isa.size() * sizeof(uint32_t),
+        6, 6);
+
+    const uint32_t hash = ComputeScxsFnv1a32(isa.data(), isa.size() * sizeof(uint32_t));
+    const std::filesystem::path cachePath = GetShaderCachePath(
+        static_cast<uint16_t>(ScxsShaderStage::Compute), hash);
+    std::error_code ec;
+    std::filesystem::remove(cachePath, ec);
+
+    D3D12_SHADER_BYTECODE inBc{ scxs.data(), scxs.size() };
+    Rdna2IsaTranslator translator;
+    std::string err;
+
+    // 1. Cold miss: lifts + compiles via D3DCompile and populates disk cache
+    TranslatedShader cold{};
+    SC_EXPECT(SUCCEEDED(translator.Translate(inBc, cold, err)));
+    SC_EXPECT(!cold.bytecode.empty());
+    SC_EXPECT(cold.sourceTag.find("DISK-CACHE") == std::string::npos);
+    SC_EXPECT(std::filesystem::exists(cachePath, ec));
+
+    // 2. Warm hit: loads directly from disk cache with identical DXBC bytes
+    TranslatedShader warm{};
+    SC_EXPECT(SUCCEEDED(translator.Translate(inBc, warm, err)));
+    SC_EXPECT(warm.sourceTag.find("DISK-CACHE") != std::string::npos);
+    SC_EXPECT(warm.bytecode == cold.bytecode);
+
+    std::filesystem::remove(cachePath, ec);
+    return true;
+}
+
 bool TestRdna2ComputeDispatchE2E() {
     using Microsoft::WRL::ComPtr;
     using namespace sc::d3d12;
@@ -3883,6 +3927,7 @@ int main() {
     RunTest("DynamicLoaderHooks",                TestDynamicLoaderHooks);
     RunTest("DStorageGpuBufferAndFenceE2E",      TestDStorageGpuBufferAndFenceE2E);
     RunTest("Rdna2ComputeDispatchE2E",           TestRdna2ComputeDispatchE2E);
+    RunTest("ShaderDiskCacheE2E",                TestShaderDiskCacheE2E);
 
     XGameRuntimeUninitialize();
 

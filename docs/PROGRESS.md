@@ -155,3 +155,8 @@
 ## Sprint 36: RDNA2 Compute Shader Lifter (MUBUF Load/Store) & GPU Dispatch E2E
 - Added `kMubufLoadDword` (`0x14`) decoding, `AppendMubufLoadDword` encoding, and `StructuredBuffer<uint> gIn : register(t0)` lifting in `src/shims/d3d12_xs/rdna2_isa.hpp`.
 - Added CTest #35 (`Rdna2ComputeDispatchE2E`) in `src/tests/scarlett_tests/main.cpp`: wrapped a binary RDNA2 compute shader (`out[i] = 2 * in[i] + 7`) in an SCXS container, translated to `cs_5_0` via `Rdna2IsaTranslator`, dispatched 64 threads on D3D12 hardware with root SRV `t0` + UAV `u0`, and verified all 64 `uint32_t` outputs via GPU readback (`35 passed, 0 failed`).
+
+## Sprint 37: Disk-Backed RDNA2-to-DXBC Shader Translation Cache
+- Added `GetShaderCachePath(stage, payloadFnv1a)` and disk cache read/write fast paths to `Rdna2IsaTranslator::Translate` in `src/shims/d3d12_xs/shader_translator.hpp`.
+- Warm hits bypass ISA decoding, HLSL lifting, and `D3DCompile`, returning cached DXBC directly with `SCXS(RDNA2-ISA/DISK-CACHE)->`.
+- Added CTest #36 (`ShaderDiskCacheE2E`) in `src/tests/scarlett_tests/main.cpp` verifying cold miss -> disk write -> warm cache hit with exact byte-for-byte DXBC parity (`36 passed, 0 failed`).
