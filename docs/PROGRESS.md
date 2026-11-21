@@ -215,3 +215,6 @@
 ## Sprint 52: Runtime Delay-Load IAT Patching & GetProcAddress Ordinal Hook
 - Extended `src/loader/scarlett_hook.cpp` to patch `IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT` thunks alongside standard IAT entries, hook `GetProcAddress` with ordinal-lookup tracking, and expose `ScarlettHookPatchModuleForTest` / `ScarlettHookGetRuntimeStats`.
 - Added CTest #51 (`RuntimeDelayLoadAndOrdinalHookE2E`) in `src/tests/scarlett_tests/main.cpp` validating live in-memory delay-load IAT rewriting and ordinal `GetProcAddress` resolution (`51 passed, 0 failed`).
+
+## Sprint 53: 3D Perspective-Projected Indexed Geometry & Hardware Z-Buffer E2E
+- Added CTest #52 (`D3D12Xs3DPerspectiveDepthRenderE2E`) in `src/tests/scarlett_tests/main.cpp` rendering overlapping 3D indexed quads through a `4x4` perspective MVP matrix (`cbuffer b0`) with `D32_FLOAT` hardware depth testing (`D3D12_COMPARISON_FUNC_LESS`) via `ID3D12GraphicsCommandListX`, verifying near/far Z-buffer occlusion via GPU readback (`52 passed, 0 failed`).

@@ -4,7 +4,7 @@
 
 **Clean-room Windows / D3D12 binary compatibility & shim layer for Xbox Series X|S (Scarlett / GDK) x64 executables.**
 
-[![Release](https://img.shields.io/badge/release-v1.0.0-ff0040?style=flat-square)](https://github.com/jadeowaowa/scarlett-layer/releases/tag/v1.0.0-scarlett-layer) [![Build](https://img.shields.io/badge/build-CMake%20%2B%20Ninja%20%2B%20MSVC-0078D4?style=flat-square)](#build--verify) [![Tests](https://img.shields.io/badge/CTests-51%2F51%20passing-2ea44f?style=flat-square)](#verification-suite) [![Baseline](https://img.shields.io/badge/baseline-sprint--52-8957e5?style=flat-square)](#delivery-timeline) [![Platform](https://img.shields.io/badge/platform-Windows%20x64%20%7C%20D3D12-blue?style=flat-square)](#requirements)
+[![Release](https://img.shields.io/badge/release-v1.0.0-ff0040?style=flat-square)](https://github.com/jadeowaowa/scarlett-layer/releases/tag/v1.0.0-scarlett-layer) [![Build](https://img.shields.io/badge/build-CMake%20%2B%20Ninja%20%2B%20MSVC-0078D4?style=flat-square)](#build--verify) [![Tests](https://img.shields.io/badge/CTests-52%2F52%20passing-2ea44f?style=flat-square)](#verification-suite) [![Baseline](https://img.shields.io/badge/baseline-sprint--53-8957e5?style=flat-square)](#delivery-timeline) [![Platform](https://img.shields.io/badge/platform-Windows%20x64%20%7C%20D3D12-blue?style=flat-square)](#requirements)
 
 </div>
 
@@ -61,9 +61,9 @@ cd scarlett-layer
 .\tools\verify.bat --verbose
 ```
 
-### Verification Suite (`51/51` Passing)
+### Verification Suite (`52/52` Passing)
 
-All **51 CTests** execute end-to-end on real D3D12 hardware with zero D3D12 validation errors and zero memory leaks. Key integration benchmarks include:
+All **52 CTests** execute end-to-end on real D3D12 hardware with zero D3D12 validation errors and zero memory leaks. Key integration benchmarks include:
 
 - **`ScarlettFullStack50SprintCapstoneE2E` (#49)** — Full Golden Master boot-to-frame-to-save run uniting all 9 shims + unencrypted XVD / `MicrosoftGame.Config` packaging in a single pipeline.
 - **`ScarlettTitleBringUpE2E` (#44)** — End-to-end `xgameruntime` (`XUser` + `XGameSave`), `libHttpClient`, `gameinput`, `xaudio2_9`, and `d3d12_xs` title bring-up loop.
