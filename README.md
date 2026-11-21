@@ -7,7 +7,7 @@ An experimental Windows / Direct3D 12 compatibility layer for running **unpacked
 ![Tests](https://img.shields.io/badge/checks-64%2F64-2ea44f?style=flat-square)
 ![Status](https://img.shields.io/badge/status-experimental-orange?style=flat-square)
 
-> **Status: experimental.** The subsystems below are implemented and exercised by an automated test suite. `[TODO: confirm and edit this line]` No commercial title has been run end-to-end through the layer yet. See [Current status](#current-status).
+> **Status: experimental.** The subsystems below are implemented and exercised by an automated test suite. No commercial title has been run end-to-end through the layer yet. See [Current status](#current-status).
 
 ## What it does
 
