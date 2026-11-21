@@ -1,7 +1,7 @@
 # Scarlett Layer â€” AI Context Snapshot
 
-**Commit:** `316eb9e` (#78) | **Generated:** 2026-11-21 05:16 UTC  
-**Totals:** 61 files (19,184 LOC) | 12 shims | 48 CTest checks
+**Commit:** `da17268` (#80) | **Generated:** 2026-11-21 05:18 UTC  
+**Totals:** 61 files (19,518 LOC) | 12 shims | 49 CTest checks
 
 ---
 
@@ -121,7 +121,7 @@
  1651  src/tests/dummy_title/main.cpp
    59  src/tests/engine_plugin/engine_plugin.cpp
     3  src/tests/engine_plugin/engine_plugin.def
- 5347  src/tests/scarlett_tests/main.cpp
+ 5681  src/tests/scarlett_tests/main.cpp
   242  tools/audit_imports.py
   505  tools/build_wiki.py
   108  tools/test_brief.py
@@ -381,7 +381,7 @@
 - `MimgOp`: kMimgImageSample = 0x20u
 - `InstFormat`: Sopp, Vop1, Vop2, Vop3, Exp, Mubuf, Smem, Vintrp, Mimg
 
-## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 48 total)
+## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 49 total)
 ```cpp
     RunTest("VfsPathTranslation",         TestVfsPathTranslation);
     RunTest("RuntimeAndXUser",            TestRuntimeAndXUser);
@@ -431,9 +431,12 @@
     RunTest("XMemAndXgXsSwizzleE2E",             TestXMemAndXgXsSwizzleE2E);
     RunTest("DStorageVelocityDynamicE2E",        TestDStorageVelocityDynamicE2E);
     RunTest("LoaderXvdAndGameConfigE2E",         TestLoaderXvdAndGameConfigE2E);
+    RunTest("ScarlettFullStack50SprintCapstoneE2E", TestScarlettFullStack50SprintCapstoneE2E);
 ```
 
 ## 6. Recent Git History
+- `da17268 Merge Sprint 49: Loader XVD & MicrosoftGame.config E2E (48/48 CTests)`
+- `0b86dbf Sprint 49: Loader packaging — unencrypted XVD & MicrosoftGame.config E2E (CTest #48)`
 - `316eb9e Merge Sprint 48: dstorage_xs dynamic Velocity streaming E2E (47/47 CTests)`
 - `ad04cf2 Sprint 48: dstorage_xs dynamic Velocity streaming & status-array E2E (CTest #47)`
 - `48df6a1 Merge Sprint 47: xmem & xg_xs physical memory + BC7 swizzle E2E (46/46 CTests)`
@@ -442,5 +445,3 @@
 - `a172169 Sprint 46: Phase 4 kickoff — kernelx & pixevt OS/profiler E2E (CTest #45)`
 - `7ab8721 Merge Sprint 45: Phase 3 closeout (44/44 CTests)`
 - `6f628b4 Sprint 45: Phase 3 closeout — full Scarlett title bring-up E2E (CTest #44)`
-- `62406f1 Merge Sprint 44: GameInput runtime polling E2E (43/43 CTests)`
-- `3b6ec9e Sprint 44: GameInput runtime polling E2E (CTest #43)`

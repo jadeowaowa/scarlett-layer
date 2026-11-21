@@ -203,3 +203,7 @@
 
 ## Sprint 49: Loader Packaging — Unencrypted XVD & MicrosoftGame.config E2E
 - Added CTest #48 (`LoaderXvdAndGameConfigE2E`) in `src/tests/scarlett_tests/main.cpp` validating encrypted XVD rejection, unencrypted XVD `ReadUserData` extraction, and `sc::loader::ParseGameConfig` manifest/executable resolution (`48 passed, 0 failed`).
+
+## Sprint 50: Phase 4 Closeout & 50-Sprint Golden Master Capstone (`v1.0.0`)
+- Added CTest #49 (`ScarlettFullStack50SprintCapstoneE2E`) in `src/tests/scarlett_tests/main.cpp` uniting all 9 shims (`d3d12_xs`, `xgameruntime`, `gameinput`, `dstorage_xs`, `xmem`, `kernelx`, `pixevt`, `xaudio2_9`, `xg_xs`) plus unencrypted XVD / `MicrosoftGame.Config` packaging into a single end-to-end boot-to-frame-to-save Golden Master pipeline (`49 passed, 0 failed`, zero leaks).
+- Completed all **50 Sprints (Phases 1–4)** and tagged **`sprint-50-baseline`** + **`v1.0.0-scarlett-layer`**.

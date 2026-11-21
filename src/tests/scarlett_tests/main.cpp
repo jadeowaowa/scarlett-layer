@@ -2371,6 +2371,339 @@ static size_t CurlTestWriteCb(char* ptr, size_t size, size_t nmemb, void* userda
     return total;
 }
 
+bool TestScarlettFullStack50SprintCapstoneE2E() {
+    using Microsoft::WRL::ComPtr;
+    CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+
+    // 1. Profiler (pixevt) + OS Topology & Budget (kernelx)
+    HMODULE pixMod = LoadLibraryW(L"shims\\pixevt.dll");
+    if (!pixMod) pixMod = LoadLibraryW(L"pixevt.dll");
+    SC_EXPECT(pixMod != nullptr);
+    auto pPixBegin  = reinterpret_cast<void(WINAPI*)(uint64_t, const char*)>(GetProcAddress(pixMod, "PIXBeginEvent"));
+    auto pPixEnd    = reinterpret_cast<void(WINAPI*)(void)>(GetProcAddress(pixMod, "PIXEndEvent"));
+    auto pPixMarker = reinterpret_cast<void(WINAPI*)(uint64_t, const char*)>(GetProcAddress(pixMod, "PIXSetMarker"));
+    SC_EXPECT(pPixBegin && pPixEnd && pPixMarker);
+
+    pPixBegin(0xFFFF0040ULL, "Sprint50::GoldenMasterCapstone");
+
+    HMODULE kxMod = LoadLibraryW(L"shims\\kernelx.dll");
+    if (!kxMod) kxMod = LoadLibraryW(L"kernelx.dll");
+    SC_EXPECT(kxMod != nullptr);
+    struct LocalMemStat { DWORD len, res; uint64_t tot, avail, lu, lp, la, tu, tp, ta; };
+    struct LocalProcInfo { uint32_t tc, tt, ht; DWORD_PTR mask; };
+    auto pTitleMem = reinterpret_cast<BOOL(WINAPI*)(LocalMemStat*)>(GetProcAddress(kxMod, "TitleMemoryStatus"));
+    auto pProcInfo = reinterpret_cast<BOOL(WINAPI*)(LocalProcInfo*)>(GetProcAddress(kxMod, "GetConsoleProcessorInfo"));
+    SC_EXPECT(pTitleMem && pProcInfo);
+    LocalMemStat ms{}; ms.len = sizeof(ms);
+    SC_EXPECT(pTitleMem(&ms) != FALSE && ms.tot == 14495514624ULL);
+    LocalProcInfo pi{};
+    SC_EXPECT(pProcInfo(&pi) != FALSE && pi.tc == 7 && pi.tt == 14);
+
+    // 2. Unencrypted XVD + MicrosoftGame.Config Packaging
+    const auto tmpDir = std::filesystem::temp_directory_path() / "scarlett_sprint50_capstone";
+    std::error_code ec;
+    std::filesystem::remove_all(tmpDir, ec);
+    std::filesystem::create_directories(tmpDir, ec);
+
+    const std::string xmlManifest =
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+        "<Game configVersion=\"1\">\n"
+        "  <Identity Name=\"ScarlettGoldenMaster\" Publisher=\"CN=Scarlett\" Version=\"1.0.50.0\" />\n"
+        "  <TitleId>50505050</TitleId>\n"
+        "  <ShellVisuals DefaultDisplayName=\"Scarlett Layer v1.0\" />\n"
+        "  <ExecutableList><Executable Name=\"ScarlettCapstone.exe\" Id=\"Game\" /></ExecutableList>\n"
+        "</Game>\n";
+    std::vector<uint8_t> manifestBytes(xmlManifest.begin(), xmlManifest.end());
+    const auto xvdImg = sc::vfs::XvdContainer::BuildSyntheticUnencryptedXvd(manifestBytes, 1u, 0u);
+    const auto xvdPath = tmpDir / "golden_master.xvd";
+    { std::ofstream ofs(xvdPath, std::ios::binary); ofs.write(reinterpret_cast<const char*>(xvdImg.data()), static_cast<std::streamsize>(xvdImg.size())); }
+
+    sc::vfs::XvdContainer xvd;
+    std::string xvdErr;
+    SC_EXPECT(xvd.Open(xvdPath, xvdErr) && !xvd.Header().IsEncrypted());
+    std::vector<uint8_t> extracted;
+    SC_EXPECT(xvd.ReadUserData(0, manifestBytes.size(), extracted, xvdErr));
+    const auto pkgRoot = tmpDir / "pkg";
+    std::filesystem::create_directories(pkgRoot, ec);
+    { std::ofstream ofs(pkgRoot / "MicrosoftGame.Config", std::ios::binary); ofs.write(reinterpret_cast<const char*>(extracted.data()), static_cast<std::streamsize>(extracted.size())); }
+    { std::ofstream ofs(pkgRoot / "ScarlettCapstone.exe", std::ios::binary); ofs << "MZ"; }
+    const auto cfg = sc::loader::ParseGameConfig(pkgRoot);
+    SC_EXPECT(cfg.valid && cfg.identityName == "ScarlettGoldenMaster" && cfg.titleId == "50505050");
+
+    // 3. Physical Memory (xmem) + 64KB_S BC7 Swizzle (xg_xs) + Velocity Streaming (dstorage_xs)
+    pPixMarker(0xFF00CCFFULL, "Sprint50::AssetSwizzleAndStream");
+    HMODULE xmemMod = LoadLibraryW(L"shims\\xmem.dll");
+    if (!xmemMod) xmemMod = LoadLibraryW(L"xmem.dll");
+    HMODULE xgMod = LoadLibraryW(L"shims\\xg_xs.dll");
+    if (!xgMod) xgMod = LoadLibraryW(L"xg_xs.dll");
+    HMODULE dsMod = LoadLibraryW(L"shims\\dstorage_xs.dll");
+    if (!dsMod) dsMod = LoadLibraryW(L"dstorage_xs.dll");
+    SC_EXPECT(xmemMod && xgMod && dsMod);
+
+    auto pXMemAlloc = reinterpret_cast<void*(WINAPI*)(size_t, uint32_t)>(GetProcAddress(xmemMod, "XMemAlloc"));
+    auto pXMemFree  = reinterpret_cast<void(WINAPI*)(void*, uint32_t)>(GetProcAddress(xmemMod, "XMemFree"));
+    SC_EXPECT(pXMemAlloc && pXMemFree);
+
+    struct LocalXgDesc { uint32_t w, h, mips, arr; DXGI_FORMAT fmt; uint32_t mode; };
+    struct LocalXgMip { uint64_t off, sz; uint32_t pitch, pw, ph, mode; };
+    struct LocalXgPlane { uint64_t baseOff, sz; uint32_t bpe, mips; LocalXgMip ml[15]; };
+    struct LocalXgLayout { uint64_t sz, align; uint32_t planes; LocalXgPlane pl[1]; };
+    struct ILocalXgComp : public IUnknown {
+        virtual HRESULT STDMETHODCALLTYPE GetResourceLayout(LocalXgLayout*) = 0;
+        virtual HRESULT STDMETHODCALLTYPE CopyIntoSubresource(void*, uint32_t, const void*, uint32_t, uint32_t) = 0;
+        virtual HRESULT STDMETHODCALLTYPE CopyFromSubresource(void*, uint32_t, const void*, uint32_t, uint32_t) = 0;
+    };
+    auto pXgCreate = reinterpret_cast<HRESULT(WINAPI*)(const LocalXgDesc*, ILocalXgComp**)>(GetProcAddress(xgMod, "XGCreateTexture2DComputer"));
+    SC_EXPECT(pXgCreate != nullptr);
+
+    LocalXgDesc xgDesc{ 256, 256, 1, 1, DXGI_FORMAT_BC7_UNORM, 2u };
+    ILocalXgComp* xgComp = nullptr;
+    SC_EXPECT(SUCCEEDED(pXgCreate(&xgDesc, &xgComp)) && xgComp != nullptr);
+    LocalXgLayout xgLayout{};
+    SC_EXPECT(SUCCEEDED(xgComp->GetResourceLayout(&xgLayout)) && xgLayout.sz >= 65536ULL);
+
+    const uint32_t physAttrs = (10u) | (15u << 8) | (1u << 12) | (1u << 14); // TextureTiled, 64K, Physical, ZeroInit
+    void* tiledSrc = pXMemAlloc(static_cast<size_t>(xgLayout.sz), physAttrs);
+    void* tiledDst = pXMemAlloc(static_cast<size_t>(xgLayout.sz), physAttrs);
+    SC_EXPECT(tiledSrc && tiledDst);
+
+    constexpr uint32_t kRowPitch = 64u * 16u;
+    constexpr size_t   kLinearBytes = static_cast<size_t>(kRowPitch) * 64u;
+    std::vector<uint8_t> linearIn(kLinearBytes), linearOut(kLinearBytes, 0);
+    for (size_t i = 0; i < kLinearBytes; ++i) linearIn[i] = static_cast<uint8_t>((i * 50u + 7u) & 0xFFu);
+    SC_EXPECT(SUCCEEDED(xgComp->CopyIntoSubresource(tiledSrc, 0, linearIn.data(), kRowPitch, static_cast<uint32_t>(kLinearBytes))));
+
+    auto pDsGetFactory = reinterpret_cast<HRESULT(WINAPI*)(REFIID, void**)>(GetProcAddress(dsMod, "DStorageGetFactory"));
+    SC_EXPECT(pDsGetFactory != nullptr);
+    ComPtr<IDStorageFactoryX> dsFactory;
+    SC_EXPECT(SUCCEEDED(pDsGetFactory(IID_IDStorageFactoryX, reinterpret_cast<void**>(dsFactory.GetAddressOf()))));
+    DSTORAGE_QUEUE_DESC dsQd{ DSTORAGE_REQUEST_SOURCE_MEMORY, 16, DSTORAGE_PRIORITY_REALTIME, "Sprint50CapstoneQ", nullptr };
+    ComPtr<IDStorageQueueX> dsQueue;
+    SC_EXPECT(SUCCEEDED(dsFactory->CreateQueue(&dsQd, IID_IDStorageQueueX, reinterpret_cast<void**>(dsQueue.GetAddressOf()))));
+    ComPtr<IDStorageStatusArrayX> dsStatus;
+    SC_EXPECT(SUCCEEDED(dsFactory->CreateStatusArray(1, "Sprint50Status", IID_IDStorageStatusArrayX, reinterpret_cast<void**>(dsStatus.GetAddressOf()))));
+
+    DSTORAGE_REQUEST dsReq{};
+    dsReq.Options = { DSTORAGE_COMPRESSION_FORMAT_NONE, DSTORAGE_REQUEST_SOURCE_MEMORY, DSTORAGE_REQUEST_DESTINATION_MEMORY };
+    dsReq.Source.Memory = { tiledSrc, static_cast<uint32_t>(xgLayout.sz) };
+    dsReq.Destination.Memory = { tiledDst, static_cast<uint32_t>(xgLayout.sz) };
+    dsReq.UncompressedSize = static_cast<uint32_t>(xgLayout.sz);
+    dsReq.Name = "Sprint50::BC7Asset";
+    dsQueue->EnqueueRequest(&dsReq);
+    dsQueue->EnqueueStatus(dsStatus.Get(), 0);
+    dsQueue->Submit();
+    for (uint32_t s = 0; !dsStatus->IsComplete(0) && s < 5000; ++s) Sleep(1);
+    SC_EXPECT(dsStatus->IsComplete(0) && SUCCEEDED(dsStatus->GetHResult(0)));
+
+    SC_EXPECT(SUCCEEDED(xgComp->CopyFromSubresource(linearOut.data(), 0, tiledDst, kRowPitch, static_cast<uint32_t>(kLinearBytes))));
+    SC_EXPECT(std::memcmp(linearIn.data(), linearOut.data(), kLinearBytes) == 0);
+
+    dsStatus.Reset(); dsQueue.Reset(); dsFactory.Reset();
+    xgComp->Release();
+    pXMemFree(tiledDst, physAttrs);
+    pXMemFree(tiledSrc, physAttrs);
+    FreeLibrary(dsMod); FreeLibrary(xgMod); FreeLibrary(xmemMod);
+
+    // 4. Input (gameinput) + Audio (xaudio2_9) + GPU Render Clear (d3d12_xs)
+    pPixMarker(0xFFFF0040ULL, "Sprint50::InputAudioGpuFrame");
+    HMODULE giMod = LoadLibraryW(L"shims\\gameinput.dll");
+    if (!giMod) giMod = LoadLibraryW(L"gameinput.dll");
+    SC_EXPECT(giMod != nullptr);
+    struct LocalPad { uint32_t buttons; float lt, rt, lx, ly, rx, ry; };
+    struct LocalKey { uint32_t sc, cp; uint8_t vk; bool dead; };
+    struct ILocalGIRead : public IUnknown {
+        virtual uint32_t STDMETHODCALLTYPE GetInputKind() = 0;
+        virtual uint64_t STDMETHODCALLTYPE GetTimestamp() = 0;
+        virtual bool     STDMETHODCALLTYPE GetGamepadState(LocalPad*) = 0;
+        virtual uint32_t STDMETHODCALLTYPE GetKeyCount() = 0;
+        virtual uint32_t STDMETHODCALLTYPE GetKeyState(uint32_t, LocalKey*) = 0;
+    };
+    struct ILocalGI : public IUnknown {
+        virtual uint64_t STDMETHODCALLTYPE GetCurrentTimestamp() = 0;
+        virtual HRESULT  STDMETHODCALLTYPE GetCurrentReading(uint32_t, void*, ILocalGIRead**) = 0;
+    };
+    auto pGICreate = reinterpret_cast<HRESULT(WINAPI*)(ILocalGI**)>(GetProcAddress(giMod, "GameInputCreate"));
+    auto pGISynth  = reinterpret_cast<void(WINAPI*)(bool, const LocalPad*)>(GetProcAddress(giMod, "ScarlettGameInputSetSyntheticGamepad"));
+    SC_EXPECT(pGICreate && pGISynth);
+    ILocalGI* gi = nullptr;
+    SC_EXPECT(SUCCEEDED(pGICreate(&gi)) && gi != nullptr);
+    LocalPad padIn{ 0x00000004u, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+    pGISynth(true, &padIn);
+    ILocalGIRead* rd = nullptr;
+    SC_EXPECT(SUCCEEDED(gi->GetCurrentReading(0x00020000u, nullptr, &rd)) && rd != nullptr);
+    LocalPad padOut{};
+    SC_EXPECT(rd->GetGamepadState(&padOut) && (padOut.buttons & 0x00000004u) != 0);
+    pGISynth(false, nullptr);
+    rd->Release(); gi->Release(); FreeLibrary(giMod);
+
+    HMODULE xaMod = LoadLibraryW(L"shims\\xaudio2_9.dll");
+    if (!xaMod) xaMod = LoadLibraryW(L"xaudio2_9.dll");
+    SC_EXPECT(xaMod != nullptr);
+    auto pXACreate = reinterpret_cast<HRESULT(WINAPI*)(IXAudio2**, UINT32, XAUDIO2_PROCESSOR)>(GetProcAddress(xaMod, "XAudio2Create"));
+    IXAudio2* xa = nullptr;
+    SC_EXPECT(pXACreate && SUCCEEDED(pXACreate(&xa, 0, XAUDIO2_DEFAULT_PROCESSOR)) && xa != nullptr);
+
+    D3D12XBOX_CREATE_DEVICE_PARAMETERS devParams{}; devParams.Version = 1;
+    ComPtr<ID3D12DeviceX> devX;
+    SC_EXPECT(SUCCEEDED(D3D12XboxCreateDevice(nullptr, &devParams, IID_ID3D12DeviceX, reinterpret_cast<void**>(devX.GetAddressOf()))));
+    ComPtr<ID3D12Device> nativeDev;
+    SC_EXPECT(SUCCEEDED(devX->QueryInterface(IID_ScarlettNativeD3D12Device, reinterpret_cast<void**>(nativeDev.GetAddressOf()))));
+
+    D3D12_COMMAND_QUEUE_DESC qd{}; qd.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+    ComPtr<ID3D12CommandQueueX> queueX;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommandQueueX(&qd, queueX.GetAddressOf())));
+    ComPtr<ID3D12CommandAllocator> alloc;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&alloc))));
+    ComPtr<ID3D12GraphicsCommandListX> clX;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, alloc.Get(), nullptr,
+        IID_ID3D12GraphicsCommandListX, reinterpret_cast<void**>(clX.GetAddressOf()))));
+
+    D3D12_DESCRIPTOR_HEAP_DESC rtvHD{ D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 1, D3D12_DESCRIPTOR_HEAP_FLAG_NONE, 0 };
+    ComPtr<ID3D12DescriptorHeap> rtvHeap;
+    SC_EXPECT(SUCCEEDED(devX->CreateDescriptorHeap(&rtvHD, IID_PPV_ARGS(&rtvHeap))));
+
+    D3D12_HEAP_PROPERTIES defHeap{ D3D12_HEAP_TYPE_DEFAULT };
+    D3D12_HEAP_PROPERTIES rbHeap{ D3D12_HEAP_TYPE_READBACK };
+    D3D12_RESOURCE_DESC rtDesc{};
+    rtDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    rtDesc.Width = 4; rtDesc.Height = 4; rtDesc.DepthOrArraySize = 1; rtDesc.MipLevels = 1;
+    rtDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM; rtDesc.SampleDesc.Count = 1;
+    rtDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+    rtDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+
+    // Scarlett Crimson (255, 0, 64, 255)
+    D3D12_CLEAR_VALUE clearVal{};
+    clearVal.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    clearVal.Color[0] = 1.0f; clearVal.Color[1] = 0.0f; clearVal.Color[2] = 64.0f / 255.0f; clearVal.Color[3] = 1.0f;
+
+    ComPtr<ID3D12Resource> rtTex;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommittedResource(&defHeap, D3D12_HEAP_FLAG_NONE, &rtDesc,
+        D3D12_RESOURCE_STATE_RENDER_TARGET, &clearVal, IID_PPV_ARGS(&rtTex))));
+    D3D12_CPU_DESCRIPTOR_HANDLE rtvH = rtvHeap->GetCPUDescriptorHandleForHeapStart();
+    nativeDev->CreateRenderTargetView(rtTex.Get(), nullptr, rtvH);
+
+    D3D12_RESOURCE_DESC rbDesc{};
+    rbDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    rbDesc.Width = 256 * 4; rbDesc.Height = 1; rbDesc.DepthOrArraySize = 1; rbDesc.MipLevels = 1;
+    rbDesc.SampleDesc.Count = 1; rbDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    ComPtr<ID3D12Resource> rbBuf;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommittedResource(&rbHeap, D3D12_HEAP_FLAG_NONE, &rbDesc,
+        D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&rbBuf))));
+
+    clX->OMSetRenderTargets(1, &rtvH, FALSE, nullptr);
+    clX->ClearRenderTargetView(rtvH, clearVal.Color, 0, nullptr);
+    D3D12_RESOURCE_BARRIER bar{};
+    bar.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    bar.Transition = { rtTex.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+                       D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_SOURCE };
+    clX->ResourceBarrier(1, &bar);
+    D3D12_TEXTURE_COPY_LOCATION srcL{ rtTex.Get(), D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX, { 0 } };
+    D3D12_TEXTURE_COPY_LOCATION dstL{};
+    dstL.pResource = rbBuf.Get();
+    dstL.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    dstL.PlacedFootprint.Footprint = { DXGI_FORMAT_R8G8B8A8_UNORM, 4, 4, 1, 256 };
+    clX->CopyTextureRegion(&dstL, 0, 0, 0, &srcL, nullptr);
+    SC_EXPECT(SUCCEEDED(clX->Close()));
+
+    ComPtr<ID3D12Fence> fence;
+    SC_EXPECT(SUCCEEDED(nativeDev->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence))));
+    HANDLE ev = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    SC_EXPECT(ev != nullptr);
+    ID3D12CommandList* lists[] = { clX->GetNativeCommandList() };
+    queueX->ExecuteCommandLists(1, lists);
+    SC_EXPECT(SUCCEEDED(queueX->Signal(fence.Get(), 1)));
+    SC_EXPECT(SUCCEEDED(fence->SetEventOnCompletion(1, ev)));
+    SC_EXPECT(WaitForSingleObject(ev, 5000) == WAIT_OBJECT_0);
+    CloseHandle(ev);
+
+    uint8_t* pRb = nullptr;
+    SC_EXPECT(SUCCEEDED(rbBuf->Map(0, nullptr, reinterpret_cast<void**>(&pRb))));
+    SC_EXPECT(pRb[0] == 255 && pRb[1] == 0 && pRb[2] == 64 && pRb[3] == 255);
+    rbBuf->Unmap(0, nullptr);
+
+    xa->Release();
+    FreeLibrary(xaMod);
+
+    // 5. GDK Runtime + XUser + XGameSave Golden Master Checkpoint
+    pPixMarker(0xFF00FF88ULL, "Sprint50::PersistCheckpoint");
+    HMODULE xgrMod = LoadLibraryW(L"shims\\xgameruntime.dll");
+    if (!xgrMod) xgrMod = LoadLibraryW(L"xgameruntime.dll");
+    SC_EXPECT(xgrMod != nullptr);
+    struct LocalAB { void* q; void* ctx; void (CALLBACK* cb)(LocalAB*); unsigned char in[sizeof(void*) * 4]; };
+    struct LocalBI { const char* name; uint32_t size; };
+    struct LocalBlob { LocalBI info; uint8_t* data; };
+
+    auto pInit   = reinterpret_cast<HRESULT(WINAPI*)(void)>(GetProcAddress(xgrMod, "XGameRuntimeInitialize"));
+    auto pUninit = reinterpret_cast<void(WINAPI*)(void)>(GetProcAddress(xgrMod, "XGameRuntimeUninitialize"));
+    auto pQCr    = reinterpret_cast<HRESULT(WINAPI*)(uint32_t, uint32_t, void**)>(GetProcAddress(xgrMod, "XTaskQueueCreate"));
+    auto pQDisp  = reinterpret_cast<bool(WINAPI*)(void*, uint32_t, uint32_t)>(GetProcAddress(xgrMod, "XTaskQueueDispatch"));
+    auto pQCl    = reinterpret_cast<void(WINAPI*)(void*)>(GetProcAddress(xgrMod, "XTaskQueueCloseHandle"));
+    auto pUAdd   = reinterpret_cast<HRESULT(WINAPI*)(uint32_t, LocalAB*)>(GetProcAddress(xgrMod, "XUserAddAsync"));
+    auto pUAddR  = reinterpret_cast<HRESULT(WINAPI*)(LocalAB*, void**)>(GetProcAddress(xgrMod, "XUserAddResult"));
+    auto pUCl    = reinterpret_cast<void(WINAPI*)(void*)>(GetProcAddress(xgrMod, "XUserCloseHandle"));
+    auto pGsIn   = reinterpret_cast<HRESULT(WINAPI*)(void*, const char*, bool, LocalAB*)>(GetProcAddress(xgrMod, "XGameSaveInitializeProviderAsync"));
+    auto pGsInR  = reinterpret_cast<HRESULT(WINAPI*)(LocalAB*, void**)>(GetProcAddress(xgrMod, "XGameSaveInitializeProviderResult"));
+    auto pGsClP  = reinterpret_cast<void(WINAPI*)(void*)>(GetProcAddress(xgrMod, "XGameSaveCloseProvider"));
+    auto pGsCrC  = reinterpret_cast<HRESULT(WINAPI*)(void*, const char*, void**)>(GetProcAddress(xgrMod, "XGameSaveCreateContainer"));
+    auto pGsClC  = reinterpret_cast<void(WINAPI*)(void*)>(GetProcAddress(xgrMod, "XGameSaveCloseContainer"));
+    auto pGsCrU  = reinterpret_cast<HRESULT(WINAPI*)(void*, const char*, void**)>(GetProcAddress(xgrMod, "XGameSaveCreateUpdate"));
+    auto pGsClU  = reinterpret_cast<void(WINAPI*)(void*)>(GetProcAddress(xgrMod, "XGameSaveCloseUpdate"));
+    auto pGsWr   = reinterpret_cast<HRESULT(WINAPI*)(void*, const char*, const uint8_t*, size_t)>(GetProcAddress(xgrMod, "XGameSaveSubmitBlobWrite"));
+    auto pGsSub  = reinterpret_cast<HRESULT(WINAPI*)(void*, LocalAB*)>(GetProcAddress(xgrMod, "XGameSaveSubmitUpdateAsync"));
+    auto pGsSubR = reinterpret_cast<HRESULT(WINAPI*)(LocalAB*)>(GetProcAddress(xgrMod, "XGameSaveSubmitUpdateResult"));
+    auto pGsRd   = reinterpret_cast<HRESULT(WINAPI*)(void*, const char**, uint32_t, LocalAB*)>(GetProcAddress(xgrMod, "XGameSaveReadBlobDataAsync"));
+    auto pGsRdR  = reinterpret_cast<HRESULT(WINAPI*)(LocalAB*, size_t, LocalBlob*, uint32_t*)>(GetProcAddress(xgrMod, "XGameSaveReadBlobDataResult"));
+    SC_EXPECT(pInit && pUninit && pQCr && pQDisp && pQCl && pUAdd && pUAddR && pUCl &&
+              pGsIn && pGsInR && pGsClP && pGsCrC && pGsClC && pGsCrU && pGsClU && pGsWr && pGsSub && pGsSubR && pGsRd && pGsRdR);
+
+    SC_EXPECT(SUCCEEDED(pInit()));
+    void* tq = nullptr;
+    SC_EXPECT(SUCCEEDED(pQCr(0, 0, &tq)) && tq != nullptr);
+    LocalAB abU{}; abU.q = tq;
+    SC_EXPECT(SUCCEEDED(pUAdd(1, &abU)));
+    while (pQDisp(tq, 0, 0)) {} while (pQDisp(tq, 1, 0)) {}
+    void* user = nullptr;
+    SC_EXPECT(SUCCEEDED(pUAddR(&abU, &user)) && user != nullptr);
+
+    LocalAB abP{}; abP.q = tq;
+    SC_EXPECT(SUCCEEDED(pGsIn(user, "00000000-0000-0000-0000-000000000050", false, &abP)));
+    while (pQDisp(tq, 0, 0)) {} while (pQDisp(tq, 1, 0)) {}
+    void* prov = nullptr;
+    SC_EXPECT(SUCCEEDED(pGsInR(&abP, &prov)) && prov != nullptr);
+
+    void* cont = nullptr;
+    SC_EXPECT(SUCCEEDED(pGsCrC(prov, "sprint50_golden", &cont)) && cont != nullptr);
+    void* upd = nullptr;
+    SC_EXPECT(SUCCEEDED(pGsCrU(cont, "GoldenMaster", &upd)) && upd != nullptr);
+    const std::string checkpoint = "scarlett:v1.0:sprint50:all9shims:ok";
+    SC_EXPECT(SUCCEEDED(pGsWr(upd, "milestone", reinterpret_cast<const uint8_t*>(checkpoint.data()), checkpoint.size())));
+
+    LocalAB abS{}; abS.q = tq;
+    SC_EXPECT(SUCCEEDED(pGsSub(upd, &abS)));
+    while (pQDisp(tq, 0, 0)) {} while (pQDisp(tq, 1, 0)) {}
+    SC_EXPECT(SUCCEEDED(pGsSubR(&abS)));
+    pGsClU(upd);
+
+    const char* bNames[] = { "milestone" };
+    LocalAB abR{}; abR.q = tq;
+    SC_EXPECT(SUCCEEDED(pGsRd(cont, bNames, 1, &abR)));
+    while (pQDisp(tq, 0, 0)) {} while (pQDisp(tq, 1, 0)) {}
+    std::vector<uint8_t> rBuf(512, 0);
+    uint32_t bCnt = 0;
+    SC_EXPECT(SUCCEEDED(pGsRdR(&abR, rBuf.size(), reinterpret_cast<LocalBlob*>(rBuf.data()), &bCnt)));
+    SC_EXPECT(bCnt == 1);
+    const auto* blob = reinterpret_cast<const LocalBlob*>(rBuf.data());
+    SC_EXPECT(blob->info.size == checkpoint.size() && std::memcmp(blob->data, checkpoint.data(), checkpoint.size()) == 0);
+
+    pGsClC(cont); pGsClP(prov); pUCl(user); pQCl(tq); pUninit();
+    FreeLibrary(xgrMod);
+    FreeLibrary(kxMod);
+    pPixEnd();
+    FreeLibrary(pixMod);
+    std::filesystem::remove_all(tmpDir, ec);
+    return true;
+}
+
 bool TestLoaderXvdAndGameConfigE2E() {
     const auto tmpDir = std::filesystem::temp_directory_path() / "scarlett_sprint49_xvd_pkg";
     std::error_code ec;
@@ -5339,6 +5672,7 @@ int main() {
     RunTest("XMemAndXgXsSwizzleE2E",             TestXMemAndXgXsSwizzleE2E);
     RunTest("DStorageVelocityDynamicE2E",        TestDStorageVelocityDynamicE2E);
     RunTest("LoaderXvdAndGameConfigE2E",         TestLoaderXvdAndGameConfigE2E);
+    RunTest("ScarlettFullStack50SprintCapstoneE2E", TestScarlettFullStack50SprintCapstoneE2E);
 
     XGameRuntimeUninitialize();
 
