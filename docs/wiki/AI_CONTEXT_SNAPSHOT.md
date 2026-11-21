@@ -1,7 +1,7 @@
 # Scarlett Layer â€” AI Context Snapshot
 
-**Commit:** `7ab8721` (#72) | **Generated:** 2026-11-21 05:04 UTC  
-**Totals:** 61 files (18,889 LOC) | 12 shims | 45 CTest checks
+**Commit:** `03e18a1` (#74) | **Generated:** 2026-11-21 05:07 UTC  
+**Totals:** 61 files (19,014 LOC) | 12 shims | 46 CTest checks
 
 ---
 
@@ -121,7 +121,7 @@
  1651  src/tests/dummy_title/main.cpp
    59  src/tests/engine_plugin/engine_plugin.cpp
     3  src/tests/engine_plugin/engine_plugin.def
- 5052  src/tests/scarlett_tests/main.cpp
+ 5177  src/tests/scarlett_tests/main.cpp
   242  tools/audit_imports.py
   505  tools/build_wiki.py
   108  tools/test_brief.py
@@ -381,7 +381,7 @@
 - `MimgOp`: kMimgImageSample = 0x20u
 - `InstFormat`: Sopp, Vop1, Vop2, Vop3, Exp, Mubuf, Smem, Vintrp, Mimg
 
-## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 45 total)
+## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 46 total)
 ```cpp
     RunTest("VfsPathTranslation",         TestVfsPathTranslation);
     RunTest("RuntimeAndXUser",            TestRuntimeAndXUser);
@@ -428,9 +428,12 @@
     RunTest("GameInputRuntimePollingE2E",        TestGameInputRuntimePollingE2E);
     RunTest("ScarlettTitleBringUpE2E",           TestScarlettTitleBringUpE2E);
     RunTest("KernelXAndPixEvtE2E",               TestKernelXAndPixEvtE2E);
+    RunTest("XMemAndXgXsSwizzleE2E",             TestXMemAndXgXsSwizzleE2E);
 ```
 
 ## 6. Recent Git History
+- `03e18a1 Merge Sprint 46: kernelx & pixevt OS/profiler E2E (45/45 CTests)`
+- `a172169 Sprint 46: Phase 4 kickoff — kernelx & pixevt OS/profiler E2E (CTest #45)`
 - `7ab8721 Merge Sprint 45: Phase 3 closeout (44/44 CTests)`
 - `6f628b4 Sprint 45: Phase 3 closeout — full Scarlett title bring-up E2E (CTest #44)`
 - `62406f1 Merge Sprint 44: GameInput runtime polling E2E (43/43 CTests)`
@@ -439,5 +442,3 @@
 - `0209cbe Sprint 43: XUser profile parity (GetId/GetState/GetLocalId) + XGameSave E2E (CTest #42)`
 - `1c71a44 Merge Sprint 42: Phase 3 networking shims E2E (41/41 CTests)`
 - `6b2fae4 Sprint 42: Phase 3 networking shims E2E (libHttpClient + XCurl, CTest #41)`
-- `20de58b Merge Sprint 41: Phase 3 audio runtime E2E (40/40 CTests)`
-- `96e1a65 Sprint 41: Phase 3 audio runtime E2E (xaudio2_9 + AcpHal, CTest #40)`
