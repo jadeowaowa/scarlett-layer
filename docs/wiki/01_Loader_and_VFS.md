@@ -5,7 +5,9 @@
 - `src/common/codecs.hpp` (343 lines)
 - `src/common/stub.hpp` (43 lines)
 - `src/common/vfs.hpp` (76 lines)
-- `src/loader/main.cpp` (128 lines)
+- `src/common/xvd_container.hpp` (161 lines)
+- `src/loader/main.cpp` (166 lines)
+- `src/loader/pe_inspector.hpp` (177 lines)
 - `src/loader/pe_patcher.cpp` (396 lines)
 - `src/loader/pe_patcher.hpp` (19 lines)
 - `src/loader/scarlett_hook.cpp` (401 lines)
@@ -20,3 +22,6 @@
 - **Enum `Level`:** Trace, Info, Warn, Stub, Error
 
 ## `src/common/vfs.hpp`
+
+## `src/common/xvd_container.hpp`
+- **Structs:** `XvdHeader`

@@ -1,7 +1,7 @@
 # Scarlett Layer â€” AI Context Snapshot
 
-**Commit:** `e998915` (#30) | **Generated:** 2026-11-21 00:10 UTC  
-**Totals:** 58 files (15,569 LOC) | 12 shims | 25 CTest checks
+**Commit:** `ead135e` (#32) | **Generated:** 2026-11-21 00:15 UTC  
+**Totals:** 60 files (16,013 LOC) | 12 shims | 26 CTest checks
 
 ---
 
@@ -68,7 +68,9 @@
   343  src/common/codecs.hpp
    43  src/common/stub.hpp
    76  src/common/vfs.hpp
-  128  src/loader/main.cpp
+  161  src/common/xvd_container.hpp
+  166  src/loader/main.cpp
+  177  src/loader/pe_inspector.hpp
   396  src/loader/pe_patcher.cpp
    19  src/loader/pe_patcher.hpp
   401  src/loader/scarlett_hook.cpp
@@ -118,7 +120,7 @@
  1651  src/tests/dummy_title/main.cpp
    59  src/tests/engine_plugin/engine_plugin.cpp
     3  src/tests/engine_plugin/engine_plugin.def
- 2868  src/tests/scarlett_tests/main.cpp
+ 2936  src/tests/scarlett_tests/main.cpp
   242  tools/audit_imports.py
   505  tools/build_wiki.py
   108  tools/test_brief.py
@@ -341,7 +343,7 @@
 - `VintrpOp`: kVintrpP1F32 = 0x00u, kVintrpP2F32 = 0x01u, kVintrpMovF32 = 0x02u
 - `InstFormat`: Sopp, Vop1, Vop2, Vop3, Exp, Mubuf, Smem, Vintrp
 
-## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 25 total)
+## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 26 total)
 ```cpp
     RunTest("VfsPathTranslation",         TestVfsPathTranslation);
     RunTest("RuntimeAndXUser",            TestRuntimeAndXUser);
@@ -368,9 +370,12 @@
     RunTest("DStorageGpuTextureStreaming",       TestDStorageGpuTextureStreaming);
     RunTest("DStorageDeviceXBridgeAndMipChain",  TestDStorageDeviceXBridgeAndMipChain);
     RunTest("RetailBringUpShims",                TestRetailBringUpShims);
+    RunTest("LoaderInspectAndXvdMount",          TestLoaderInspectAndXvdMount);
 ```
 
 ## 6. Recent Git History
+- `ead135e Merge Sprint 26: Retail bring-up shims`
+- `5d4f624 Sprint 26: Retail bring-up shims (GameInput @1, AcpHal, libHttpClient.GDK, XCurl) + CTest #25`
 - `e998915 tools: add VS BuildTools ctest fallback to verify.bat`
 - `fc60b8d Sprint 25: d3d12_xs <-> dstorage_xs bridge, mip-chain streaming + CTest #24`
 - `4c41efe Sprint 24: DirectStorage direct-to-VRAM GPU texture streaming + CTest #23`
@@ -379,5 +384,3 @@
 - `c4b8cc0 Sprint 22: xg_xs RDNA2 64KB_S swizzling and BC1/BC3/BC7 block compression`
 - `f8fcebf Tools: add test_brief.py and --slim mode for AI_CONTEXT_SNAPSHOT.md`
 - `116f183 Tools: add zero-dependency wiki generator (build_wiki.py), INVARIANTS.md, and AI context snapshot`
-- `a72f224 Docs: Sprint 21 technical architecture paper revision (Sprints 17-21)`
-- `5eff0aa Sprint 21: binary RDNA2 VS lifter (SMEM CBVs, VINTRP, EXP pos0/param0) and full VS+PS pipeline`

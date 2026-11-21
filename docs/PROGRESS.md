@@ -106,3 +106,9 @@
 - Added `AcpHal.dll` (`src/shims/acphal/`) implementing `AcpHalCreate` (`IAcpHal` vtable: `Connect`, `Disconnect`, `SubmitCommand`, `PopMessage` with `0x80` disconnect event), `AcpHalAllocateShapeContexts`/`ReleaseShapeContexts`, and aligned `ApuAlloc`/`ApuFree`.
 - Added `libHttpClient.GDK.dll` (`src/shims/libhttpclient/`) and `XCurl.dll` (`src/shims/xcurl/`) with offline mock routing for retail bring-up without live network dependencies.
 - Added CTest #25 (`RetailBringUpShims`) verifying `gameinput.dll` dynamic hook + ordinal `#1`, `AcpHal` lifecycle/alignment, and `libHttpClient`/`XCurl` mock round-trips (`25 passed, 0 failed`).
+
+## Sprint 27: Loader PE Import Inspector & Unencrypted XVD Container
+- Added `src/common/xvd_container.hpp` implementing clean-room unencrypted XVD header parsing (`msft-xvd` magic at `0x200`), encryption rejection, bounds-checked `ReadUserData`, and a synthetic XVD builder.
+- Added `src/loader/pe_inspector.hpp` to audit PE64 import tables against `build/bin/shims/` and classify imports into Shimmed, System (including MSVC Debug/Release CRTs), and Missing.
+- Added `loader.exe --inspect <target.exe>` and `--inspect-xvd <file.xvd>` CLI modes in `src/loader/main.cpp`.
+- Added CTest #26 (`LoaderInspectAndXvdMount`) verifying PE64 import auditing and unencrypted/encrypted XVD handling (`26 passed, 0 failed`).
