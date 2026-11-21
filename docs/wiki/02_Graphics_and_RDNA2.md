@@ -1,7 +1,7 @@
 # 02 â€” Graphics (`d3d12_xs`), Surface Tiling (`xg_xs`) & RDNA2 Binary Lifter
 
 ## `d3d12_xs.dll`
-**Files:** `src/shims/d3d12_xs/command_list_x.cpp` (172 L), `src/shims/d3d12_xs/command_queue_x.cpp` (442 L), `src/shims/d3d12_xs/d3d12_xs.cpp` (104 L), `src/shims/d3d12_xs/d3d12_xs.def` (4 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (237 L), `src/shims/d3d12_xs/d3d12_xs_internal.hpp` (79 L), `src/shims/d3d12_xs/d3d12_xs_utils.cpp` (85 L), `src/shims/d3d12_xs/device_x.cpp` (664 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1191 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_translator.hpp` (401 L)
+**Files:** `src/shims/d3d12_xs/command_list_x.cpp` (187 L), `src/shims/d3d12_xs/command_queue_x.cpp` (442 L), `src/shims/d3d12_xs/d3d12_xs.cpp` (104 L), `src/shims/d3d12_xs/d3d12_xs.def` (4 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (244 L), `src/shims/d3d12_xs/d3d12_xs_internal.hpp` (79 L), `src/shims/d3d12_xs/d3d12_xs_utils.cpp` (85 L), `src/shims/d3d12_xs/device_x.cpp` (698 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1191 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_stripper.hpp` (272 L), `src/shims/d3d12_xs/shader_translator.hpp` (401 L)
 
 **DLL Exports (`.def`):** `D3D12XboxCreateDevice`, `D3D12SerializeRootSignature = ScarlettSerializeRootSignature`
 
@@ -48,6 +48,7 @@
 - `[33]` `void CopyTextureRegion( const D3D12_TEXTURE_COPY_LOCATION* pDst, UINT DstX, UINT DstY, UINT DstZ, const D3D12_TEXTURE_COPY_LOCATION* pSrc, const D3D12_BOX* pSrcBox)`
 - `[34]` `void InsertWaitOnPresent(UINT64 PresentToken)`
 - `[35]` `ID3D12GraphicsCommandList* GetNativeCommandList()`
+- `[36]` `void Barrier( UINT32 NumBarrierGroups, const D3D12_BARRIER_GROUP* pBarrierGroups)`
 
 **COM Interface `ID3D12DeviceX : IUnknown`:**
 - `[03]` `HRESULT CreateCommandQueueX( const D3D12_COMMAND_QUEUE_DESC* pDesc, ID3D12CommandQueueX** ppCommandQueue)`
@@ -69,6 +70,7 @@
 - `[19]` `HRESULT SetFrameIntervalX( IDXGIOutput* pOutput, uint32_t PeriodInMicroseconds, uint32_t MaxLatency, uint32_t Flags)`
 - `[20]` `HRESULT ScheduleFrameEventX( D3D12XBOX_FRAME_EVENT Event, UINT64 OffsetMicroseconds, HANDLE hEvent, uint32_t Flags)`
 - `[21]` `HRESULT WaitFrameEventX( D3D12XBOX_FRAME_EVENT Event, DWORD TimeoutInMilliseconds, HANDLE hEvent, D3D12XBOX_FRAME_PIPELINE_TOKEN* pToken)`
+- `[22]` `HRESULT CheckFeatureSupport( D3D12_FEATURE Feature, void* pFeatureSupportData, UINT FeatureSupportDataSize)`
 
 **Key Enums:**
 - `D3D12XBOX_FRAME_INTERVAL_FLAGS`: D3D12XBOX_FRAME_INTERVAL_FLAG_NONE = 0

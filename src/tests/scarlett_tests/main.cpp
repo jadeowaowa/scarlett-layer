@@ -72,6 +72,9 @@ constexpr TestEntry kTests[] = {
     {"Pe64ImplicitTlsAndGuestAtExitE2E",   TestPe64ImplicitTlsAndGuestAtExitE2E},
     {"AutoStubThunkSurvivalE2E",           TestAutoStubThunkSurvivalE2E},
     {"LoaderSymbolCoverageAuditE2E",       TestLoaderSymbolCoverageAuditE2E},
+    {"DxbcDigestAndXboxChunkStripperE2E",  TestDxbcDigestAndXboxChunkStripperE2E},
+    {"D3D12XsEnhancedBarriersE2E",         TestD3D12XsEnhancedBarriersE2E},
+    {"D3D12XsFeatureCapsQueryE2E",         TestD3D12XsFeatureCapsQueryE2E},
 };
 
 bool ContainsCaseInsensitive(std::string_view haystack, std::string_view needle) {

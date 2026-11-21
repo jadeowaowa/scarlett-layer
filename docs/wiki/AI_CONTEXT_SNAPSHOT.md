@@ -1,7 +1,7 @@
 # Scarlett Layer â€” AI Context Snapshot
 
-**Commit:** `b03456b` (#111) | **Generated:** 2026-11-21 15:15 UTC  
-**Totals:** 75 files (22,327 LOC) | 12 shims | 61 CTest checks
+**Commit:** `517c54d` (#113) | **Generated:** 2026-11-21 15:51 UTC  
+**Totals:** 76 files (22,876 LOC) | 12 shims | 64 CTest checks
 
 ---
 
@@ -80,16 +80,17 @@
   105  src/shims/acphal/acphal.cpp
     7  src/shims/acphal/acphal.def
    33  src/shims/acphal/acphal.hpp
-  172  src/shims/d3d12_xs/command_list_x.cpp
+  187  src/shims/d3d12_xs/command_list_x.cpp
   442  src/shims/d3d12_xs/command_queue_x.cpp
   104  src/shims/d3d12_xs/d3d12_xs.cpp
     4  src/shims/d3d12_xs/d3d12_xs.def
-  237  src/shims/d3d12_xs/d3d12_xs.hpp
+  244  src/shims/d3d12_xs/d3d12_xs.hpp
    79  src/shims/d3d12_xs/d3d12_xs_internal.hpp
    85  src/shims/d3d12_xs/d3d12_xs_utils.cpp
-  664  src/shims/d3d12_xs/device_x.cpp
+  698  src/shims/d3d12_xs/device_x.cpp
  1191  src/shims/d3d12_xs/rdna2_isa.hpp
   201  src/shims/d3d12_xs/shader_inspector.hpp
+  272  src/shims/d3d12_xs/shader_stripper.hpp
   401  src/shims/d3d12_xs/shader_translator.hpp
  1269  src/shims/dstorage_xs/dstorage_xs.cpp
     4  src/shims/dstorage_xs/dstorage_xs.def
@@ -129,10 +130,10 @@
    59  src/tests/engine_plugin/engine_plugin.cpp
     3  src/tests/engine_plugin/engine_plugin.def
   328  src/tests/scarlett_3d_demo/main.cpp
-  140  src/tests/scarlett_tests/main.cpp
-  170  src/tests/scarlett_tests/test_harness.hpp
+  143  src/tests/scarlett_tests/main.cpp
+  176  src/tests/scarlett_tests/test_harness.hpp
  1312  src/tests/scarlett_tests/tests_d3d12_core.cpp
- 1658  src/tests/scarlett_tests/tests_d3d12_shaders_present.cpp
+ 1870  src/tests/scarlett_tests/tests_d3d12_shaders_present.cpp
  1346  src/tests/scarlett_tests/tests_loader_e2e.cpp
   876  src/tests/scarlett_tests/tests_runtime_io.cpp
  1524  src/tests/scarlett_tests/tests_storage_swizzle.cpp
@@ -156,7 +157,7 @@
 - `HRESULT WINAPI ApuFree(void* virtualAddress)`
 
 ## `d3d12_xs.dll`
-**Files:** `src/shims/d3d12_xs/command_list_x.cpp` (172 L), `src/shims/d3d12_xs/command_queue_x.cpp` (442 L), `src/shims/d3d12_xs/d3d12_xs.cpp` (104 L), `src/shims/d3d12_xs/d3d12_xs.def` (4 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (237 L), `src/shims/d3d12_xs/d3d12_xs_internal.hpp` (79 L), `src/shims/d3d12_xs/d3d12_xs_utils.cpp` (85 L), `src/shims/d3d12_xs/device_x.cpp` (664 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1191 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_translator.hpp` (401 L)
+**Files:** `src/shims/d3d12_xs/command_list_x.cpp` (187 L), `src/shims/d3d12_xs/command_queue_x.cpp` (442 L), `src/shims/d3d12_xs/d3d12_xs.cpp` (104 L), `src/shims/d3d12_xs/d3d12_xs.def` (4 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (244 L), `src/shims/d3d12_xs/d3d12_xs_internal.hpp` (79 L), `src/shims/d3d12_xs/d3d12_xs_utils.cpp` (85 L), `src/shims/d3d12_xs/device_x.cpp` (698 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1191 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_stripper.hpp` (272 L), `src/shims/d3d12_xs/shader_translator.hpp` (401 L)
 
 **DLL Exports (`.def`):** `D3D12XboxCreateDevice`, `D3D12SerializeRootSignature = ScarlettSerializeRootSignature`
 
@@ -203,6 +204,7 @@
 - `[33]` `void CopyTextureRegion( const D3D12_TEXTURE_COPY_LOCATION* pDst, UINT DstX, UINT DstY, UINT DstZ, const D3D12_TEXTURE_COPY_LOCATION* pSrc, const D3D12_BOX* pSrcBox)`
 - `[34]` `void InsertWaitOnPresent(UINT64 PresentToken)`
 - `[35]` `ID3D12GraphicsCommandList* GetNativeCommandList()`
+- `[36]` `void Barrier( UINT32 NumBarrierGroups, const D3D12_BARRIER_GROUP* pBarrierGroups)`
 
 **COM Interface `ID3D12DeviceX : IUnknown`:**
 - `[03]` `HRESULT CreateCommandQueueX( const D3D12_COMMAND_QUEUE_DESC* pDesc, ID3D12CommandQueueX** ppCommandQueue)`
@@ -224,6 +226,7 @@
 - `[19]` `HRESULT SetFrameIntervalX( IDXGIOutput* pOutput, uint32_t PeriodInMicroseconds, uint32_t MaxLatency, uint32_t Flags)`
 - `[20]` `HRESULT ScheduleFrameEventX( D3D12XBOX_FRAME_EVENT Event, UINT64 OffsetMicroseconds, HANDLE hEvent, uint32_t Flags)`
 - `[21]` `HRESULT WaitFrameEventX( D3D12XBOX_FRAME_EVENT Event, DWORD TimeoutInMilliseconds, HANDLE hEvent, D3D12XBOX_FRAME_PIPELINE_TOKEN* pToken)`
+- `[22]` `HRESULT CheckFeatureSupport( D3D12_FEATURE Feature, void* pFeatureSupportData, UINT FeatureSupportDataSize)`
 
 ## `dstorage_xs.dll`
 **Files:** `src/shims/dstorage_xs/dstorage_xs.cpp` (1269 L), `src/shims/dstorage_xs/dstorage_xs.def` (4 L), `src/shims/dstorage_xs/dstorage_xs.hpp` (181 L)
@@ -395,7 +398,7 @@
 - `MimgOp`: kMimgImageSample = 0x20u
 - `InstFormat`: Sopp, Vop1, Vop2, Vop3, Exp, Mubuf, Smem, Vintrp, Mimg
 
-## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 61 total)
+## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 64 total)
 ```cpp
     {"VfsPathTranslation",                 TestVfsPathTranslation},
     {"RuntimeAndXUser",                    TestRuntimeAndXUser},
@@ -458,9 +461,14 @@
     {"Pe64ImplicitTlsAndGuestAtExitE2E",   TestPe64ImplicitTlsAndGuestAtExitE2E},
     {"AutoStubThunkSurvivalE2E",           TestAutoStubThunkSurvivalE2E},
     {"LoaderSymbolCoverageAuditE2E",       TestLoaderSymbolCoverageAuditE2E},
+    {"DxbcDigestAndXboxChunkStripperE2E",  TestDxbcDigestAndXboxChunkStripperE2E},
+    {"D3D12XsEnhancedBarriersE2E",         TestD3D12XsEnhancedBarriersE2E},
+    {"D3D12XsFeatureCapsQueryE2E",         TestD3D12XsFeatureCapsQueryE2E},
 ```
 
 ## 6. Recent Git History
+- `517c54d Merge Sprint 64: JIT x64 auto-stub thunks & symbol coverage audit (61/61 CTests)`
+- `3c32f75 Sprint 64: JIT x64 W^X auto-stub thunks, symbol coverage CLI, and XAudio2CreateWithVersionInfo (61/61 CTests)`
 - `b03456b Merge Sprint 63: PE64 implicit TLS & XMem 16-byte alignment (59/59 CTests)`
 - `86d7633 Sprint 63: PE64 implicit TLS, isolated guest atexit, and XMem 16-byte alignment (59/59 CTests)`
 - `56bfe0e Merge docs refresh: Sprint 62 README, Sprints 63-72 roadmap, wiki test parser`
@@ -469,5 +477,3 @@
 - `ef51508 Sprint 62: Centralized sc::config, MakeCom RAII factories, and /W4 hygiene`
 - `f8f6eeb Merge Sprint 61: Modularize scarlett_tests suite (57/57 CTests)`
 - `199d672 Sprint 61: Modularize scarlett_tests into subsystem suites + CLI filtering`
-- `d5f5fb0 Merge Sprint 60: Modularize d3d12_xs shim (57/57 CTests)`
-- `6e5f1ef Sprint 60: Decompose d3d12_xs.cpp monolith into modular translation units`

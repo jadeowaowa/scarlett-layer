@@ -4,7 +4,7 @@
 
 **Clean-room Windows / D3D12 binary compatibility & shim layer for Xbox Series X|S (Scarlett / GDK) x64 executables.**
 
-[![Release](https://img.shields.io/badge/release-v1.0.0-ff0040?style=flat-square)](https://github.com/jadeowaowa/scarlett-layer/releases/tag/v1.0.0-scarlett-layer) [![Build](https://img.shields.io/badge/build-CMake%20%2B%20Ninja%20%2B%20MSVC%20%2FW4-0078D4?style=flat-square)](#build--verify) [![Tests](https://img.shields.io/badge/CTests-61%2F61%20passing-2ea44f?style=flat-square)](#verification-suite) [![Baseline](https://img.shields.io/badge/baseline-sprint--64-8957e5?style=flat-square)](#delivery-timeline) [![Platform](https://img.shields.io/badge/platform-Windows%20x64%20%7C%20D3D12-blue?style=flat-square)](#requirements)
+[![Release](https://img.shields.io/badge/release-v1.0.0-ff0040?style=flat-square)](https://github.com/jadeowaowa/scarlett-layer/releases/tag/v1.0.0-scarlett-layer) [![Build](https://img.shields.io/badge/build-CMake%20%2B%20Ninja%20%2B%20MSVC%20%2FW4-0078D4?style=flat-square)](#build--verify) [![Tests](https://img.shields.io/badge/CTests-64%2F64%20passing-2ea44f?style=flat-square)](#verification-suite) [![Baseline](https://img.shields.io/badge/baseline-sprint--65-8957e5?style=flat-square)](#delivery-timeline) [![Platform](https://img.shields.io/badge/platform-Windows%20x64%20%7C%20D3D12-blue?style=flat-square)](#requirements)
 
 </div>
 
@@ -61,7 +61,7 @@ Unpacked Scarlett Title Package (MicrosoftGame.Config | Unencrypted XVD | Title 
 git clone https://github.com/jadeowaowa/scarlett-layer.git
 cd scarlett-layer
 
-# Full build + 61/61 CTest run (strict zero-warning D3D12 validation)
+# Full build + 64/64 CTest run (strict zero-warning D3D12 validation)
 $env:SCARLETT_STRICT_D3D12 = "1"
 .\tools\verify.bat --verbose
 ```
@@ -77,9 +77,9 @@ $env:SCARLETT_STRICT_D3D12 = "1"
 .\build\bin\titles\scarlett_tests\scarlett_tests.exe --filter PresentX
 ```
 
-### Verification Suite (`61/61` Passing)
+### Verification Suite (`64/64` Passing)
 
-All **61 CTests** execute end-to-end on real D3D12 hardware with **0 `/W4` compiler warnings** and **0 `d3d12_debug` validation errors or warnings**. Key integration benchmarks include:
+All **64 CTests** execute end-to-end on real D3D12 hardware with **0 `/W4` compiler warnings** and **0 `d3d12_debug` validation errors or warnings**. Key integration benchmarks include:
 
 - **`ScarlettFullStack50SprintCapstoneE2E` & `ScarlettTitleBringUpE2E`** — Full boot-to-frame-to-save runs uniting all shims + unencrypted XVD / `MicrosoftGame.Config` packaging.
 - **`D3D12Xs3DPerspectiveDepthRenderE2E` & `D3D12XsAsyncComputeCrossQueueSyncE2E`** — 3D depth-buffered rendering, cross-queue `DIRECT` + `COMPUTE` fence sync, and `PresentX` resource lifetime hardening.
@@ -96,8 +96,8 @@ All **61 CTests** execute end-to-end on real D3D12 hardware with **0 `/W4` compi
 | **Phase 2: Hooks, I/O & D3D12_XS** | Sprints 34–40 | `GetModuleHandle*` hooks, `dstorage_xs` GPU streaming + fence E2E, RDNA2 Compute `Dispatch`, `ID3D12GraphicsCommandListX` wrapper, PSO cache hardening (38 CTests) | **Done** |
 | **Phase 3: Runtime Bring-Up** | Sprints 41–45 | `xaudio2_9`/`AcpHal` playback, `libHttpClient`/`XCurl` networking, `XUser`/`XGameSave`, `gameinput`, `ScarlettTitleBringUpE2E` (44 CTests) | **Done** |
 | **Phase 4: OS, Telemetry & v1.0** | Sprints 46–50 | `kernelx`/`pixevt`, `xmem`/`xg_xs` BC7 swizzle, dynamic `dstorage_xs`, XVD/Config E2E, 50-Sprint Golden Master Capstone (49 CTests) | **Done** |
-| **Phase 5: ABI, PresentX & Async Compute** | Sprints 51–58 | Delay-load & ordinal hooks, 3D depth rendering, COM vtable ABI conformance, DXGI + headless `PresentX`, frame-pacing tokens, async compute cross-queue fence sync & `0x87D` lifetime hardening (61 CTests) | **Done** |
-| **Phase 6: Architecture Refactor & Hardening** | Sprints 59–62 | `SCARLETT_STRICT_D3D12=1` zero-warning validation, modular `d3d12_xs` (5 TUs), modular `scarlett_tests` (5 suites + `--list`/`--filter`), `common/config.hpp`, `MakeCom` RAII, `/W4` clean build (61 CTests) | **Done** |
+| **Phase 5: ABI, PresentX & Async Compute** | Sprints 51–58 | Delay-load & ordinal hooks, 3D depth rendering, COM vtable ABI conformance, DXGI + headless `PresentX`, frame-pacing tokens, async compute cross-queue fence sync & `0x87D` lifetime hardening (64 CTests) | **Done** |
+| **Phase 6: Architecture Refactor & Hardening** | Sprints 59–62 | `SCARLETT_STRICT_D3D12=1` zero-warning validation, modular `d3d12_xs` (5 TUs), modular `scarlett_tests` (5 suites + `--list`/`--filter`), `common/config.hpp`, `MakeCom` RAII, `/W4` clean build (64 CTests) | **Done** |
 
 ## Next 10-Sprint Roadmap (Sprints 63–72)
 
