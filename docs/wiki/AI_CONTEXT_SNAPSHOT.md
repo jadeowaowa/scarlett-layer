@@ -1,7 +1,7 @@
 # Scarlett Layer â€” AI Context Snapshot
 
-**Commit:** `834af4f` (#84) | **Generated:** 2026-11-21 05:34 UTC  
-**Totals:** 61 files (19,638 LOC) | 12 shims | 50 CTest checks
+**Commit:** `a84c1d3` (#86) | **Generated:** 2026-11-21 05:38 UTC  
+**Totals:** 61 files (19,764 LOC) | 12 shims | 51 CTest checks
 
 ---
 
@@ -74,7 +74,7 @@
   208  src/loader/pe_inspector.hpp
   396  src/loader/pe_patcher.cpp
    19  src/loader/pe_patcher.hpp
-  469  src/loader/scarlett_hook.cpp
+  510  src/loader/scarlett_hook.cpp
   105  src/shims/acphal/acphal.cpp
     7  src/shims/acphal/acphal.def
    33  src/shims/acphal/acphal.hpp
@@ -121,7 +121,7 @@
  1651  src/tests/dummy_title/main.cpp
    59  src/tests/engine_plugin/engine_plugin.cpp
     3  src/tests/engine_plugin/engine_plugin.def
- 5770  src/tests/scarlett_tests/main.cpp
+ 5855  src/tests/scarlett_tests/main.cpp
   242  tools/audit_imports.py
   505  tools/build_wiki.py
   108  tools/test_brief.py
@@ -381,7 +381,7 @@
 - `MimgOp`: kMimgImageSample = 0x20u
 - `InstFormat`: Sopp, Vop1, Vop2, Vop3, Exp, Mubuf, Smem, Vintrp, Mimg
 
-## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 50 total)
+## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 51 total)
 ```cpp
     RunTest("VfsPathTranslation",         TestVfsPathTranslation);
     RunTest("RuntimeAndXUser",            TestRuntimeAndXUser);
@@ -433,9 +433,12 @@
     RunTest("LoaderXvdAndGameConfigE2E",         TestLoaderXvdAndGameConfigE2E);
     RunTest("ScarlettFullStack50SprintCapstoneE2E", TestScarlettFullStack50SprintCapstoneE2E);
     RunTest("PeDelayLoadAndOrdinalAuditE2E",     TestPeDelayLoadAndOrdinalAuditE2E);
+    RunTest("RuntimeDelayLoadAndOrdinalHookE2E", TestRuntimeDelayLoadAndOrdinalHookE2E);
 ```
 
 ## 6. Recent Git History
+- `a84c1d3 Merge Sprint 51: PE64 delay-load & ordinal import auditing (50/50 CTests)`
+- `2029333 Sprint 51: Phase 5 kickoff — PE64 delay-load & ordinal import auditing (CTest #50)`
 - `834af4f Docs: Clean up README for v1.0.0 release and add v2.0+ roadmap`
 - `273f98d Docs: Add v1.0.0 Golden Master milestone summary to README`
 - `0d60944 Merge Sprint 50: 50-Sprint Golden Master Capstone (49/49 CTests)`
@@ -444,5 +447,3 @@
 - `0b86dbf Sprint 49: Loader packaging — unencrypted XVD & MicrosoftGame.config E2E (CTest #48)`
 - `316eb9e Merge Sprint 48: dstorage_xs dynamic Velocity streaming E2E (47/47 CTests)`
 - `ad04cf2 Sprint 48: dstorage_xs dynamic Velocity streaming & status-array E2E (CTest #47)`
-- `48df6a1 Merge Sprint 47: xmem & xg_xs physical memory + BC7 swizzle E2E (46/46 CTests)`
-- `8ed0b9c Sprint 47: xmem & xg_xs physical memory + 64KB_S BC7 swizzle E2E (CTest #46)`

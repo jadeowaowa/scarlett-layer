@@ -2371,6 +2371,90 @@ static size_t CurlTestWriteCb(char* ptr, size_t size, size_t nmemb, void* userda
     return total;
 }
 
+bool TestRuntimeDelayLoadAndOrdinalHookE2E() {
+    HMODULE hookMod = GetModuleHandleW(L"scarlett_hook.dll");
+    bool loadedByTest = false;
+    if (!hookMod) {
+        hookMod = LoadLibraryW(L"scarlett_hook.dll");
+        loadedByTest = (hookMod != nullptr);
+    }
+    SC_EXPECT(hookMod != nullptr);
+
+    using PFN_PatchTest = uint32_t(WINAPI*)(HMODULE);
+    using PFN_GetStats  = void(WINAPI*)(uint32_t*, uint32_t*);
+    auto pPatchTest = reinterpret_cast<PFN_PatchTest>(GetProcAddress(hookMod, "ScarlettHookPatchModuleForTest"));
+    auto pGetStats  = reinterpret_cast<PFN_GetStats>(GetProcAddress(hookMod, "ScarlettHookGetRuntimeStats"));
+    SC_EXPECT(pPatchTest != nullptr && pGetStats != nullptr);
+
+    uint32_t delayBefore = 0, ordBefore = 0;
+    pGetStats(&delayBefore, &ordBefore);
+
+    // Synthesize an in-memory PE64 image with a Delay-Load descriptor importing LoadLibraryW & GetProcAddress
+    uint8_t* img = static_cast<uint8_t*>(VirtualAlloc(nullptr, 0x2000, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
+    SC_EXPECT(img != nullptr);
+
+    auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(img);
+    dos->e_magic = IMAGE_DOS_SIGNATURE;
+    dos->e_lfanew = 0x80;
+
+    auto* nt = reinterpret_cast<IMAGE_NT_HEADERS64*>(img + 0x80);
+    nt->Signature = IMAGE_NT_SIGNATURE;
+    nt->FileHeader.Machine = IMAGE_FILE_MACHINE_AMD64;
+    nt->FileHeader.SizeOfOptionalHeader = sizeof(IMAGE_OPTIONAL_HEADER64);
+    nt->OptionalHeader.Magic = IMAGE_NT_OPTIONAL_HDR64_MAGIC;
+    nt->OptionalHeader.NumberOfRvaAndSizes = IMAGE_NUMBEROF_DIRECTORY_ENTRIES;
+    nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT].VirtualAddress = 0x1000;
+    nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT].Size = sizeof(IMAGE_DELAYLOAD_DESCRIPTOR) * 2;
+
+    std::strcpy(reinterpret_cast<char*>(img + 0x1300), "kernel32.dll");
+    auto* ibn0 = reinterpret_cast<IMAGE_IMPORT_BY_NAME*>(img + 0x1320);
+    std::strcpy(ibn0->Name, "LoadLibraryW");
+    auto* ibn1 = reinterpret_cast<IMAGE_IMPORT_BY_NAME*>(img + 0x1350);
+    std::strcpy(ibn1->Name, "GetProcAddress");
+
+    auto* ddesc = reinterpret_cast<IMAGE_DELAYLOAD_DESCRIPTOR*>(img + 0x1000);
+    ddesc[0].Attributes.AllAttributes = 1;
+    ddesc[0].DllNameRVA = 0x1300;
+    ddesc[0].ImportNameTableRVA = 0x1100;
+    ddesc[0].ImportAddressTableRVA = 0x1200;
+
+    auto* intThunks = reinterpret_cast<IMAGE_THUNK_DATA64*>(img + 0x1100);
+    intThunks[0].u1.AddressOfData = 0x1320;
+    intThunks[1].u1.AddressOfData = 0x1350;
+    intThunks[2].u1.AddressOfData = 0;
+
+    auto* iatThunks = reinterpret_cast<IMAGE_THUNK_DATA64*>(img + 0x1200);
+    iatThunks[0].u1.Function = 0xDEADBEEFULL;
+    iatThunks[1].u1.Function = 0xCAFEBABEULL;
+    iatThunks[2].u1.Function = 0;
+
+    const uint32_t patched = pPatchTest(reinterpret_cast<HMODULE>(img));
+    SC_EXPECT(patched == 2);
+    SC_EXPECT(iatThunks[0].u1.Function != 0xDEADBEEFULL);
+    SC_EXPECT(iatThunks[1].u1.Function != 0xCAFEBABEULL);
+
+    // Invoke the patched GetProcAddress hook with an ordinal lookup on d3d12_xs.dll
+    using PFN_GetProc = FARPROC(WINAPI*)(HMODULE, LPCSTR);
+    auto hookedGetProc = reinterpret_cast<PFN_GetProc>(iatThunks[1].u1.Function);
+    HMODULE d3dMod = LoadLibraryW(L"shims\\d3d12_xs.dll");
+    if (!d3dMod) d3dMod = LoadLibraryW(L"d3d12_xs.dll");
+    SC_EXPECT(d3dMod != nullptr);
+    FARPROC ordProc = hookedGetProc(d3dMod, MAKEINTRESOURCEA(1));
+    SC_EXPECT(ordProc != nullptr);
+    FreeLibrary(d3dMod);
+
+    uint32_t delayAfter = 0, ordAfter = 0;
+    pGetStats(&delayAfter, &ordAfter);
+    SC_EXPECT(delayAfter >= delayBefore + 2);
+    SC_EXPECT(ordAfter >= ordBefore + 1);
+
+    VirtualFree(img, 0, MEM_RELEASE);
+    if (loadedByTest) {
+        FreeLibrary(hookMod);
+    }
+    return true;
+}
+
 bool TestPeDelayLoadAndOrdinalAuditE2E() {
     const auto tmpDir = std::filesystem::temp_directory_path() / "scarlett_sprint51_pe_audit";
     std::error_code ec;
@@ -5762,6 +5846,7 @@ int main() {
     RunTest("LoaderXvdAndGameConfigE2E",         TestLoaderXvdAndGameConfigE2E);
     RunTest("ScarlettFullStack50SprintCapstoneE2E", TestScarlettFullStack50SprintCapstoneE2E);
     RunTest("PeDelayLoadAndOrdinalAuditE2E",     TestPeDelayLoadAndOrdinalAuditE2E);
+    RunTest("RuntimeDelayLoadAndOrdinalHookE2E", TestRuntimeDelayLoadAndOrdinalHookE2E);
 
     XGameRuntimeUninitialize();
 

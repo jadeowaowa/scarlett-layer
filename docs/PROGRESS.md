@@ -211,3 +211,7 @@
 ## Sprint 51: Phase 5 Kickoff — PE64 Delay-Load & Ordinal Import Auditing
 - Extended `sc::loader::InspectPeImports` in `src/loader/pe_inspector.hpp` to parse `IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT` (`IMAGE_DELAYLOAD_DESCRIPTOR`) and count `IMAGE_ORDINAL_FLAG64` ordinal-only imports across both standard and delay-load tables.
 - Added CTest #50 (`PeDelayLoadAndOrdinalAuditE2E`) in `src/tests/scarlett_tests/main.cpp` validating synthetic PE64 delay-load and ordinal import auditing (`50 passed, 0 failed`).
+
+## Sprint 52: Runtime Delay-Load IAT Patching & GetProcAddress Ordinal Hook
+- Extended `src/loader/scarlett_hook.cpp` to patch `IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT` thunks alongside standard IAT entries, hook `GetProcAddress` with ordinal-lookup tracking, and expose `ScarlettHookPatchModuleForTest` / `ScarlettHookGetRuntimeStats`.
+- Added CTest #51 (`RuntimeDelayLoadAndOrdinalHookE2E`) in `src/tests/scarlett_tests/main.cpp` validating live in-memory delay-load IAT rewriting and ordinal `GetProcAddress` resolution (`51 passed, 0 failed`).
