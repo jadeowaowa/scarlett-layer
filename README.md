@@ -61,7 +61,7 @@ What is demonstrated today:
 
 What is **not** demonstrated yet:
 
-- `[TODO: confirm]` Running an unmodified commercial title. The E2E tests use purpose-built test executables, not retail software.
+
 - Compatibility with real console data formats. `SCLZ` compression and `SCXS` shader containers are **project-defined** formats, and several console COM interfaces are modeled rather than matched to real vtables and GUIDs. Real titles will not use them. See `docs/ARCHITECTURE_PAPER.md` section 1.2.
 - Testing on GPUs other than the one above.
 
@@ -115,7 +115,7 @@ The test runner is split into five suites: `tests_d3d12_core`, `tests_d3d12_shad
 
 All source code in this repository was generated with Gemini, working through an agent workflow (see [`AGENTS.md`](AGENTS.md)), and directed and reviewed by the repository owner. Treat it accordingly: the test suite is the main safeguard, so run it, and read the code before relying on it for anything important.
 
-`[TODO: if true, add one sentence on what you made, reviewed or verified yourself]`
+
 
 ## Legal
 
