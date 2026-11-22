@@ -13,6 +13,10 @@ bool TestXGameRuntimeComBrokerE2E();
 bool TestScarlettStudioSelfTest();
 bool TestXvdRealOffsetsAndGeometry();
 bool TestMalformedPeAndConfigHardening();
+bool TestRdna2OracleAluAndCbvDiffE2E();
+bool TestRdna2OracleFp16LdsAndCfDiffE2E();
+bool TestRdna2OracleControlFlowAndRealRgaCsDiffE2E();
+bool TestRdna2OracleGraphicsPipelineDiffE2E();
 
 namespace {
 
@@ -96,6 +100,10 @@ constexpr TestEntry kTests[] = {
     {"ScarlettStudioSelfTest",             TestScarlettStudioSelfTest},
     {"XvdRealOffsetsAndGeometry",          TestXvdRealOffsetsAndGeometry},
     {"MalformedPeAndConfigHardening",      TestMalformedPeAndConfigHardening},
+    {"Rdna2OracleAluAndCbvDiffE2E",        TestRdna2OracleAluAndCbvDiffE2E},
+    {"Rdna2OracleFp16LdsAndCfDiffE2E",     TestRdna2OracleFp16LdsAndCfDiffE2E},
+    {"Rdna2OracleControlFlowAndRealRgaCsDiffE2E", TestRdna2OracleControlFlowAndRealRgaCsDiffE2E},
+    {"Rdna2OracleGraphicsPipelineDiffE2E", TestRdna2OracleGraphicsPipelineDiffE2E},
 };
 
 bool EqualsCaseInsensitive(std::string_view a, std::string_view b) {

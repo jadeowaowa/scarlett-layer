@@ -7,7 +7,7 @@
 
 | Metric | Value | Notes |
 | :--- | :--- | :--- |
-| **Tier 1 (Self-Authored Synthetic CTests)** | **74/74** (`42 cpu`, `32 gpu`) | Discovered from `src/tests/scarlett_tests/main.cpp` + `CMakeLists.txt`; run in CI via Microsoft WARP. |
+| **Tier 1 (Self-Authored Synthetic CTests)** | **78/78** (`42 cpu`, `36 gpu`) | Discovered from `src/tests/scarlett_tests/main.cpp` + `CMakeLists.txt`; run in CI via Microsoft WARP. |
 | **Tier 2 (Automated External Xbox-Targeted Binaries)** | **0** | No unmodified `Gaming.Xbox.Scarlett.x64` binary runs in CI yet (planned Sprint 72). |
 | **Local Desktop GDK Sample** | `SimpleTriangleDesktop.exe` (PC Desktop target) | Boots, renders, and exits cleanly (`code=0`, 0 auto-stubs) locally; not an Xbox console target. |
 | **Shim DLL Targets & Exported Symbols** | **12 `.def` shims** (`97` exports) | Plus `libHttpClient.dll` alias staged beside `libHttpClient.GDK.dll`. |
@@ -108,3 +108,7 @@
 | 72 | `ScarlettStudioSelfTest` | `cpu` |
 | 73 | `XvdRealOffsetsAndGeometry` | `cpu` |
 | 74 | `MalformedPeAndConfigHardening` | `cpu` |
+| 75 | `Rdna2OracleAluAndCbvDiffE2E` | `gpu` |
+| 76 | `Rdna2OracleFp16LdsAndCfDiffE2E` | `gpu` |
+| 77 | `Rdna2OracleControlFlowAndRealRgaCsDiffE2E` | `gpu` |
+| 78 | `Rdna2OracleGraphicsPipelineDiffE2E` | `gpu` |

@@ -178,6 +178,7 @@ add_executable(scarlett_tests
     src/tests/scarlett_tests/tests_storage_swizzle.cpp
     src/tests/scarlett_tests/tests_runtime_io.cpp
     src/tests/scarlett_tests/tests_loader_e2e.cpp
+    src/tests/scarlett_tests/tests_rdna2_oracle.cpp
 )
 target_link_libraries(scarlett_tests PRIVATE sc_common xgameruntime d3d12_xs gameinput xg_xs dstorage_xs xaudio2_9 xmem kernelx acphal libhttpclient xcurl d3dcompiler)
 add_dependencies(scarlett_tests pixevt engine_plugin scarlett_studio)
@@ -207,6 +208,13 @@ target_link_libraries(scarlett_studio PRIVATE sc_common user32 gdi32 comdlg32 sh
 add_dependencies(scarlett_studio loader)
 sc_set_runtime_dir(scarlett_studio "${SC_BIN_DIR}")
 sc_set_runtime_dir(loader "${SC_BIN_DIR}")
+
+# Offline RDNA2 corpus sweep tool -> build/bin/rdna2_sweep.exe
+add_executable(rdna2_sweep
+    src/tools/rdna2_sweep/main.cpp
+)
+target_link_libraries(rdna2_sweep PRIVATE sc_common d3dcompiler)
+sc_set_runtime_dir(rdna2_sweep "${SC_BIN_DIR}")
 
 # Register each test from scarlett_tests/main.cpp individually in CTest
 set(_sc_tests_main "${CMAKE_SOURCE_DIR}/src/tests/scarlett_tests/main.cpp")
@@ -246,6 +254,10 @@ set(_sc_gpu_tests
     DxbcDigestAndXboxChunkStripperE2E
     D3D12XsEnhancedBarriersE2E
     D3D12XsFeatureCapsQueryE2E
+    Rdna2OracleAluAndCbvDiffE2E
+    Rdna2OracleFp16LdsAndCfDiffE2E
+    Rdna2OracleControlFlowAndRealRgaCsDiffE2E
+    Rdna2OracleGraphicsPipelineDiffE2E
 )
 
 set(_sc_registered_count 0)

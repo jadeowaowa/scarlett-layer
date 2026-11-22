@@ -1,6 +1,6 @@
 # 05 — Automated Test Suite & Synthetic Title Index
 
-`scarlett_tests.exe` runs **74 checks** via `loader.exe` under CTest (`ctest --test-dir build`).
+`scarlett_tests.exe` runs **78 checks** via `loader.exe` under CTest (`ctest --test-dir build`).
 
 ## Exact `RunTest` Registration Order (`src/tests/scarlett_tests/main.cpp`)
 ```cpp
@@ -152,6 +152,14 @@
     {"XvdRealOffsetsAndGeometry",          TestXvdRealOffsetsAndGeometry},
 // 74
     {"MalformedPeAndConfigHardening",      TestMalformedPeAndConfigHardening},
+// 75
+    {"Rdna2OracleAluAndCbvDiffE2E",        TestRdna2OracleAluAndCbvDiffE2E},
+// 76
+    {"Rdna2OracleFp16LdsAndCfDiffE2E",     TestRdna2OracleFp16LdsAndCfDiffE2E},
+// 77
+    {"Rdna2OracleControlFlowAndRealRgaCsDiffE2E", TestRdna2OracleControlFlowAndRealRgaCsDiffE2E},
+// 78
+    {"Rdna2OracleGraphicsPipelineDiffE2E", TestRdna2OracleGraphicsPipelineDiffE2E},
 ```
 
 ## Test & Title Files
@@ -159,10 +167,12 @@
 - `src/tests/engine_plugin/engine_plugin.cpp` (59 lines)
 - `src/tests/engine_plugin/engine_plugin.def` (3 lines)
 - `src/tests/scarlett_3d_demo/main.cpp` (328 lines)
-- `src/tests/scarlett_tests/main.cpp` (194 lines)
+- `src/tests/scarlett_tests/main.cpp` (202 lines)
+- `src/tests/scarlett_tests/rdna2_oracle_harness.hpp` (156 lines)
 - `src/tests/scarlett_tests/test_harness.hpp` (176 lines)
 - `src/tests/scarlett_tests/tests_d3d12_core.cpp` (1312 lines)
 - `src/tests/scarlett_tests/tests_d3d12_shaders_present.cpp` (1949 lines)
 - `src/tests/scarlett_tests/tests_loader_e2e.cpp` (2009 lines)
+- `src/tests/scarlett_tests/tests_rdna2_oracle.cpp` (801 lines)
 - `src/tests/scarlett_tests/tests_runtime_io.cpp` (967 lines)
 - `src/tests/scarlett_tests/tests_storage_swizzle.cpp` (1597 lines)

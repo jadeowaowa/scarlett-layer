@@ -1,7 +1,7 @@
 # 01 — Loader, Runtime IAT Hooking & Common Utilities
 
 ## Source Files
-- `CMakeLists.txt` (276 lines)
+- `CMakeLists.txt` (288 lines)
 - `src/common/ansi_path.hpp` (99 lines)
 - `src/common/codecs.hpp` (343 lines)
 - `src/common/config.hpp` (73 lines)
@@ -18,6 +18,7 @@
 - `tools/audit_imports.py` (242 lines)
 - `tools/build_wiki.py` (505 lines)
 - `tools/generate_status.py` (159 lines)
+- `tools/rdna2_corpus_sweep.py` (265 lines)
 - `tools/test_brief.py` (108 lines)
 
 ## `src/common/ansi_path.hpp`

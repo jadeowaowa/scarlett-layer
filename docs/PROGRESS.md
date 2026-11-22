@@ -35,6 +35,7 @@
 | Sprint 68 | Real GDK `261000` `xgameruntime.dll` COM service broker (8 service vtables), `libHttpClient` async callbacks, local Desktop `SimpleTriangleDesktop.exe` boot (`code=0`, 0 auto-stubs), `scarlett_studio.exe` | Done (Tier 1 + Desktop sample) |
 | Sprint 69 | Direct2D 1.1 + DirectWrite + DirectComposition Liquid Glass UI on `scarlett_studio.exe`, Apache-2.0 `LICENSE`, wiki rebuild, `v0.69.0-pre` release archive | Done (72/72 Tier 1) |
 | Sprint 70 | Real 12 KiB `emoose/xvdtool` XVD offsets (`0x280`/`0x284`/`0x288`/`0x28C`/`0x470`) & hash-tree geometry, `game_config.hpp` path containment, `pe_inspector.hpp` bounds/overflow hardening, `tools/generate_status.py` CI drift check | Done (74/74 Tier 1) |
+| Sprint 71 | 28-case independent-oracle RDNA2 differential GPU suite (4 CTests), lifter/CFG/FP16/LDS fixes, `rdna2_sweep.exe` + 255-ELF real `gfx1030` corpus sweep (`docs/RDNA2_CORPUS_REPORT.md`) | Done (78/78 Tier 1) |
 
 ## Shim & Export Coverage
 
@@ -94,7 +95,7 @@
 ## Upcoming Milestones (Sprints 70-73)
 See [`docs/ROADMAP.md`](ROADMAP.md) for the active real-Xbox-Series execution timeline:
 - [x] **Sprint 70:** Real 12 KiB `emoose/xvdtool` XVD offsets (`0x280`/`0x284`/`0x288`/`0x28C`/`0x470`), PE/`MicrosoftGame.Config` parser hardening, and `tools/generate_status.py` CI drift check
-- [ ] **Sprint 71:** Independent-oracle differential RDNA2 shader suite (>= 25 cases) + corpus-scale GFX10.3 translate/compile sweep
+- [x] **Sprint 71:** Independent-oracle differential RDNA2 shader suite (28 cases across 4 GPU CTests) + reproducible 255-ELF real `gfx1030` corpus sweep (`docs/RDNA2_CORPUS_REPORT.md`)
 - [ ] **Sprint 72:** First unmodified **Xbox-platform-targeted (`Gaming.Xbox.Scarlett.x64`)** unencrypted binary boot & verified frame (Tier 2)
 - [ ] **Sprint 73:** Multi-title Tier 2 validation, parser fuzzing, second GPU vendor verification, and human loader audit (`TODO(jade)`)
 
@@ -324,3 +325,8 @@ See [`docs/ROADMAP.md`](ROADMAP.md) for the active real-Xbox-Series execution ti
 - **Loader Parser Hardening (`src/loader/game_config.hpp`, `src/loader/pe_inspector.hpp`):** Enforced 4 MiB manifest cap, regular-file check, and package-root lexical containment in `ParseGameConfig` (blocking `..`, rooted paths, drive specifiers/NTFS ADS `:`, and control chars). Centralized bounds-checked PE64 reading (`ReadFileBytesSafe`, `ParseValidatedPe64Headers`, `GetDataDir`), 64-bit overflow-safe `RvaToFileOffset` bounded by `SizeOfRawData`, and descriptor/thunk/export loop caps.
 - **Automated Status & CI Drift Check (`tools/generate_status.py`, `docs/STATUS.md`, `.github/workflows/ci.yml`):** Added zero-dependency status generator wired into GitHub Actions Windows CI (`--check`) to keep `docs/STATUS.md`, `README.md`, `docs/ROADMAP.md`, `CONTRIBUTING.md`, and `AGENTS.md` locked to live test/export counts.
 - **Verification (`src/tests/scarlett_tests/tests_loader_e2e.cpp`):** Added `XvdRealOffsetsAndGeometry` (#73) and `MalformedPeAndConfigHardening` (#74) -> **74 passed, 0 failed** (`42 cpu`, `32 gpu`) on both NVIDIA RTX 5070 and Microsoft WARP with zero `/W4` warnings.
+
+## Sprint 71: Independent-Oracle RDNA2 Differential Suite & Real `gfx1030` Corpus Sweep
+- **28-Case Independent-Oracle Differential Suite (`src/tests/scarlett_tests/tests_rdna2_oracle.cpp`, `rdna2_oracle_harness.hpp`):** Added 4 GPU CTest targets (`Rdna2OracleAluAndCbvDiffE2E`, `Rdna2OracleFp16LdsAndCfDiffE2E`, `Rdna2OracleControlFlowAndRealRgaCsDiffE2E`, `Rdna2OracleGraphicsPipelineDiffE2E`) comparing lifted RDNA2 GPU readback against independent reference HLSL execution across ALU/CBV, FP16/VOP3P, LDS/atomics, uniform/divergent control flow, loops, real RGA `gfx1030` compute shaders, and graphics pipelines on both RTX 5070 and WARP.
+- **RDNA2 ISA/Lifter Fixes (`src/shims/d3d12_xs/rdna2_isa.hpp`, `rdna2_lifter.hpp`, `shader_translator.hpp`):** Added branch-aware `s_code_end` decode termination, `AppendDs`/`AppendMubufOp` helpers, portable `cs_5_0` 16-bit split `umul`/`imul`, `saveexec` temporary snapshotting, `[branch]` CFG block dispatch, `kScxsFlagByteAddressed`, and `scxs_v2_` disk cache key bump.
+- **Offline `gfx1030` Corpus Sweep (`src/tools/rdna2_sweep/main.cpp`, `tools/rdna2_corpus_sweep.py`, `docs/RDNA2_CORPUS_REPORT.md`):** Swept 255 real MIT-licensed HLSL shaders compiled via `dxc.exe -spirv` -> AMD RGA 2.9.1 (`gfx1030`): **255/255 (100.0%)** decode, **126/255 (49.4%)** strict lift+DXBC compile, and **245/255 (96.1%)** compat lift+DXBC compile.

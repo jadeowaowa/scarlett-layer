@@ -34,6 +34,8 @@ enum class ScxsTargetArch : uint32_t {
     HostReference = 2
 };
 
+inline constexpr uint32_t kScxsFlagByteAddressed = 1u << 0;
+
 enum class ScxsPayloadFormat : uint32_t {
     EmbeddedDxbcOrDxil = 1,
     Rdna2Isa           = 2
@@ -76,10 +78,10 @@ inline const char* ScxsStageName(uint16_t stage) {
     }
 }
 
-inline std::filesystem::path GetShaderCachePath(uint16_t stage, uint32_t payloadFnv1a) {
-    char fileName[64];
-    std::snprintf(fileName, sizeof(fileName), "scxs_%s_%08X.dxbc",
-                  ScxsStageName(stage), payloadFnv1a);
+inline std::filesystem::path GetShaderCachePath(uint16_t stage, uint32_t payloadFnv1a, uint32_t flags = 0u) {
+    char fileName[80];
+    std::snprintf(fileName, sizeof(fileName), "scxs_v2_%s_%08X_%X.dxbc",
+                  ScxsStageName(stage), payloadFnv1a, flags);
     return std::filesystem::temp_directory_path() / "scarlett-layer-shader-cache" / fileName;
 }
 
@@ -191,7 +193,7 @@ public:
         }
 
         const auto stage = static_cast<ScxsShaderStage>(hdr.stage);
-        const std::filesystem::path cachePath = GetShaderCachePath(hdr.stage, hdr.payloadFnv1a);
+        const std::filesystem::path cachePath = GetShaderCachePath(hdr.stage, hdr.payloadFnv1a, hdr.flags);
         {
             std::error_code ec;
             if (std::filesystem::exists(cachePath, ec) && std::filesystem::file_size(cachePath, ec) > 0) {
@@ -221,7 +223,9 @@ public:
             entry   = "VSMain";
             target  = "vs_5_0";
         } else if (stage == ScxsShaderStage::Compute) {
-            lifted  = rdna2::LiftComputeShaderToHlsl(prog, liftedHlsl, outError);
+            rdna2::LiftOptions liftOpts{};
+            liftOpts.byteAddressedBuffers = (hdr.flags & kScxsFlagByteAddressed) != 0u;
+            lifted  = rdna2::LiftComputeShaderToHlsl(prog, liftedHlsl, outError, liftOpts);
             srcName = "rdna2_lifted_cs.hlsl";
             entry   = "CSMain";
             target  = "cs_5_0";

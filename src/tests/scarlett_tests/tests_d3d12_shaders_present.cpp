@@ -1050,7 +1050,7 @@ bool TestRdna2ImageSampleShader() {
     SC_EXPECT(LiftPixelShaderToHlsl(prog, hlsl, err));
     SC_EXPECT(hlsl.find("Texture2D<float4> gTex0 : register(t0);") != std::string::npos);
     SC_EXPECT(hlsl.find("SamplerState gSamp0 : register(s0);") != std::string::npos);
-    SC_EXPECT(hlsl.find("gTex0.Sample(gSamp0, float2(v0, v1))") != std::string::npos);
+    SC_EXPECT(hlsl.find("gTex0.Sample(gSamp0, float2(asfloat(v0), asfloat(v1)))") != std::string::npos);
 
     // Compile lifted HLSL to real DXBC ps_5_0 bytecode
     ID3DBlob* bytecode = nullptr;

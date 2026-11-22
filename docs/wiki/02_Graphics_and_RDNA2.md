@@ -1,7 +1,7 @@
 # 02 — Graphics (`d3d12_xs`), Surface Tiling (`xg_xs`) & RDNA2 Binary Lifter
 
 ## `d3d12_xs.dll`
-**Files:** `src/shims/d3d12_xs/command_list_x.cpp` (187 L), `src/shims/d3d12_xs/command_queue_x.cpp` (457 L), `src/shims/d3d12_xs/d3d12_xs.cpp` (119 L), `src/shims/d3d12_xs/d3d12_xs.def` (4 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (261 L), `src/shims/d3d12_xs/d3d12_xs_internal.hpp` (79 L), `src/shims/d3d12_xs/d3d12_xs_utils.cpp` (85 L), `src/shims/d3d12_xs/device_x.cpp` (742 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1191 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_stripper.hpp` (272 L), `src/shims/d3d12_xs/shader_translator.hpp` (401 L)
+**Files:** `src/shims/d3d12_xs/command_list_x.cpp` (187 L), `src/shims/d3d12_xs/command_queue_x.cpp` (457 L), `src/shims/d3d12_xs/d3d12_xs.cpp` (119 L), `src/shims/d3d12_xs/d3d12_xs.def` (4 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (261 L), `src/shims/d3d12_xs/d3d12_xs_internal.hpp` (79 L), `src/shims/d3d12_xs/d3d12_xs_utils.cpp` (85 L), `src/shims/d3d12_xs/device_x.cpp` (742 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1040 L), `src/shims/d3d12_xs/rdna2_lifter.hpp` (1052 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_stripper.hpp` (272 L), `src/shims/d3d12_xs/shader_translator.hpp` (405 L)
 
 **DLL Exports (`.def`):** `D3D12XboxCreateDevice`, `D3D12SerializeRootSignature = ScarlettSerializeRootSignature`
 
@@ -79,15 +79,20 @@
 - `D3D12XBOX_SCHEDULE_FRAME_EVENT_FLAGS`: D3D12XBOX_SCHEDULE_FRAME_EVENT_FLAG_NONE = 0
 - `D3D12XBOX_WAIT_FRAME_EVENT_FLAGS`: D3D12XBOX_WAIT_FRAME_EVENT_FLAG_NONE = 0
 - `D3D12XBOX_FRAME_EVENT`: D3D12XBOX_FRAME_EVENT_ORIGIN = 0, D3D12XBOX_FRAME_EVENT_DISPLAY = 1
-- `SoppOp`: kSoppNop = 0x00u, kSoppEndpgm = 0x01u, kSoppWaitcnt = 0x0Cu
-- `Vop1Op`: kVop1Nop = 0x00u, kVop1MovB32 = 0x01u, kVop1RcpF32 = 0x2Au, kVop1SqrtF32 = 0x33u
-- `Vop2Op`: kVop2AddF32 = 0x03u, kVop2SubF32 = 0x04u, kVop2SubRevF32 = 0x05u, kVop2MulF32 = 0x08u, kVop2MinF32 = 0x0Fu, kVop2MaxF32 = 0x10u, kVop2AddNcU32 = 0x25u, kVop2FmacF32 = 0x2Bu
-- `Vop3Op`: kVop3MadF32 = 0x141u, kVop3FmaF32 = 0x14Bu, kVop3Min3F32 = 0x150u, kVop3Max3F32 = 0x151u, kVop3Med3F32 = 0x152u, kVop3MulLoU32 = 0x169u
-- `MubufOp`: kMubufLoadDword = 0x14u, kMubufStoreDword = 0x1Cu
-- `SmemOp`: kSmemLoadDword = 0x00u, kSmemLoadDwordX2 = 0x01u, kSmemLoadDwordX4 = 0x02u
+- `SoppOp`: kSoppNop = 0x00u, kSoppEndpgm = 0x01u, kSoppBranch = 0x02u, kSoppCbranchScc0 = 0x04u, kSoppCbranchScc1 = 0x05u, kSoppCbranchVccz = 0x06u, kSoppCbranchVccnz = 0x07u, kSoppCbranchExecz = 0x08u, kSoppCbranchExecnz = 0x09u, kSoppBarrier = 0x0Au, kSoppWaitcnt = 0x0Cu, kSoppSendmsg = 0x10u, kSoppInstPrefetch = 0x20u, kSoppClause = 0x21u, ... (+1 more)
+- `Sop1Op`: kSop1MovB32 = 0x03u, kSop1MovB64 = 0x04u, kSop1NotB32 = 0x07u, kSop1NotB64 = 0x08u, kSop1WqmB64 = 0x09u, kSop1BrevB32 = 0x0Bu, kSop1Bcnt1I32B32 = 0x0Eu, kSop1Bcnt1I32B64 = 0x0Fu, kSop1FlbitI32B32 = 0x16u, kSop1Bitset1B32 = 0x1Au, kSop1GetpcB64 = 0x1Fu, kSop1AndSaveexecB64 = 0x24u, kSop1OrSaveexecB64 = 0x25u, kSop1Andn2SaveexecB64 = 0x27u, ... (+3 more)
+- `Sop2Op`: kSop2AddU32 = 0x00u, kSop2SubU32 = 0x01u, kSop2AddI32 = 0x02u, kSop2SubI32 = 0x03u, kSop2AddcU32 = 0x04u, kSop2MinI32 = 0x06u, kSop2MinU32 = 0x07u, kSop2MaxI32 = 0x08u, kSop2MaxU32 = 0x09u, kSop2CselectB32 = 0x0Au, kSop2CselectB64 = 0x0Bu, kSop2AndB32 = 0x0Eu, kSop2AndB64 = 0x0Fu, kSop2OrB32 = 0x10u, ... (+14 more)
+- `SopcOp`: kSopcCmpEqI32 = 0x00u, kSopcCmpLgI32 = 0x01u, kSopcCmpGtI32 = 0x02u, kSopcCmpGeI32 = 0x03u, kSopcCmpLtI32 = 0x04u, kSopcCmpLeI32 = 0x05u, kSopcCmpEqU32 = 0x06u, kSopcCmpLgU32 = 0x07u, kSopcCmpGtU32 = 0x08u, kSopcCmpGeU32 = 0x09u, kSopcCmpLtU32 = 0x0Au, kSopcCmpLeU32 = 0x0Bu, kSopcBitcmp0B32 = 0x0Cu, kSopcBitcmp1B32 = 0x0Du
+- `SopkOp`: kSopkMovkI32 = 0x00u, kSopkCmovkI32 = 0x02u, kSopkCmpkEqI32 = 0x03u, kSopkCmpkLgI32 = 0x04u, kSopkCmpkGtI32 = 0x05u, kSopkCmpkGeI32 = 0x06u, kSopkCmpkLtI32 = 0x07u, kSopkCmpkLeI32 = 0x08u, kSopkCmpkEqU32 = 0x09u, kSopkCmpkLgU32 = 0x0Au, kSopkCmpkGtU32 = 0x0Bu, kSopkCmpkGeU32 = 0x0Cu, kSopkCmpkLtU32 = 0x0Du, kSopkCmpkLeU32 = 0x0Eu, ... (+5 more)
+- `Vop1Op`: kVop1Nop = 0x00u, kVop1MovB32 = 0x01u, kVop1Readfirstlane = 0x02u, kVop1CvtF32I32 = 0x05u, kVop1CvtF32U32 = 0x06u, kVop1CvtU32F32 = 0x07u, kVop1CvtI32F32 = 0x08u, kVop1CvtF16F32 = 0x0Au, kVop1CvtF32F16 = 0x0Bu, kVop1CvtF32Ubyte0 = 0x11u, kVop1FractF32 = 0x20u, kVop1TruncF32 = 0x21u, kVop1CeilF32 = 0x22u, kVop1RndneF32 = 0x23u, ... (+12 more)
+- `Vop2Op`: kVop2CndmaskB32 = 0x01u, kVop2AddF32 = 0x03u, kVop2SubF32 = 0x04u, kVop2SubRevF32 = 0x05u, kVop2MulLegacyF32 = 0x07u, kVop2MulF32 = 0x08u, kVop2MulI32I24 = 0x09u, kVop2MulU32U24 = 0x0Bu, kVop2MinF32 = 0x0Fu, kVop2MaxF32 = 0x10u, kVop2MinI32 = 0x11u, kVop2MaxI32 = 0x12u, kVop2MinU32 = 0x13u, kVop2MaxU32 = 0x14u, ... (+19 more)
+- `Vop3Op`: kVop3MadF32 = 0x141u, kVop3MadU32U24 = 0x143u, kVop3BfeU32 = 0x148u, kVop3BfeI32 = 0x149u, kVop3BfiB32 = 0x14Au, kVop3FmaF32 = 0x14Bu, kVop3AlignbitB32 = 0x14Eu, kVop3Min3F32 = 0x151u, kVop3Max3F32 = 0x154u, kVop3Med3F32 = 0x157u, kVop3CvtPkrtzF16F32 = 0x168u, kVop3MulLoU32 = 0x169u, kVop3MulHiU32 = 0x16Au, kVop3MulHiI32 = 0x16Cu, ... (+15 more)
+- `Vop3pOp`: kVop3pPkMadI16 = 0x00u, kVop3pPkMulLoU16 = 0x01u, kVop3pPkAddI16 = 0x02u, kVop3pPkSubI16 = 0x03u, kVop3pPkFmaF16 = 0x0Eu, kVop3pPkAddF16 = 0x0Fu, kVop3pPkMulF16 = 0x10u, kVop3pPkMinF16 = 0x11u, kVop3pPkMaxF16 = 0x12u
+- `MubufOp`: kMubufLoadDword = 0x0Cu, kMubufLoadDwordX2 = 0x0Du, kMubufLoadDwordX4 = 0x0Eu, kMubufLoadDwordX3 = 0x0Fu, kMubufLoadDwordLegacy = 0x14u, kMubufStoreDword = 0x1Cu, kMubufStoreDwordX2 = 0x1Du, kMubufStoreDwordX4 = 0x1Eu, kMubufStoreDwordX3 = 0x1Fu, kMubufAtomicAdd = 0x32u
+- `SmemOp`: kSmemLoadDword = 0x00u, kSmemLoadDwordX2 = 0x01u, kSmemLoadDwordX4 = 0x02u, kSmemLoadDwordX8 = 0x03u, kSmemLoadDwordX16 = 0x04u, kSmemBufferLoadDword = 0x08u, kSmemBufferLoadDwordX2 = 0x09u, kSmemBufferLoadDwordX4 = 0x0Au, kSmemBufferLoadDwordX8 = 0x0Bu
 - `VintrpOp`: kVintrpP1F32 = 0x00u, kVintrpP2F32 = 0x01u, kVintrpMovF32 = 0x02u
-- `MimgOp`: kMimgImageSample = 0x20u
-- `InstFormat`: Sopp, Vop1, Vop2, Vop3, Exp, Mubuf, Smem, Vintrp, Mimg
+- `MimgOp`: kMimgImageLoad = 0x00u, kMimgImageStore = 0x08u, kMimgImageSample = 0x20u, kMimgImageSampleL = 0x24u, kMimgImageSampleLz = 0x27u, kMimgImageSampleLO = 0x34u
+- `InstFormat`: Sopp, Sop1, Sop2, Sopc, Sopk, Vop1, Vop2, Vopc, Vop3, Vop3p, Exp, Mubuf, Mtbuf, Smem, ... (+4 more)
 - `ShaderContainerKind`: None = 0, Dxbc = 1, Dxil = 2, Scxs = 3, Unknown = 4
 - `ScxsShaderStage`: Pixel = 0, Vertex = 1, Geometry = 2, Hull = 3, Domain = 4, Compute = 5, Mesh = 6, Amplification = 7
 - `ScxsTargetArch`: Unknown = 0, Rdna2Scarlett = 1, HostReference = 2

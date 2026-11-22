@@ -1,7 +1,7 @@
 # Scarlett Layer — AI Context Snapshot
 
-**Commit:** `45eafbf` (#144) | **Generated:** 2026-11-22 08:01 UTC  
-**Totals:** 81 files (27,069 LOC) | 12 shims | 74 CTest checks
+**Commit:** `2de878f` (#146) | **Generated:** 2026-11-22 12:51 UTC  
+**Totals:** 86 files (29,329 LOC) | 12 shims | 78 CTest checks
 
 ---
 
@@ -39,6 +39,7 @@
 | Sprint 68 | Real GDK `261000` `xgameruntime.dll` COM service broker (8 service vtables), `libHttpClient` async callbacks, local Desktop `SimpleTriangleDesktop.exe` boot (`code=0`, 0 auto-stubs), `scarlett_studio.exe` | Done (Tier 1 + Desktop sample) |
 | Sprint 69 | Direct2D 1.1 + DirectWrite + DirectComposition Liquid Glass UI on `scarlett_studio.exe`, Apache-2.0 `LICENSE`, wiki rebuild, `v0.69.0-pre` release archive | Done (72/72 Tier 1) |
 | Sprint 70 | Real 12 KiB `emoose/xvdtool` XVD offsets (`0x280`/`0x284`/`0x288`/`0x28C`/`0x470`) & hash-tree geometry, `game_config.hpp` path containment, `pe_inspector.hpp` bounds/overflow hardening, `tools/generate_status.py` CI drift check | Done (74/74 Tier 1) |
+| Sprint 71 | 28-case independent-oracle RDNA2 differential GPU suite (4 CTests), lifter/CFG/FP16/LDS fixes, `rdna2_sweep.exe` + 255-ELF real `gfx1030` corpus sweep (`docs/RDNA2_CORPUS_REPORT.md`) | Done (78/78 Tier 1) |
 
 ---
 
@@ -73,7 +74,7 @@
 
 ## 2. File Inventory
 ```text
-  276  CMakeLists.txt
+  288  CMakeLists.txt
    99  src/common/ansi_path.hpp
   343  src/common/codecs.hpp
    73  src/common/config.hpp
@@ -100,10 +101,11 @@
    79  src/shims/d3d12_xs/d3d12_xs_internal.hpp
    85  src/shims/d3d12_xs/d3d12_xs_utils.cpp
   742  src/shims/d3d12_xs/device_x.cpp
- 1191  src/shims/d3d12_xs/rdna2_isa.hpp
+ 1040  src/shims/d3d12_xs/rdna2_isa.hpp
+ 1052  src/shims/d3d12_xs/rdna2_lifter.hpp
   201  src/shims/d3d12_xs/shader_inspector.hpp
   272  src/shims/d3d12_xs/shader_stripper.hpp
-  401  src/shims/d3d12_xs/shader_translator.hpp
+  405  src/shims/d3d12_xs/shader_translator.hpp
  1269  src/shims/dstorage_xs/dstorage_xs.cpp
     4  src/shims/dstorage_xs/dstorage_xs.def
   181  src/shims/dstorage_xs/dstorage_xs.hpp
@@ -143,16 +145,20 @@
    59  src/tests/engine_plugin/engine_plugin.cpp
     3  src/tests/engine_plugin/engine_plugin.def
   328  src/tests/scarlett_3d_demo/main.cpp
-  194  src/tests/scarlett_tests/main.cpp
+  202  src/tests/scarlett_tests/main.cpp
+  156  src/tests/scarlett_tests/rdna2_oracle_harness.hpp
   176  src/tests/scarlett_tests/test_harness.hpp
  1312  src/tests/scarlett_tests/tests_d3d12_core.cpp
  1949  src/tests/scarlett_tests/tests_d3d12_shaders_present.cpp
  2009  src/tests/scarlett_tests/tests_loader_e2e.cpp
+  801  src/tests/scarlett_tests/tests_rdna2_oracle.cpp
   967  src/tests/scarlett_tests/tests_runtime_io.cpp
  1597  src/tests/scarlett_tests/tests_storage_swizzle.cpp
+  113  src/tools/rdna2_sweep/main.cpp
   242  tools/audit_imports.py
   505  tools/build_wiki.py
   159  tools/generate_status.py
+  265  tools/rdna2_corpus_sweep.py
   108  tools/test_brief.py
 ```
 
@@ -171,7 +177,7 @@
 - `HRESULT WINAPI ApuFree(void* virtualAddress)`
 
 ## `d3d12_xs.dll`
-**Files:** `src/shims/d3d12_xs/command_list_x.cpp` (187 L), `src/shims/d3d12_xs/command_queue_x.cpp` (457 L), `src/shims/d3d12_xs/d3d12_xs.cpp` (119 L), `src/shims/d3d12_xs/d3d12_xs.def` (4 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (261 L), `src/shims/d3d12_xs/d3d12_xs_internal.hpp` (79 L), `src/shims/d3d12_xs/d3d12_xs_utils.cpp` (85 L), `src/shims/d3d12_xs/device_x.cpp` (742 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1191 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_stripper.hpp` (272 L), `src/shims/d3d12_xs/shader_translator.hpp` (401 L)
+**Files:** `src/shims/d3d12_xs/command_list_x.cpp` (187 L), `src/shims/d3d12_xs/command_queue_x.cpp` (457 L), `src/shims/d3d12_xs/d3d12_xs.cpp` (119 L), `src/shims/d3d12_xs/d3d12_xs.def` (4 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (261 L), `src/shims/d3d12_xs/d3d12_xs_internal.hpp` (79 L), `src/shims/d3d12_xs/d3d12_xs_utils.cpp` (85 L), `src/shims/d3d12_xs/device_x.cpp` (742 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1040 L), `src/shims/d3d12_xs/rdna2_lifter.hpp` (1052 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_stripper.hpp` (272 L), `src/shims/d3d12_xs/shader_translator.hpp` (405 L)
 
 **DLL Exports (`.def`):** `D3D12XboxCreateDevice`, `D3D12SerializeRootSignature = ScarlettSerializeRootSignature`
 
@@ -405,17 +411,22 @@
 
 
 ## 4. RDNA2 ISA Decoder Opcodes (`rdna2_isa.hpp`)
-- `SoppOp`: kSoppNop = 0x00u, kSoppEndpgm = 0x01u, kSoppWaitcnt = 0x0Cu
-- `Vop1Op`: kVop1Nop = 0x00u, kVop1MovB32 = 0x01u, kVop1RcpF32 = 0x2Au, kVop1SqrtF32 = 0x33u
-- `Vop2Op`: kVop2AddF32 = 0x03u, kVop2SubF32 = 0x04u, kVop2SubRevF32 = 0x05u, kVop2MulF32 = 0x08u, kVop2MinF32 = 0x0Fu, kVop2MaxF32 = 0x10u, kVop2AddNcU32 = 0x25u, kVop2FmacF32 = 0x2Bu
-- `Vop3Op`: kVop3MadF32 = 0x141u, kVop3FmaF32 = 0x14Bu, kVop3Min3F32 = 0x150u, kVop3Max3F32 = 0x151u, kVop3Med3F32 = 0x152u, kVop3MulLoU32 = 0x169u
-- `MubufOp`: kMubufLoadDword = 0x14u, kMubufStoreDword = 0x1Cu
-- `SmemOp`: kSmemLoadDword = 0x00u, kSmemLoadDwordX2 = 0x01u, kSmemLoadDwordX4 = 0x02u
+- `SoppOp`: kSoppNop = 0x00u, kSoppEndpgm = 0x01u, kSoppBranch = 0x02u, kSoppCbranchScc0 = 0x04u, kSoppCbranchScc1 = 0x05u, kSoppCbranchVccz = 0x06u, kSoppCbranchVccnz = 0x07u, kSoppCbranchExecz = 0x08u, kSoppCbranchExecnz = 0x09u, kSoppBarrier = 0x0Au, kSoppWaitcnt = 0x0Cu, kSoppSendmsg = 0x10u, kSoppInstPrefetch = 0x20u, kSoppClause = 0x21u, kSoppDenormMode = 0x25u
+- `Sop1Op`: kSop1MovB32 = 0x03u, kSop1MovB64 = 0x04u, kSop1NotB32 = 0x07u, kSop1NotB64 = 0x08u, kSop1WqmB64 = 0x09u, kSop1BrevB32 = 0x0Bu, kSop1Bcnt1I32B32 = 0x0Eu, kSop1Bcnt1I32B64 = 0x0Fu, kSop1FlbitI32B32 = 0x16u, kSop1Bitset1B32 = 0x1Au, kSop1GetpcB64 = 0x1Fu, kSop1AndSaveexecB64 = 0x24u, kSop1OrSaveexecB64 = 0x25u, kSop1Andn2SaveexecB64 = 0x27u, kSop1AndSaveexecB32 = 0x3Cu, kSop1OrSaveexecB32 = 0x3Du, kSop1Andn2SaveexecB32 = 0x3Fu
+- `Sop2Op`: kSop2AddU32 = 0x00u, kSop2SubU32 = 0x01u, kSop2AddI32 = 0x02u, kSop2SubI32 = 0x03u, kSop2AddcU32 = 0x04u, kSop2MinI32 = 0x06u, kSop2MinU32 = 0x07u, kSop2MaxI32 = 0x08u, kSop2MaxU32 = 0x09u, kSop2CselectB32 = 0x0Au, kSop2CselectB64 = 0x0Bu, kSop2AndB32 = 0x0Eu, kSop2AndB64 = 0x0Fu, kSop2OrB32 = 0x10u, kSop2OrB64 = 0x11u, kSop2XorB32 = 0x12u, kSop2XorB64 = 0x13u, kSop2Andn2B32 = 0x14u, kSop2Andn2B64 = 0x15u, kSop2Orn2B32 = 0x16u, kSop2Orn2B64 = 0x17u, kSop2LshlB32 = 0x1Eu, kSop2LshrB32 = 0x20u, kSop2AshrI32 = 0x22u, kSop2MulI32 = 0x26u, kSop2BfeU32 = 0x27u, kSop2BfeI32 = 0x28u, kSop2MulHiU32 = 0x35u
+- `SopcOp`: kSopcCmpEqI32 = 0x00u, kSopcCmpLgI32 = 0x01u, kSopcCmpGtI32 = 0x02u, kSopcCmpGeI32 = 0x03u, kSopcCmpLtI32 = 0x04u, kSopcCmpLeI32 = 0x05u, kSopcCmpEqU32 = 0x06u, kSopcCmpLgU32 = 0x07u, kSopcCmpGtU32 = 0x08u, kSopcCmpGeU32 = 0x09u, kSopcCmpLtU32 = 0x0Au, kSopcCmpLeU32 = 0x0Bu, kSopcBitcmp0B32 = 0x0Cu, kSopcBitcmp1B32 = 0x0Du
+- `SopkOp`: kSopkMovkI32 = 0x00u, kSopkCmovkI32 = 0x02u, kSopkCmpkEqI32 = 0x03u, kSopkCmpkLgI32 = 0x04u, kSopkCmpkGtI32 = 0x05u, kSopkCmpkGeI32 = 0x06u, kSopkCmpkLtI32 = 0x07u, kSopkCmpkLeI32 = 0x08u, kSopkCmpkEqU32 = 0x09u, kSopkCmpkLgU32 = 0x0Au, kSopkCmpkGtU32 = 0x0Bu, kSopkCmpkGeU32 = 0x0Cu, kSopkCmpkLtU32 = 0x0Du, kSopkCmpkLeU32 = 0x0Eu, kSopkAddkI32 = 0x0Fu, kSopkMulkI32 = 0x10u, kSopkSetregB32 = 0x13u, kSopkSetregImm32 = 0x15u, kSopkWaitcntVscnt = 0x17u
+- `Vop1Op`: kVop1Nop = 0x00u, kVop1MovB32 = 0x01u, kVop1Readfirstlane = 0x02u, kVop1CvtF32I32 = 0x05u, kVop1CvtF32U32 = 0x06u, kVop1CvtU32F32 = 0x07u, kVop1CvtI32F32 = 0x08u, kVop1CvtF16F32 = 0x0Au, kVop1CvtF32F16 = 0x0Bu, kVop1CvtF32Ubyte0 = 0x11u, kVop1FractF32 = 0x20u, kVop1TruncF32 = 0x21u, kVop1CeilF32 = 0x22u, kVop1RndneF32 = 0x23u, kVop1FloorF32 = 0x24u, kVop1ExpF32 = 0x25u, kVop1LogF32 = 0x27u, kVop1RcpF32 = 0x2Au, kVop1RcpIflagF32 = 0x2Bu, kVop1RsqF32 = 0x2Eu, kVop1SqrtF32 = 0x33u, kVop1SinF32 = 0x35u, kVop1CosF32 = 0x36u, kVop1NotB32 = 0x37u, kVop1BfrevB32 = 0x38u, kVop1FfblB32 = 0x3Au
+- `Vop2Op`: kVop2CndmaskB32 = 0x01u, kVop2AddF32 = 0x03u, kVop2SubF32 = 0x04u, kVop2SubRevF32 = 0x05u, kVop2MulLegacyF32 = 0x07u, kVop2MulF32 = 0x08u, kVop2MulI32I24 = 0x09u, kVop2MulU32U24 = 0x0Bu, kVop2MinF32 = 0x0Fu, kVop2MaxF32 = 0x10u, kVop2MinI32 = 0x11u, kVop2MaxI32 = 0x12u, kVop2MinU32 = 0x13u, kVop2MaxU32 = 0x14u, kVop2LshrrevB32 = 0x16u, kVop2AshrrevI32 = 0x18u, kVop2LshlrevB32 = 0x1Au, kVop2AndB32 = 0x1Bu, kVop2OrB32 = 0x1Cu, kVop2XorB32 = 0x1Du, kVop2AddNcU32 = 0x25u, kVop2SubNcU32 = 0x26u, kVop2SubrevNcU32 = 0x27u, kVop2AddCoCiU32 = 0x28u, kVop2FmacF32 = 0x2Bu, kVop2FmamkF32 = 0x2Cu, kVop2FmaakF32 = 0x2Du, kVop2AddF16 = 0x32u, kVop2SubF16 = 0x33u, kVop2MulF16 = 0x35u, kVop2FmacF16 = 0x36u, kVop2FmamkF16 = 0x37u, kVop2FmaakF16 = 0x38u
+- `Vop3Op`: kVop3MadF32 = 0x141u, kVop3MadU32U24 = 0x143u, kVop3BfeU32 = 0x148u, kVop3BfeI32 = 0x149u, kVop3BfiB32 = 0x14Au, kVop3FmaF32 = 0x14Bu, kVop3AlignbitB32 = 0x14Eu, kVop3Min3F32 = 0x151u, kVop3Max3F32 = 0x154u, kVop3Med3F32 = 0x157u, kVop3CvtPkrtzF16F32 = 0x168u, kVop3MulLoU32 = 0x169u, kVop3MulHiU32 = 0x16Au, kVop3MulHiI32 = 0x16Cu, kVop3MadU64U32 = 0x176u, kVop3Xor3B32 = 0x178u, kVop3AddCoU32 = 0x30Fu, kVop3SubCoU32 = 0x310u, kVop3PackB32F16 = 0x311u, kVop3PermB32 = 0x344u, kVop3XadU32 = 0x345u, kVop3LshlAddU32 = 0x346u, kVop3AddLshlU32 = 0x347u, kVop3ReadlaneB32 = 0x360u, kVop3WritelaneB32 = 0x361u, kVop3Add3U32 = 0x36Du, kVop3LshlOrB32 = 0x36Fu, kVop3AndOrB32 = 0x371u, kVop3Or3B32 = 0x372u
+- `Vop3pOp`: kVop3pPkMadI16 = 0x00u, kVop3pPkMulLoU16 = 0x01u, kVop3pPkAddI16 = 0x02u, kVop3pPkSubI16 = 0x03u, kVop3pPkFmaF16 = 0x0Eu, kVop3pPkAddF16 = 0x0Fu, kVop3pPkMulF16 = 0x10u, kVop3pPkMinF16 = 0x11u, kVop3pPkMaxF16 = 0x12u
+- `MubufOp`: kMubufLoadDword = 0x0Cu, kMubufLoadDwordX2 = 0x0Du, kMubufLoadDwordX4 = 0x0Eu, kMubufLoadDwordX3 = 0x0Fu, kMubufLoadDwordLegacy = 0x14u, kMubufStoreDword = 0x1Cu, kMubufStoreDwordX2 = 0x1Du, kMubufStoreDwordX4 = 0x1Eu, kMubufStoreDwordX3 = 0x1Fu, kMubufAtomicAdd = 0x32u
+- `SmemOp`: kSmemLoadDword = 0x00u, kSmemLoadDwordX2 = 0x01u, kSmemLoadDwordX4 = 0x02u, kSmemLoadDwordX8 = 0x03u, kSmemLoadDwordX16 = 0x04u, kSmemBufferLoadDword = 0x08u, kSmemBufferLoadDwordX2 = 0x09u, kSmemBufferLoadDwordX4 = 0x0Au, kSmemBufferLoadDwordX8 = 0x0Bu
 - `VintrpOp`: kVintrpP1F32 = 0x00u, kVintrpP2F32 = 0x01u, kVintrpMovF32 = 0x02u
-- `MimgOp`: kMimgImageSample = 0x20u
-- `InstFormat`: Sopp, Vop1, Vop2, Vop3, Exp, Mubuf, Smem, Vintrp, Mimg
+- `MimgOp`: kMimgImageLoad = 0x00u, kMimgImageStore = 0x08u, kMimgImageSample = 0x20u, kMimgImageSampleL = 0x24u, kMimgImageSampleLz = 0x27u, kMimgImageSampleLO = 0x34u
+- `InstFormat`: Sopp, Sop1, Sop2, Sopc, Sopk, Vop1, Vop2, Vopc, Vop3, Vop3p, Exp, Mubuf, Mtbuf, Smem, Vintrp, Mimg, Ds, Flat
 
-## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 74 total)
+## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 78 total)
 ```cpp
     {"VfsPathTranslation",                 TestVfsPathTranslation},
     {"RuntimeAndXUser",                    TestRuntimeAndXUser},
@@ -491,9 +502,15 @@
     {"ScarlettStudioSelfTest",             TestScarlettStudioSelfTest},
     {"XvdRealOffsetsAndGeometry",          TestXvdRealOffsetsAndGeometry},
     {"MalformedPeAndConfigHardening",      TestMalformedPeAndConfigHardening},
+    {"Rdna2OracleAluAndCbvDiffE2E",        TestRdna2OracleAluAndCbvDiffE2E},
+    {"Rdna2OracleFp16LdsAndCfDiffE2E",     TestRdna2OracleFp16LdsAndCfDiffE2E},
+    {"Rdna2OracleControlFlowAndRealRgaCsDiffE2E", TestRdna2OracleControlFlowAndRealRgaCsDiffE2E},
+    {"Rdna2OracleGraphicsPipelineDiffE2E", TestRdna2OracleGraphicsPipelineDiffE2E},
 ```
 
 ## 6. Recent Git History
+- `2de878f Merge sprint-70-xvd-and-parser-hardening: real XVD geometry, parser hardening, and status CI (74/74)`
+- `385b503 feat(xvd,loader,ci): migrate real 12 KiB XVD geometry, harden PE/GameConfig parsers, add status drift check`
 - `45eafbf Merge docs/truth-reset-s69: truthful baseline docs and Sprint 70-73 roadmap`
 - `98f616b docs: reconcile all repo docs to Sprint 69 truth, add THIRD_PARTY.md, and set Sprints 70-73 Xbox timeline`
 - `cac4aa2 Remove duplicate roadmap row, clarify sample scope, and rebuild wiki`
@@ -502,5 +519,3 @@
 - `d2dac59 Sprint 69: Liquid Glass UI for Scarlett Studio, wiki update, and v0.69.0-pre prep`
 - `bd18bca Fix escaped whitespace literals in studio_model.hpp ExtractXmlAttr`
 - `11d1057 Merge sprint-68-xgameruntime-broker: GDK broker ABI + Scarlett Studio GUI`
-- `03118c3 Sprint 68: GDK xgameruntime COM service broker, SimpleTriangleDesktop boot, and Scarlett Studio GUI`
-- `d10b665 Merge sprint-67-gdk-samples-and-warp: WARP CI, corpus auditor, GDK sample alignment`
