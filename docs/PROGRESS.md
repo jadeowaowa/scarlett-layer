@@ -26,22 +26,28 @@
 | Sprint 20 | Binary RDNA2 Compute ISA lifter (`v_mul_lo_u32`, `v_add_nc_u32`, `buffer_store_dword`) on `COMPUTE` queue | Done |
 | Sprint 21 | Binary RDNA2 Vertex Shader lifter (`SMEM` CBVs, `VINTRP`, `EXP pos0`/`param0`) + full VS+PS GPU pipeline | Done |
 | Sprint 22 | `xg_xs.dll` RDNA2 `64KB_S` swizzling & BC1/BC3/BC7 multi-mip block compression + GPU BC1 sample | Done |
+| Sprints 23-62 | DirectStorage GPU streaming, retail bring-up shims (`AcpHal`, `libHttpClient`, `XCurl`), PE/XVD inspection, `MicrosoftGame.Config`, RDNA2 textured draw & compute E2E, `d3d12_xs` command-list wrappers, 3D depth/PresentX/frame-pacing/async-compute E2E (see sprint notes below) | Done (Tier 1) |
+| Sprint 63 | PE64 implicit `.tls` inspection/callbacks, isolated guest `atexit`, `XMemAllocDefault` 16-byte min alignment | Done (Tier 1) |
+| Sprint 64 | W^X x64 `AutoStubEngine`, PE symbol coverage auditor (`loader --inspect`), `XAudio2` `@1` export parity | Done (Tier 1) |
+| Sprint 65 | DXBC modified-MD5 digest + Xbox-chunk stripper (`shader_stripper.hpp`), Enhanced Barriers, `CheckFeatureSupport` | Done (Tier 1) |
+| Sprint 66 | VFS path-escape & long-path hardening, XVD overflow + inverted encryption-flag fix (`emoose/xvdtool`), lossless ANSI/non-ASCII paths, `FreeLibrary` hook, portable `vswhere` build, 67 individual CTests, `SPEC_SOURCES.md`, CI | Done (Tier 1) |
+| Sprint 67 | `SCARLETT_USE_WARP=1` software D3D12 + full WARP CI, `loader --audit-dir`, Desktop GDK `261000` `SimpleTriangleDesktop` alignment (`libHttpClient.dll` 10/10), `PresentX(0)` & 5-arg `WaitFrameEventX` | Done (Tier 1) |
+| Sprint 68 | Real GDK `261000` `xgameruntime.dll` COM service broker (8 service vtables), `libHttpClient` async callbacks, local Desktop `SimpleTriangleDesktop.exe` boot (`code=0`, 0 auto-stubs), `scarlett_studio.exe` | Done (Tier 1 + Desktop sample) |
+| Sprint 69 | Direct2D 1.1 + DirectWrite + DirectComposition Liquid Glass UI on `scarlett_studio.exe`, Apache-2.0 `LICENSE`, wiki rebuild, `v0.69.0-pre` release archive | Done (72/72 Tier 1) |
 
 ## Shim & Export Coverage
 
 ### `loader.exe` + `scarlett_hook.dll` + `common/`
-- [x] In-memory static & delay-load PE import redirection across all 9 shims
-- [x] Pre-entrypoint APC injection of `scarlett_hook.dll`
-- [x] Multi-module runtime IAT hooks (`LoadLibraryA/W`, `LoadLibraryExA/W`) across main `.exe` and loaded sub-DLLs
-- [x] Virtual console drive mapping (`G:\` game root, `T:\` scratch, `S:\` save temp)
-- [x] Zero-dependency `SCLZ` LZ77 block codec + standard IMA-ADPCM (`0x0011`) audio codec
-- [x] Automated headless CTest suite (`scarlett_tests.exe`, 21 checks)
+- [x] In-memory static, delay-load, and ordinal PE import redirection across all 12 shims (+ `libHttpClient.dll` alias)
+- [x] Pre-entrypoint APC injection of `scarlett_hook.dll`, implicit `.tls` support, guest `atexit`, and W^X `AutoStubEngine`
+- [x] Multi-module runtime IAT hooks (`LoadLibraryA/W`, `LoadLibraryExA/W`, `GetModuleHandle*`, `GetProcAddress`, `FreeLibrary`)
+- [x] Virtual console drive mapping (`G:\`, `T:\`, `S:\`) with traversal rejection and long-path support
+- [x] Synthetic `SCLZ` LZ77 codec (`ASSUMED`), standard IMA-ADPCM (`0x0011`), and read-only XVD/XVC inspection (encrypted images rejected)
+- [x] Automated CTest suite (`scarlett_tests.exe`): **72/72 Tier 1 self-authored synthetic checks** (`40 cpu`, `32 gpu`) on RTX 5070 + Microsoft WARP; **0 Tier 2 automated external Xbox-targeted binary tests**
 
 ### `xgameruntime.dll`
-- [x] `XGameRuntimeInitialize`, `XGameRuntimeUninitialize`, `XSystemGetDeviceType`
-- [x] `XTaskQueueCreate`, `XTaskQueueDispatch`, `XTaskQueueCloseHandle`, `XAsyncGetStatus`
-- [x] `XUserAddAsync`, `XUserAddResult`, `XUserGetGamertag`, `XUserCloseHandle`
-- [x] `XGameSave*` provider, container, atomic update, blob delete, and undersized-buffer retry
+- [x] GDK `261000` COM service broker (`DllCanUnloadNow`, `InitializeApiImpl`/`Ex`/`Ex2`, `QueryApiImpl`, `UninitializeApiImpl`, `XErrorReport` + 8 service vtables)
+- [x] Flat `X*` exports: `XGameRuntimeInitialize`, `XTaskQueue*`, `XAsync*`, `XUser*`, `XGameSave*`, `XSystemGetDeviceType`
 
 ### `d3d12_xs.dll`
 - [x] `D3D12XboxCreateDevice`, `D3D12SerializeRootSignature`
@@ -79,10 +85,17 @@
 - [x] `VirtualAllocX`, `VirtualFreeX` (`SC_MEM_GRAPHICS` unified memory reservation + unload leak report)
 - [x] `GetConsoleProcessorInfo`, `SetThreadAffinityMaskX` (7-core/14-thread Series X topology + safe host mask clamping)
 
-## Upcoming Subsystems
-- [ ] Async compute command queues (`D3D12_COMMAND_LIST_TYPE_COMPUTE`) & cross-queue GPU fence sync
-- [ ] RDNA2 `64KB_S` swizzling & BCn block-compressed texture support (`xg_xs.dll`)
-- [ ] Next scheduled revision of `docs/ARCHITECTURE_PAPER.md`: Sprint 21
+### `AcpHal.dll`, `libHttpClient.dll` / `libHttpClient.GDK.dll`, `XCurl.dll`
+- [x] `AcpHalCreate` (`IAcpHal` vtable), `AcpHalAllocateShapeContexts`/`ReleaseShapeContexts`, `ApuAlloc`/`ApuFree`
+- [x] `libHttpClient.dll` & `libHttpClient.GDK.dll` (10/10 symbols observed on Desktop `SimpleTriangleDesktop.exe` + async callback completion)
+- [x] `XCurl.dll` offline HTTP/cURL request shims
+
+## Upcoming Milestones (Sprints 70-73)
+See [`docs/ROADMAP.md`](ROADMAP.md) for the active real-Xbox-Series execution timeline:
+- [ ] **Sprint 70:** Real 12 KiB `emoose/xvdtool` XVD offsets (`0x280`/`0x284`/`0x288`/`0x28C`/`0x470`), PE/`MicrosoftGame.Config` parser hardening, and `tools/generate_status.py` CI drift check
+- [ ] **Sprint 71:** Independent-oracle differential RDNA2 shader suite (>= 25 cases) + corpus-scale GFX10.3 translate/compile sweep
+- [ ] **Sprint 72:** First unmodified **Xbox-platform-targeted (`Gaming.Xbox.Scarlett.x64`)** unencrypted binary boot & verified frame (Tier 2)
+- [ ] **Sprint 73:** Multi-title Tier 2 validation, parser fuzzing, second GPU vendor verification, and human loader audit (`TODO(jade)`)
 
 ## Sprint 23: DirectStorage Direct-to-VRAM GPU Buffer Streaming
 - Added DSTORAGE_DESTINATION_BUFFER to DSTORAGE_DESTINATION union in dstorage_xs.hpp.
