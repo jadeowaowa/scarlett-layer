@@ -1,7 +1,7 @@
 # 02 — Graphics (`d3d12_xs`), Surface Tiling (`xg_xs`) & RDNA2 Binary Lifter
 
 ## `d3d12_xs.dll`
-**Files:** `src/shims/d3d12_xs/command_list_x.cpp` (187 L), `src/shims/d3d12_xs/command_queue_x.cpp` (442 L), `src/shims/d3d12_xs/d3d12_xs.cpp` (104 L), `src/shims/d3d12_xs/d3d12_xs.def` (4 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (244 L), `src/shims/d3d12_xs/d3d12_xs_internal.hpp` (79 L), `src/shims/d3d12_xs/d3d12_xs_utils.cpp` (85 L), `src/shims/d3d12_xs/device_x.cpp` (698 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1191 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_stripper.hpp` (272 L), `src/shims/d3d12_xs/shader_translator.hpp` (401 L)
+**Files:** `src/shims/d3d12_xs/command_list_x.cpp` (187 L), `src/shims/d3d12_xs/command_queue_x.cpp` (457 L), `src/shims/d3d12_xs/d3d12_xs.cpp` (119 L), `src/shims/d3d12_xs/d3d12_xs.def` (4 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (261 L), `src/shims/d3d12_xs/d3d12_xs_internal.hpp` (79 L), `src/shims/d3d12_xs/d3d12_xs_utils.cpp` (85 L), `src/shims/d3d12_xs/device_x.cpp` (742 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1191 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_stripper.hpp` (272 L), `src/shims/d3d12_xs/shader_translator.hpp` (401 L)
 
 **DLL Exports (`.def`):** `D3D12XboxCreateDevice`, `D3D12SerializeRootSignature = ScarlettSerializeRootSignature`
 
@@ -13,6 +13,8 @@
 - `[04]` `HRESULT Signal(ID3D12Fence* pFence, UINT64 Value)`
 - `[05]` `HRESULT Wait(ID3D12Fence* pFence, UINT64 Value)`
 - `[06]` `HRESULT PresentX( UINT PlaneCount, const D3D12XBOX_PRESENT_PLANE_PARAMETERS* pPlaneParameters, const D3D12XBOX_PRESENT_PARAMETERS* pPresentParameters)`
+- `[07]` `void SuspendX(UINT32 Flags)`
+- `[08]` `void ResumeX()`
 
 **COM Interface `ID3D12GraphicsCommandListX : IUnknown`:**
 - `[03]` `HRESULT Close()`
@@ -69,11 +71,13 @@
 - `[18]` `HRESULT CreateComputePipelineState( const D3D12_COMPUTE_PIPELINE_STATE_DESC* pDesc, REFIID riid, void** ppPipelineState)`
 - `[19]` `HRESULT SetFrameIntervalX( IDXGIOutput* pOutput, uint32_t PeriodInMicroseconds, uint32_t MaxLatency, uint32_t Flags)`
 - `[20]` `HRESULT ScheduleFrameEventX( D3D12XBOX_FRAME_EVENT Event, UINT64 OffsetMicroseconds, HANDLE hEvent, uint32_t Flags)`
-- `[21]` `HRESULT WaitFrameEventX( D3D12XBOX_FRAME_EVENT Event, DWORD TimeoutInMilliseconds, HANDLE hEvent, D3D12XBOX_FRAME_PIPELINE_TOKEN* pToken)`
+- `[21]` `HRESULT WaitFrameEventX( D3D12XBOX_FRAME_EVENT Event, DWORD TimeoutInMilliseconds, HANDLE hEvent, uint32_t Flags, D3D12XBOX_FRAME_PIPELINE_TOKEN* pToken)`
 - `[22]` `HRESULT CheckFeatureSupport( D3D12_FEATURE Feature, void* pFeatureSupportData, UINT FeatureSupportDataSize)`
 
 **Key Enums:**
 - `D3D12XBOX_FRAME_INTERVAL_FLAGS`: D3D12XBOX_FRAME_INTERVAL_FLAG_NONE = 0
+- `D3D12XBOX_SCHEDULE_FRAME_EVENT_FLAGS`: D3D12XBOX_SCHEDULE_FRAME_EVENT_FLAG_NONE = 0
+- `D3D12XBOX_WAIT_FRAME_EVENT_FLAGS`: D3D12XBOX_WAIT_FRAME_EVENT_FLAG_NONE = 0
 - `D3D12XBOX_FRAME_EVENT`: D3D12XBOX_FRAME_EVENT_ORIGIN = 0, D3D12XBOX_FRAME_EVENT_DISPLAY = 1
 - `SoppOp`: kSoppNop = 0x00u, kSoppEndpgm = 0x01u, kSoppWaitcnt = 0x0Cu
 - `Vop1Op`: kVop1Nop = 0x00u, kVop1MovB32 = 0x01u, kVop1RcpF32 = 0x2Au, kVop1SqrtF32 = 0x33u

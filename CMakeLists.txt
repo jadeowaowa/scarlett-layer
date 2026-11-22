@@ -203,7 +203,7 @@ add_executable(scarlett_studio WIN32
     src/gui/scarlett_studio.cpp
 )
 target_compile_definitions(scarlett_studio PRIVATE UNICODE _UNICODE)
-target_link_libraries(scarlett_studio PRIVATE sc_common user32 gdi32 comctl32 comdlg32 shell32 ole32)
+target_link_libraries(scarlett_studio PRIVATE sc_common user32 gdi32 comdlg32 shell32 ole32 d3d11 dxgi d2d1 dwrite dcomp dwmapi)
 add_dependencies(scarlett_studio loader)
 sc_set_runtime_dir(scarlett_studio "${SC_BIN_DIR}")
 sc_set_runtime_dir(loader "${SC_BIN_DIR}")

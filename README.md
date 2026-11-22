@@ -57,7 +57,7 @@ Shared runtime flags live in `common/config.hpp`.
 
 What is demonstrated today:
 
-- All **72 individual CTest targets** (`40 cpu`, `32 gpu`) pass on both the author's NVIDIA RTX 5070 and Microsoft WARP (`SCARLETT_USE_WARP=1`), with a warning-free `/W4` build and zero D3D12 debug-layer errors. Unmodified Microsoft GDK `SimpleTriangleDesktop.exe` boots, renders, and exits cleanly (`code=0`) through `loader.exe --boot` and the desktop GUI launcher (`scarlett_studio.exe`). Both `cpu` and `gpu` suites run on GitHub Actions Windows CI (via WARP). Current baseline: Sprint 68.
+- All **72 individual CTest targets** (`40 cpu`, `32 gpu`) pass on both the author's NVIDIA RTX 5070 and Microsoft WARP (`SCARLETT_USE_WARP=1`), with a warning-free `/W4` build and zero D3D12 debug-layer errors. Unmodified Microsoft GDK `SimpleTriangleDesktop.exe` boots, renders, and exits cleanly (`code=0`) through `loader.exe --boot` and the Liquid Glass desktop launcher (`scarlett_studio.exe`, Direct2D 1.1 + DirectWrite + DirectComposition + Windows 11 Acrylic). Both `cpu` and `gpu` suites run on GitHub Actions Windows CI (via WARP). Current baseline: Sprint 69.
 - The tests run real D3D12 work with GPU readback: a textured RDNA2 draw, a compute dispatch, 3D depth rendering, and cross-queue fence sync. They also cover import and ordinal rewriting, SCLZ streaming, and a boot-to-frame-to-save run (`ScarlettTitleBringUpE2E`).
 
 What is **not** demonstrated yet:
@@ -66,7 +66,7 @@ What is **not** demonstrated yet:
 - Compatibility with real console data formats and unmodified external binaries. `SCLZ` compression, `SCXS` shader containers, and several console COM interfaces are **project-defined (`ASSUMED`)** rather than matched to retail vtables and GUIDs — see [`docs/SPEC_SOURCES.md`](docs/SPEC_SOURCES.md). Real titles will not use them.
 - Testing on GPUs other than the one above.
 
-Planned work (see [`docs/ROADMAP.md`](docs/ROADMAP.md)): modernizing `scarlett_studio.exe` with a Direct2D/DirectComposition Liquid Glass UI, expanding the differential RDNA2 shader corpus, aligning real XVD header offsets (`0x284`/`0x288`/`0x28C`), and an independent loader audit before resuming DXR, XMA2, and additional shims.
+Planned work (see [`docs/ROADMAP.md`](docs/ROADMAP.md)): expanding the differential RDNA2 shader lifter corpus, aligning real XVD header offsets (`0x284`/`0x288`/`0x28C`), testing a second GPU vendor where available, and completing an independent loader audit before resuming DXR, XMA2, and additional shims.
 
 ## Requirements
 
