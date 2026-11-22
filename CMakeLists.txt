@@ -129,6 +129,13 @@ add_library(libhttpclient SHARED
 set_target_properties(libhttpclient PROPERTIES OUTPUT_NAME "libHttpClient.GDK")
 target_link_libraries(libhttpclient PRIVATE sc_common)
 sc_set_runtime_dir(libhttpclient "${SC_BIN_DIR}/shims")
+# Also stage desktop GDK name (libHttpClient.dll) alongside console name (libHttpClient.GDK.dll)
+add_custom_command(TARGET libhttpclient POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "$<TARGET_FILE:libhttpclient>"
+        "${SC_BIN_DIR}/shims/libHttpClient.dll"
+    COMMENT "Staging shims/libHttpClient.dll alias for GDK binaries"
+)
 
 # Shim #12: XCurl.dll -> build/bin/shims/
 add_library(xcurl SHARED
@@ -198,6 +205,7 @@ file(STRINGS "${_sc_tests_main}" _sc_test_lines REGEX "^[ \t]*\\{\"([A-Za-z0-9_]
 
 set(_sc_gpu_tests
     D3D12HeadlessDeviceAndPso
+    D3D12XsGdkSampleAlignmentE2E
     D3D12PlacedResourcesAndHeap
     ScxsTranslatorAndPsoCache
     D3D12ComputePsoAndUavExecution

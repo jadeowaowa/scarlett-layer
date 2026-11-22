@@ -6,6 +6,9 @@
 bool TestVfsPathEscapeAndLongPaths();
 bool TestXvdFlagsAndBoundsNegative();
 bool TestNonAsciiShimAndFreeLibraryHook();
+bool TestWarpAdapterRenderReadback();
+bool TestLocalCorpusReadOnlyAudit();
+bool TestD3D12XsGdkSampleAlignmentE2E();
 
 namespace {
 
@@ -82,6 +85,9 @@ constexpr TestEntry kTests[] = {
     {"VfsPathEscapeAndLongPaths",          TestVfsPathEscapeAndLongPaths},
     {"XvdFlagsAndBoundsNegative",          TestXvdFlagsAndBoundsNegative},
     {"NonAsciiShimAndFreeLibraryHook",     TestNonAsciiShimAndFreeLibraryHook},
+    {"WarpAdapterRenderReadback",          TestWarpAdapterRenderReadback},
+    {"LocalCorpusReadOnlyAudit",           TestLocalCorpusReadOnlyAudit},
+    {"D3D12XsGdkSampleAlignmentE2E",       TestD3D12XsGdkSampleAlignmentE2E},
 };
 
 bool EqualsCaseInsensitive(std::string_view a, std::string_view b) {

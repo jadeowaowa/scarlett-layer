@@ -5,7 +5,7 @@ An experimental Windows / Direct3D 12 compatibility layer for running **unpacked
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-Windows%20x64%20%7C%20D3D12-blue?style=flat-square)
 [![CI](https://github.com/jadeowaowa/scarlett-layer/actions/workflows/ci.yml/badge.svg)](https://github.com/jadeowaowa/scarlett-layer/actions/workflows/ci.yml)
-![Tests](https://img.shields.io/badge/checks-67%2F67-2ea44f?style=flat-square)
+![Tests](https://img.shields.io/badge/checks-70%2F70-2ea44f?style=flat-square)
 ![Status](https://img.shields.io/badge/status-experimental-orange?style=flat-square)
 
 > **Status: experimental.** The subsystems below are implemented and exercised by an automated test suite. No commercial title has been run end-to-end through the layer yet. See [Current status](#current-status).
@@ -57,7 +57,7 @@ Shared runtime flags live in `common/config.hpp`.
 
 What is demonstrated today:
 
-- All **67 individual CTest targets** (`36 cpu`, `31 gpu`) pass on the author's machine (NVIDIA RTX 5070), with a warning-free `/W4` build and no D3D12 debug-layer errors. Each test launches `scarlett_tests.exe --exact --filter <TestName>` through `loader.exe`. The 36 `cpu` tests also run on GitHub Actions Windows CI. Current baseline: Sprint 66.
+- All **70 individual CTest targets** (`38 cpu`, `32 gpu`) pass on both the author's NVIDIA RTX 5070 and Microsoft WARP (`SCARLETT_USE_WARP=1`), with a warning-free `/W4` build and zero D3D12 debug-layer errors. Each test launches `scarlett_tests.exe --exact --filter <TestName>` through `loader.exe`. Both `cpu` and `gpu` suites run on GitHub Actions Windows CI (via WARP). Current baseline: Sprint 67.
 - The tests run real D3D12 work with GPU readback: a textured RDNA2 draw, a compute dispatch, 3D depth rendering, and cross-queue fence sync. They also cover import and ordinal rewriting, SCLZ streaming, and a boot-to-frame-to-save run (`ScarlettTitleBringUpE2E`).
 
 What is **not** demonstrated yet:
@@ -66,7 +66,7 @@ What is **not** demonstrated yet:
 - Compatibility with real console data formats and unmodified external binaries. `SCLZ` compression, `SCXS` shader containers, and several console COM interfaces are **project-defined (`ASSUMED`)** rather than matched to retail vtables and GUIDs — see [`docs/SPEC_SOURCES.md`](docs/SPEC_SOURCES.md). Real titles will not use them.
 - Testing on GPUs other than the one above.
 
-Planned work (see [`docs/ROADMAP.md`](docs/ROADMAP.md)): external validation against Microsoft's public Xbox GDK samples, an expanded differential RDNA2 shader corpus, WARP / second-GPU CI coverage, and real XVD header offset alignment (`0x284`/`0x288`/`0x28C`), before resuming DXR, XMA2, and additional shims.
+Planned work (see [`docs/ROADMAP.md`](docs/ROADMAP.md)): implementing the `xgameruntime.dll` service-broker ABI (`InitializeApiImplEx2`/`QueryApiImpl`) surfaced by Microsoft's public `SimpleTriangleDesktop` sample, expanding the differential RDNA2 shader corpus, aligning real XVD header offsets (`0x284`/`0x288`/`0x28C`), and an independent loader audit before resuming DXR, XMA2, and additional shims.
 
 ## Requirements
 
@@ -103,6 +103,8 @@ The test runner is split into five suites: `tests_d3d12_core`, `tests_d3d12_shad
 .\build\bin\titles\scarlett_tests\scarlett_tests.exe --filter PresentX
 .\build\bin\titles\scarlett_tests\scarlett_tests.exe --exact --filter VfsPathEscapeAndLongPaths
 ctest --test-dir build -L cpu --output-on-failure
+# Or run the full GPU suite on Microsoft WARP without a discrete GPU:
+# SCARLETT_HEADLESS=1 SCARLETT_USE_WARP=1 ctest --test-dir build -L gpu --output-on-failure
 ```
 
 ## Documentation

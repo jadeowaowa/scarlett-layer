@@ -33,3 +33,13 @@ This document separates behaviors backed by public documentation or open-source 
 - **TODO(jade):** Audit `src/loader/pe_patcher.cpp` and `src/loader/scarlett_hook.cpp` with an independent reviewer (suspended-process APC/IAT patching).
 - **TODO(jade):** Migrate `XvdContainer` header parsing from the `ASSUMED` `0x240..0x258` synthetic layout to the real `emoose/xvdtool` `0x284`/`0x288`/`0x28C` offsets when unencrypted retail XVD metadata support is scheduled.
 - **TODO(jade):** Retitle the existing GitHub `v1.0.0` release ("Golden Master") to a `v0.x` pre-release to match the experimental status.
+
+## 4. Microsoft Public GDK 261000 & `Xbox-GDK-Samples` Findings (Sprint 67)
+
+Empirical findings from compiling unmodified `Samples/IntroGraphics/SimpleTriangleDesktop` against Microsoft Public GDK `261000` (`October 2026`) and inspecting `Samples/IntroGraphics/SimpleTriangle`:
+
+| Subsystem | Observed Real GDK Behavior | Status in `scarlett-layer` |
+| :--- | :--- | :--- |
+| `xgameruntime.dll` | Exports only 7 bootstrap functions (`InitializeApiImpl`, `InitializeApiImplEx`, `InitializeApiImplEx2`, `QueryApiImpl`, `UninitializeApiImpl`, etc.). All 390 `X*` C APIs live in `xgameruntime.thunks.dll` / static `xgameruntime.lib`, which dynamically load `xgameruntime.dll` and invoke `InitializeApiImplEx2` + `QueryApiImpl` to fetch internal service vtables (`SSystemImpl`, `SUsersImpl`, `SAsyncImpl`, etc.). | **Known gap:** `shims/xgameruntime.dll` currently exports flat `X*` symbols directly (matching `xgameruntime.thunks.dll` rather than the `InitializeApiImplEx2` service-broker ABI). Running `SimpleTriangleDesktop.exe` under `loader.exe` surfaced `xgameruntime.dll!InitializeApiImplEx2` via `AutoStubEngine`. |
+| `libHttpClient.dll` | Desktop GDK links `libHttpClient.dll` (not `libHttpClient.GDK.dll`) and imports 10 symbols including `HCHttpCallRequestSetRequestBodyString`. | **Aligned (Sprint 67):** Exported `HCHttpCallRequestSetRequestBodyString` and staged `shims/libHttpClient.dll` alongside `libHttpClient.GDK.dll` (10/10 symbols implemented). |
+| `d3d12_xs` (`SimpleTriangle`) | Calls `PresentX(0, nullptr, nullptr)` to clear display planes, 5-arg `WaitFrameEventX(..., Flags, &token)`, `SuspendX`/`ResumeX`, `m_d3dDevice.As(&dxgiDevice)`, and ORs console-only `D3D12XBOX_RESOURCE_FLAG_*` bits into `D3D12_RESOURCE_DESC::Flags`. | **Aligned (Sprint 67):** Fixed `PresentX(0, nullptr, nullptr)`, 5-arg `WaitFrameEventX`, `SuspendX`/`ResumeX`, and upper-16-bit Xbox resource flag stripping. `IDXGIDevice1` QI bridge and retail COM GUID/vtable alignment remain open (`ASSUMED`). |

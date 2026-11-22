@@ -116,10 +116,25 @@ public:
         return m_queue->Wait(pFence, Value);
     }
 
+    void STDMETHODCALLTYPE SuspendX(UINT32 Flags) override {
+        char buf[64];
+        std::snprintf(buf, sizeof(buf), "-> queue suspended (flags=0x%X)", Flags);
+        sc::log::Write(sc::log::Level::Info, "d3d12_xs", "SuspendX", buf);
+    }
+
+    void STDMETHODCALLTYPE ResumeX() override {
+        sc::log::Write(sc::log::Level::Info, "d3d12_xs", "ResumeX", "-> queue resumed");
+    }
+
     HRESULT STDMETHODCALLTYPE PresentX(
         UINT PlaneCount,
         const D3D12XBOX_PRESENT_PLANE_PARAMETERS* pPlaneParameters,
         const D3D12XBOX_PRESENT_PARAMETERS* /*pPresentParameters*/) override {
+        // Xbox titles (e.g. Microsoft Xbox-GDK-Samples SimpleTriangle) call
+        // PresentX(0, nullptr, nullptr) during init/teardown to clear display planes.
+        if (PlaneCount == 0 && !pPlaneParameters) {
+            return S_OK;
+        }
         if (PlaneCount == 0 || !pPlaneParameters ||
             pPlaneParameters[0].ResourceCount == 0 || !pPlaneParameters[0].ppResources ||
             !pPlaneParameters[0].ppResources[0]) {

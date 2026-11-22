@@ -1465,7 +1465,7 @@ int main() {
         angle += (turbo ? 4.8f : 1.1f) * dt;
 
         D3D12XBOX_FRAME_PIPELINE_TOKEN token = D3D12XBOX_FRAME_PIPELINE_TOKEN_NULL;
-        deviceX->WaitFrameEventX(D3D12XBOX_FRAME_EVENT_ORIGIN, INFINITE, nullptr, &token);
+        deviceX->WaitFrameEventX(D3D12XBOX_FRAME_EVENT_ORIGIN, INFINITE, nullptr, D3D12XBOX_WAIT_FRAME_EVENT_FLAG_NONE, &token);
 
         ID3D12DescriptorHeap* heaps[] = { srvHeap.Get() };
 

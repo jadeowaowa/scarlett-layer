@@ -5,9 +5,10 @@ on:
     branches: [ main, "sprint-*" ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
 
 jobs:
-  build-and-test-cpu:
+  build-and-test:
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -24,7 +25,13 @@ jobs:
       - name: Build (Zero-Warning /W4 Check)
         run: cmake --build build
 
-      - name: Run CPU CTest Suite (GPU tests require hardware GPU / future WARP mode)
+      - name: Run CPU CTest Suite
         env:
           SCARLETT_HEADLESS: "1"
-        run: ctest --test-dir build -L cpu --output-on-failure --verbose
+        run: ctest --test-dir build -L cpu --output-on-failure
+
+      - name: Run GPU CTest Suite on Microsoft WARP
+        env:
+          SCARLETT_HEADLESS: "1"
+          SCARLETT_USE_WARP: "1"
+        run: ctest --test-dir build -L gpu --output-on-failure

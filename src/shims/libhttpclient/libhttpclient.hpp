@@ -18,6 +18,7 @@ extern "C" {
     HRESULT WINAPI HCHttpCallRequestSetUrl(HCCallHandle call, const char* method, const char* url);
     HRESULT WINAPI HCHttpCallRequestSetHeader(HCCallHandle call, const char* name, const char* value, uint32_t allowTracing);
     HRESULT WINAPI HCHttpCallRequestSetRequestBodyBytes(HCCallHandle call, const uint8_t* bodyBytes, uint32_t bodySize);
+HRESULT WINAPI HCHttpCallRequestSetRequestBodyString(HCCallHandle call, const char* requestBodyString);
     HRESULT WINAPI HCHttpCallRequestSetTimeout(HCCallHandle call, uint32_t timeoutInSeconds);
     HRESULT WINAPI HCHttpCallPerformAsync(HCCallHandle call, void* asyncBlock);
 

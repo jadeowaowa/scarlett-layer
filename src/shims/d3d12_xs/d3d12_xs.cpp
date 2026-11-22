@@ -48,18 +48,33 @@ HRESULT WINAPI D3D12XboxCreateDevice(
     }
 
     ComPtr<IDXGIAdapter1> adapter;
-    hr = factory->EnumAdapterByGpuPreference(
-        0, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, IID_PPV_ARGS(&adapter));
-    if (FAILED(hr)) {
-        hr = factory->EnumAdapters1(0, &adapter);
+    bool usingWarp = sc::config::UseWarp();
+    if (usingWarp) {
+        hr = factory->EnumWarpAdapter(IID_PPV_ARGS(&adapter));
         if (FAILED(hr)) {
+            sc::log::Write(sc::log::Level::Error, "d3d12_xs", __FUNCTION__,
+                           "-> SCARLETT_USE_WARP=1 requested but EnumWarpAdapter failed");
             return hr;
+        }
+    } else {
+        hr = factory->EnumAdapterByGpuPreference(
+            0, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, IID_PPV_ARGS(&adapter));
+        if (FAILED(hr)) {
+            hr = factory->EnumAdapters1(0, &adapter);
+        }
+        if (FAILED(hr)) {
+            hr = factory->EnumWarpAdapter(IID_PPV_ARGS(&adapter));
+            if (FAILED(hr)) {
+                return hr;
+            }
+            usingWarp = true;
         }
     }
 
     DXGI_ADAPTER_DESC1 desc{};
     adapter->GetDesc1(&desc);
-    std::string gpuMsg = "-> selected host GPU: " + sc::d3d12xs::WideToUtf8(desc.Description);
+    std::string gpuMsg = std::string(usingWarp ? "-> selected WARP adapter: " : "-> selected host GPU: ") +
+                         sc::d3d12xs::WideToUtf8(desc.Description);
     sc::log::Write(sc::log::Level::Info, "d3d12_xs", __FUNCTION__, gpuMsg.c_str());
 
     ComPtr<ID3D12Device> nativeDevice;

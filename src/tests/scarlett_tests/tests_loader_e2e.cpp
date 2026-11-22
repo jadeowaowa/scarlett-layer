@@ -1579,3 +1579,192 @@ bool TestNonAsciiShimAndFreeLibraryHook() {
 
     return true;
 }
+
+bool TestWarpAdapterRenderReadback() {
+    using Microsoft::WRL::ComPtr;
+
+    char prevWarp[8]{};
+    const DWORD prevLen = GetEnvironmentVariableA("SCARLETT_USE_WARP", prevWarp, static_cast<DWORD>(sizeof(prevWarp)));
+    struct RestoreWarp {
+        bool hadPrev;
+        std::string val;
+        ~RestoreWarp() {
+            SetEnvironmentVariableA("SCARLETT_USE_WARP", hadPrev ? val.c_str() : nullptr);
+        }
+    } guard{ prevLen > 0, std::string(prevWarp) };
+
+    SC_EXPECT(SetEnvironmentVariableA("SCARLETT_USE_WARP", "1") != FALSE);
+    SC_EXPECT(sc::config::UseWarp());
+
+    D3D12XBOX_CREATE_DEVICE_PARAMETERS params{};
+    params.Version = 1;
+    ComPtr<ID3D12DeviceX> devX;
+    SC_EXPECT(SUCCEEDED(D3D12XboxCreateDevice(
+        nullptr, &params, IID_ID3D12DeviceX, reinterpret_cast<void**>(devX.GetAddressOf()))));
+
+    ComPtr<ID3D12Device> nativeDev;
+    SC_EXPECT(SUCCEEDED(devX->QueryInterface(
+        IID_ScarlettNativeD3D12Device, reinterpret_cast<void**>(nativeDev.GetAddressOf()))));
+
+    // Confirm the selected adapter is genuinely Microsoft WARP (VendorId 0x1414, SOFTWARE flag)
+    const LUID luid = nativeDev->GetAdapterLuid();
+    HMODULE hDxgi = LoadLibraryW(L"dxgi.dll");
+    SC_EXPECT(hDxgi != nullptr);
+    using PFN_CreateDXGIFactory1 = HRESULT(WINAPI*)(REFIID, void**);
+    auto pCreateFactory1 = reinterpret_cast<PFN_CreateDXGIFactory1>(
+        GetProcAddress(hDxgi, "CreateDXGIFactory1"));
+    SC_EXPECT(pCreateFactory1 != nullptr);
+
+    ComPtr<IDXGIFactory4> factory4;
+    SC_EXPECT(SUCCEEDED(pCreateFactory1(IID_PPV_ARGS(&factory4))));
+    ComPtr<IDXGIAdapter1> adapter;
+    SC_EXPECT(SUCCEEDED(factory4->EnumAdapterByLuid(luid, IID_PPV_ARGS(&adapter))));
+    DXGI_ADAPTER_DESC1 desc{};
+    SC_EXPECT(SUCCEEDED(adapter->GetDesc1(&desc)));
+    SC_EXPECT(desc.VendorId == 0x1414u);
+    SC_EXPECT((desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0u);
+    FreeLibrary(hDxgi);
+
+    // Execute a real 4x4 render-target clear + readback on WARP through d3d12_xs
+    D3D12_COMMAND_QUEUE_DESC qd{};
+    qd.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+    ComPtr<ID3D12CommandQueueX> queueX;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommandQueueX(&qd, queueX.GetAddressOf())));
+
+    ComPtr<ID3D12CommandAllocator> alloc;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&alloc))));
+    ComPtr<ID3D12GraphicsCommandListX> clX;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommandList(
+        0, D3D12_COMMAND_LIST_TYPE_DIRECT, alloc.Get(), nullptr,
+        IID_ID3D12GraphicsCommandListX, reinterpret_cast<void**>(clX.GetAddressOf()))));
+
+    D3D12_DESCRIPTOR_HEAP_DESC rtvHD{ D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 1, D3D12_DESCRIPTOR_HEAP_FLAG_NONE, 0 };
+    ComPtr<ID3D12DescriptorHeap> rtvHeap;
+    SC_EXPECT(SUCCEEDED(devX->CreateDescriptorHeap(&rtvHD, IID_PPV_ARGS(&rtvHeap))));
+
+    D3D12_HEAP_PROPERTIES defHeap{ D3D12_HEAP_TYPE_DEFAULT };
+    D3D12_HEAP_PROPERTIES rbHeap{ D3D12_HEAP_TYPE_READBACK };
+    D3D12_RESOURCE_DESC rtDesc{};
+    rtDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    rtDesc.Width = 4; rtDesc.Height = 4; rtDesc.DepthOrArraySize = 1; rtDesc.MipLevels = 1;
+    rtDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM; rtDesc.SampleDesc.Count = 1;
+    rtDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+    rtDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+
+    D3D12_CLEAR_VALUE clearVal{};
+    clearVal.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    clearVal.Color[0] = 12.0f / 255.0f;
+    clearVal.Color[1] = 34.0f / 255.0f;
+    clearVal.Color[2] = 56.0f / 255.0f;
+    clearVal.Color[3] = 1.0f;
+
+    ComPtr<ID3D12Resource> rtTex;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommittedResource(
+        &defHeap, D3D12_HEAP_FLAG_NONE, &rtDesc,
+        D3D12_RESOURCE_STATE_RENDER_TARGET, &clearVal, IID_PPV_ARGS(&rtTex))));
+    D3D12_CPU_DESCRIPTOR_HANDLE rtvH = rtvHeap->GetCPUDescriptorHandleForHeapStart();
+    nativeDev->CreateRenderTargetView(rtTex.Get(), nullptr, rtvH);
+
+    D3D12_RESOURCE_DESC rbDesc{};
+    rbDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    rbDesc.Width = 256 * 4; rbDesc.Height = 1; rbDesc.DepthOrArraySize = 1; rbDesc.MipLevels = 1;
+    rbDesc.SampleDesc.Count = 1; rbDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    ComPtr<ID3D12Resource> rbBuf;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommittedResource(
+        &rbHeap, D3D12_HEAP_FLAG_NONE, &rbDesc,
+        D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&rbBuf))));
+
+    clX->OMSetRenderTargets(1, &rtvH, FALSE, nullptr);
+    clX->ClearRenderTargetView(rtvH, clearVal.Color, 0, nullptr);
+    D3D12_RESOURCE_BARRIER bar{};
+    bar.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    bar.Transition = { rtTex.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+                       D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_SOURCE };
+    clX->ResourceBarrier(1, &bar);
+    D3D12_TEXTURE_COPY_LOCATION srcL{ rtTex.Get(), D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX, { 0 } };
+    D3D12_TEXTURE_COPY_LOCATION dstL{};
+    dstL.pResource = rbBuf.Get();
+    dstL.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    dstL.PlacedFootprint.Footprint = { DXGI_FORMAT_R8G8B8A8_UNORM, 4, 4, 1, 256 };
+    clX->CopyTextureRegion(&dstL, 0, 0, 0, &srcL, nullptr);
+    SC_EXPECT(SUCCEEDED(clX->Close()));
+
+    ComPtr<ID3D12Fence> fence;
+    SC_EXPECT(SUCCEEDED(nativeDev->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence))));
+    HANDLE ev = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    SC_EXPECT(ev != nullptr);
+    ID3D12CommandList* lists[] = { clX->GetNativeCommandList() };
+    queueX->ExecuteCommandLists(1, lists);
+    SC_EXPECT(SUCCEEDED(queueX->Signal(fence.Get(), 1)));
+    SC_EXPECT(SUCCEEDED(fence->SetEventOnCompletion(1, ev)));
+    SC_EXPECT(WaitForSingleObject(ev, 5000) == WAIT_OBJECT_0);
+    CloseHandle(ev);
+
+    uint8_t* pRb = nullptr;
+    SC_EXPECT(SUCCEEDED(rbBuf->Map(0, nullptr, reinterpret_cast<void**>(&pRb))));
+    const bool pixelOk = (pRb[0] == 12 && pRb[1] == 34 && pRb[2] == 56 && pRb[3] == 255);
+    rbBuf->Unmap(0, nullptr);
+    SC_EXPECT(pixelOk);
+    return true;
+}
+
+bool TestLocalCorpusReadOnlyAudit() {
+    // 1. Always verify synthetic encrypted XVC rejection (flags=0x41: ReadOnly | RegionIdInXts)
+    const auto tmpDir = std::filesystem::temp_directory_path() / L"scarlett_s67_corpus_probe";
+    std::error_code ec;
+    std::filesystem::remove_all(tmpDir, ec);
+    std::filesystem::create_directories(tmpDir, ec);
+
+    const std::vector<uint8_t> payload = { 'S', '6', '7' };
+    const auto retailStyleFlags = sc::vfs::kXvdFlagReadOnly | sc::vfs::kXvdFlagRegionIdInXts; // 0x41
+    const auto encImg = sc::vfs::XvdContainer::BuildSyntheticUnencryptedXvd(payload, 1u, retailStyleFlags);
+    const auto encPath = tmpDir / L"retail_flags_0x41.xvc";
+    {
+        std::ofstream ofs(encPath, std::ios::binary | std::ios::trunc);
+        ofs.write(reinterpret_cast<const char*>(encImg.data()), static_cast<std::streamsize>(encImg.size()));
+    }
+    {
+        sc::vfs::XvdContainer xvd;
+        std::string err;
+        SC_EXPECT(!xvd.Open(encPath, err));
+        SC_EXPECT(err.find("Encrypted") != std::string::npos);
+    }
+    std::filesystem::remove_all(tmpDir, ec);
+
+    // 2. Opt-in local encrypted XVC negative test (never committed; skipped when env var unset)
+    if (auto localXvc = sc::config::GetEnvPath(L"SCARLETT_LOCAL_XVC_PATH")) {
+        if (std::filesystem::exists(*localXvc, ec)) {
+            sc::vfs::XvdContainer xvd;
+            std::string err;
+            SC_EXPECT(!xvd.Open(*localXvc, err));
+            SC_EXPECT(err.find("Encrypted") != std::string::npos);
+        }
+    }
+
+    // 3. Opt-in local unpacked corpus directory read-only audit (skipped when env var unset)
+    if (auto corpusDir = sc::config::GetEnvPath(L"SCARLETT_LOCAL_CORPUS_DIR")) {
+        if (std::filesystem::exists(*corpusDir, ec) && std::filesystem::is_directory(*corpusDir, ec)) {
+            auto shimDir = sc::config::GetShimDir().value_or(std::filesystem::current_path());
+            std::filesystem::recursive_directory_iterator it(
+                *corpusDir, std::filesystem::directory_options::skip_permission_denied, ec);
+            std::filesystem::recursive_directory_iterator end;
+            for (; it != end; it.increment(ec)) {
+                if (ec) { ec.clear(); continue; }
+                if (!it->is_regular_file(ec)) continue;
+                const std::string ext = sc::loader::detail::ToLowerAscii(
+                    sc::path::WideToUtf8(it->path().extension().wstring()));
+                if (ext == ".xvd" || ext == ".xvc") {
+                    sc::vfs::XvdContainer xvd;
+                    std::string err;
+                    if (!xvd.Open(it->path(), err)) {
+                        SC_EXPECT(!err.empty());
+                    }
+                } else if (ext == ".exe") {
+                    const auto cov = sc::loader::InspectPeSymbolCoverage(it->path(), shimDir);
+                    SC_EXPECT(cov.audit.validPe64 || !cov.audit.error.empty());
+                }
+            }
+        }
+    }
+    return true;
+}

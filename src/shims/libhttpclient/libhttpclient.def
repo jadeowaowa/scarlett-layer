@@ -9,6 +9,7 @@ EXPORTS
     HCHttpCallRequestSetUrl
     HCHttpCallRequestSetHeader
     HCHttpCallRequestSetRequestBodyBytes
+    HCHttpCallRequestSetRequestBodyString
     HCHttpCallRequestSetTimeout
     HCHttpCallPerformAsync
     HCHttpCallResponseGetStatusCode
