@@ -14,6 +14,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Verify Generated Status & Docs Sync
+        run: python tools/generate_status.py --check
+
       - name: Setup MSVC x64 Developer Environment
         uses: ilammy/msvc-dev-cmd@v1
         with:
