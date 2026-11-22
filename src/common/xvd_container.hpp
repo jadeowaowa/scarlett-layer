@@ -1,17 +1,28 @@
 #pragma once
 
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <string>
 #include <vector>
 
 namespace sc::vfs {
 
-inline constexpr size_t   kXvdMagicOffset       = 0x200;
-inline constexpr size_t   kXvdMinHeaderSize     = 0x1000; // 4 KiB
-inline constexpr uint32_t kXvdFlagEncrypted     = 0x1u;
+inline constexpr size_t   kXvdMagicOffset               = 0x200;
+inline constexpr size_t   kXvdMinHeaderSize             = 0x1000; // 4 KiB
+
+// XvdVolumeFlags sourced from public emoose/xvdtool (LibXboxOne/XVD/XVDEnums.cs).
+inline constexpr uint32_t kXvdFlagReadOnly              = 0x01u;
+inline constexpr uint32_t kXvdFlagEncryptionDisabled    = 0x02u;
+inline constexpr uint32_t kXvdFlagDataIntegrityDisabled = 0x04u;
+inline constexpr uint32_t kXvdFlagLegacySectorSize      = 0x08u;
+inline constexpr uint32_t kXvdFlagResiliencyEnabled     = 0x10u;
+inline constexpr uint32_t kXvdFlagSraReadOnly           = 0x20u;
+inline constexpr uint32_t kXvdFlagRegionIdInXts         = 0x40u;
+inline constexpr uint32_t kXvdFlagEraSpecific           = 0x80u;
 
 struct XvdHeader {
     std::string magic;
@@ -23,7 +34,8 @@ struct XvdHeader {
     uint64_t    userDataOffset{0};
     uint64_t    userDataLength{0};
 
-    bool IsEncrypted() const { return (volumeFlags & kXvdFlagEncrypted) != 0u; }
+    // Per emoose/xvdtool (XVDFile.cs): XVD volumes are encrypted unless EncryptionDisabled (0x2) is set.
+    bool IsEncrypted() const { return (volumeFlags & kXvdFlagEncryptionDisabled) == 0u; }
 };
 
 class XvdContainer {
@@ -37,9 +49,18 @@ public:
             outError = "Failed to open XVD file: " + path.string();
             return false;
         }
-        const auto fileSize = static_cast<uint64_t>(f.tellg());
+        const std::streampos rawPos = f.tellg();
+        if (rawPos < 0) {
+            outError = "Failed to query XVD file size";
+            return false;
+        }
+        const auto fileSize = static_cast<uint64_t>(rawPos);
         if (fileSize < kXvdMinHeaderSize) {
             outError = "XVD image smaller than 4 KiB header";
+            return false;
+        }
+        if (fileSize > static_cast<uint64_t>(std::numeric_limits<std::streamoff>::max())) {
+            outError = "XVD file size exceeds host stream offset range";
             return false;
         }
 
@@ -58,20 +79,39 @@ public:
 
         XvdHeader hdr{};
         hdr.magic.assign(reinterpret_cast<const char*>(hdrBytes.data() + kXvdMagicOffset), 8);
+        // Sourced offsets (emoose/xvdtool XVDStructs.cs): 0x200 Magic, 0x208 VolumeFlags,
+        // 0x20C FormatVersion, 0x218 DriveSize.
         hdr.volumeFlags    = ReadU32LE(hdrBytes.data() + 0x208);
         hdr.formatVersion  = ReadU32LE(hdrBytes.data() + 0x20C);
         hdr.driveSize      = ReadU64LE(hdrBytes.data() + 0x218);
+        // ASSUMED synthetic test layout offsets (real emoose/xvdtool XVDStructs.cs places
+        // ContentType at 0x284, EmbeddedXVDLength at 0x288, and uint32 UserDataLength at 0x28C;
+        // 0x240..0x25F lies within TopHashBlockHash in retail XVD headers).
         hdr.contentType    = ReadU32LE(hdrBytes.data() + 0x240);
         hdr.embeddedXvdLen = ReadU32LE(hdrBytes.data() + 0x244);
         hdr.userDataOffset = ReadU64LE(hdrBytes.data() + 0x250);
         hdr.userDataLength = ReadU64LE(hdrBytes.data() + 0x258);
 
         if (hdr.IsEncrypted()) {
-            outError = "Encrypted XVD containers are not supported (volumeFlags=0x1)";
+            char msg[128];
+            std::snprintf(
+                msg, sizeof(msg),
+                "Encrypted XVD containers are not supported (volumeFlags=0x%X; EncryptionDisabled bit 0x2 not set)",
+                hdr.volumeFlags);
+            outError = msg;
+            return false;
+        }
+        if (hdr.driveSize < kXvdMinHeaderSize || hdr.driveSize > fileSize) {
+            outError = "XVD driveSize out of bounds";
+            return false;
+        }
+        if (static_cast<uint64_t>(hdr.embeddedXvdLen) > fileSize - kXvdMinHeaderSize) {
+            outError = "XVD embeddedXvdLen exceeds file size";
             return false;
         }
         if (hdr.userDataOffset < kXvdMinHeaderSize ||
-            hdr.userDataOffset + hdr.userDataLength > fileSize) {
+            hdr.userDataOffset > fileSize ||
+            hdr.userDataLength > fileSize - hdr.userDataOffset) {
             outError = "XVD user-data region out of bounds";
             return false;
         }
@@ -112,13 +152,14 @@ public:
     static std::vector<uint8_t> BuildSyntheticUnencryptedXvd(
         const std::vector<uint8_t>& userData,
         uint32_t contentType = 1u,
-        uint32_t volumeFlags = 0u) {
+        uint32_t volumeFlags = kXvdFlagEncryptionDisabled) {
         const uint64_t totalSize = kXvdMinHeaderSize + userData.size();
         std::vector<uint8_t> img(static_cast<size_t>(totalSize), 0u);
         std::memcpy(img.data() + kXvdMagicOffset, "msft-xvd", 8);
         WriteU32LE(img.data() + 0x208, volumeFlags);
         WriteU32LE(img.data() + 0x20C, 3u); // formatVersion
         WriteU64LE(img.data() + 0x218, totalSize);
+        // ASSUMED synthetic test offsets matching Open() above.
         WriteU32LE(img.data() + 0x240, contentType);
         WriteU32LE(img.data() + 0x244, 0u);
         WriteU64LE(img.data() + 0x250, kXvdMinHeaderSize);

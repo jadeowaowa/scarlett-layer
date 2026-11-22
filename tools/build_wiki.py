@@ -355,11 +355,11 @@ def main() -> int:
         "## Navigation",
         "- **[Engineering Invariants & Sharp Edges](INVARIANTS.md)** *(hand-maintained)*",
         "- **[AI Context Snapshot (Single-File Upload)](AI_CONTEXT_SNAPSHOT.md)** *(dense token-optimized handoff)*",
-        "- **[01 â€” Loader, Hooking & Common Utilities](01_Loader_and_VFS.md)**",
-        "- **[02 â€” Graphics, Tiling & Binary RDNA2 Lifter](02_Graphics_and_RDNA2.md)**",
-        "- **[03 â€” Runtime, Kernel, Memory, Input & PIX](03_Runtime_and_Memory.md)**",
-        "- **[04 â€” Velocity DirectStorage & XAudio2](04_Storage_and_Audio.md)**",
-        "- **[05 â€” Automated Test Suite & Synthetic Title](05_Test_Suite_Index.md)**",
+        "- **[01 — Loader, Hooking & Common Utilities](01_Loader_and_VFS.md)**",
+        "- **[02 — Graphics, Tiling & Binary RDNA2 Lifter](02_Graphics_and_RDNA2.md)**",
+        "- **[03 — Runtime, Kernel, Memory, Input & PIX](03_Runtime_and_Memory.md)**",
+        "- **[04 — Velocity DirectStorage & XAudio2](04_Storage_and_Audio.md)**",
+        "- **[05 — Automated Test Suite & Synthetic Title](05_Test_Suite_Index.md)**",
         "- **[Progress Matrix](../PROGRESS.md)** | **[Technical Architecture Paper](../ARCHITECTURE_PAPER.md)**",
         "",
         "## CMake Targets",
@@ -373,7 +373,7 @@ def main() -> int:
 
     # --- 2. 01_Loader_and_VFS.md ---
     p1 = [
-        "# 01 â€” Loader, Runtime IAT Hooking & Common Utilities",
+        "# 01 — Loader, Runtime IAT Hooking & Common Utilities",
         "",
         "## Source Files",
     ]
@@ -394,29 +394,29 @@ def main() -> int:
     write_text(WIKI_DIR / "01_Loader_and_VFS.md", "\n".join(p1).rstrip() + "\n")
 
     # --- 3. 02_Graphics_and_RDNA2.md ---
-    p2 = ["# 02 â€” Graphics (`d3d12_xs`), Surface Tiling (`xg_xs`) & RDNA2 Binary Lifter", ""]
+    p2 = ["# 02 — Graphics (`d3d12_xs`), Surface Tiling (`xg_xs`) & RDNA2 Binary Lifter", ""]
     for sname in ("d3d12_xs", "xg_xs"):
         if sname in shim_map:
             p2.append(render_shim_section(shim_map[sname], detailed=True))
     write_text(WIKI_DIR / "02_Graphics_and_RDNA2.md", "\n".join(p2).rstrip() + "\n")
 
     # --- 4. 03_Runtime_and_Memory.md ---
-    p3 = ["# 03 â€” Runtime (`xgameruntime`), Kernel (`kernelx`), Memory (`xmem`), Input & PIX", ""]
+    p3 = ["# 03 — Runtime (`xgameruntime`), Kernel (`kernelx`), Memory (`xmem`), Input & PIX", ""]
     for sname in ("xgameruntime", "kernelx", "xmem", "gameinput", "pixevt"):
         if sname in shim_map:
             p3.append(render_shim_section(shim_map[sname], detailed=True))
     write_text(WIKI_DIR / "03_Runtime_and_Memory.md", "\n".join(p3).rstrip() + "\n")
 
     # --- 5. 04_Storage_and_Audio.md ---
-    p4 = ["# 04 â€” Velocity Storage (`dstorage_xs`) & Audio Proxy (`xaudio2_9`)", ""]
-    for sname in ("dstorage_xs", "xaudio2_9"):
+    p4 = ["# 04 — Velocity Storage (`dstorage_xs`) & Audio Proxy (`xaudio2_9`)", ""]
+    for sname in ("dstorage_xs", "xaudio2_9", "acphal", "libhttpclient", "xcurl"):
         if sname in shim_map:
             p4.append(render_shim_section(shim_map[sname], detailed=True))
     write_text(WIKI_DIR / "04_Storage_and_Audio.md", "\n".join(p4).rstrip() + "\n")
 
     # --- 6. 05_Test_Suite_Index.md ---
     p5 = [
-        "# 05 â€” Automated Test Suite & Synthetic Title Index",
+        "# 05 — Automated Test Suite & Synthetic Title Index",
         "",
         f"`scarlett_tests.exe` runs **{len(ctest_cases)} checks** via `loader.exe` under CTest (`ctest --test-dir build`).",
         "",
@@ -436,7 +436,7 @@ def main() -> int:
     slim = "--slim" in sys.argv
     snap_sprints = (sprint_log[:2] + sprint_log[-5:]) if (slim and len(sprint_log) > 7) else sprint_log
     snap: List[str] = [
-        "# Scarlett Layer â€” AI Context Snapshot" + (" (Slim)" if slim else ""),
+        "# Scarlett Layer — AI Context Snapshot" + (" (Slim)" if slim else ""),
         "",
         f"**Commit:** `{commit_short}` (#{commit_count}) | **Generated:** {generated_utc}  ",
         f"**Totals:** {len(source_tree)} files ({total_loc:,} LOC) | {len(shim_names)} shims | {len(ctest_cases)} CTest checks",

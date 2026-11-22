@@ -1,4 +1,5 @@
 #include "pe_patcher.hpp"
+#include "common/ansi_path.hpp"
 #include "common/stub.hpp"
 
 #include <algorithm>
@@ -6,8 +7,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cwctype>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace sc::loader {
@@ -66,17 +69,27 @@ std::string ToLowerAscii(std::string s) {
     return s;
 }
 
-std::string WideToAnsi(const std::wstring& w) {
-    if (w.empty()) {
-        return {};
+std::wstring ToLowerW(std::wstring s) {
+    for (wchar_t& c : s) {
+        c = static_cast<wchar_t>(std::towlower(c));
     }
-    int needed = WideCharToMultiByte(CP_ACP, 0, w.c_str(), -1, nullptr, 0, nullptr, nullptr);
-    if (needed <= 1) {
-        return {};
+    return s;
+}
+
+bool WidePathToAnsiChecked(const std::wstring& w, std::string& outAnsi) {
+    bool usedShort = false;
+    if (sc::path::WidePathToAnsiLossless(w, outAnsi, &usedShort)) {
+        if (usedShort) {
+            std::string msg = "Used 8.3 short path fallback for non-ACP shim path: " +
+                              sc::path::WideToUtf8(w) + " -> " + outAnsi;
+            sc::log::Write(sc::log::Level::Info, "loader", "WidePathToAnsi", msg.c_str());
+        }
+        return true;
     }
-    std::string out(static_cast<size_t>(needed - 1), '\0');
-    WideCharToMultiByte(CP_ACP, 0, w.c_str(), -1, out.data(), needed, nullptr, nullptr);
-    return out;
+    std::string msg = "Shim path cannot be losslessly encoded in CP_ACP (8.3 short path unavailable): " +
+                      sc::path::WideToUtf8(w);
+    sc::log::Write(sc::log::Level::Error, "loader", "WidePathToAnsi", msg.c_str());
+    return false;
 }
 
 bool GetRemoteImageBase(HANDLE hProcess, uintptr_t& outImageBase) {
@@ -135,27 +148,41 @@ uintptr_t AllocateNearImageBase(HANDLE hProcess, uintptr_t imageBase, DWORD size
     return 0;
 }
 
-std::unordered_map<std::string, std::string> DiscoverShims(const std::filesystem::path& shimDir) {
-    std::unordered_map<std::string, std::string> shims;
+struct DiscoveredShims {
+    std::unordered_map<std::string, std::string> ansiByKey;
+    std::unordered_set<std::string>              unrepresentableKeys;
+};
+
+DiscoveredShims DiscoverShims(const std::filesystem::path& shimDir) {
+    DiscoveredShims result;
     std::error_code ec;
     if (!std::filesystem::exists(shimDir, ec)) {
-        return shims;
+        return result;
     }
     for (const auto& entry : std::filesystem::directory_iterator(shimDir, ec)) {
         if (!entry.is_regular_file(ec)) {
             continue;
         }
-        std::string ext = ToLowerAscii(entry.path().extension().string());
-        if (ext != ".dll") {
+        const std::wstring extW = ToLowerW(entry.path().extension().wstring());
+        if (extW != L".dll") {
             continue;
         }
-        std::string key = ToLowerAscii(entry.path().filename().string());
-        std::string fullAnsi = WideToAnsi(std::filesystem::absolute(entry.path(), ec).wstring());
-        if (!fullAnsi.empty()) {
-            shims.emplace(std::move(key), std::move(fullAnsi));
+        std::string keyAnsi;
+        if (!sc::path::WideToCodePageLossless(CP_ACP, entry.path().filename().wstring(), keyAnsi)) {
+            std::string msg = "Skipping shim with non-ACP filename: " +
+                              sc::path::WideToUtf8(entry.path().filename().wstring());
+            sc::log::Write(sc::log::Level::Warn, "loader", "DiscoverShims", msg.c_str());
+            continue;
+        }
+        std::string key = ToLowerAscii(std::move(keyAnsi));
+        std::string fullAnsi;
+        if (WidePathToAnsiChecked(std::filesystem::absolute(entry.path(), ec).wstring(), fullAnsi)) {
+            result.ansiByKey.emplace(std::move(key), std::move(fullAnsi));
+        } else {
+            result.unrepresentableKeys.insert(std::move(key));
         }
     }
-    return shims;
+    return result;
 }
 
 struct PatchTarget {
@@ -168,8 +195,9 @@ struct PatchTarget {
 } // namespace
 
 bool RedirectImportsInSuspendedProcess(HANDLE hProcess, const std::filesystem::path& shimDir) {
-    auto shims = DiscoverShims(shimDir);
-    if (shims.empty()) {
+    auto discovered = DiscoverShims(shimDir);
+    auto& shims = discovered.ansiByKey;
+    if (shims.empty() && discovered.unrepresentableKeys.empty()) {
         sc::log::Write(sc::log::Level::Warn, "loader", "RedirectImports",
                        "No shim DLLs found in shims directory");
         return true;
@@ -216,7 +244,14 @@ bool RedirectImportsInSuspendedProcess(HANDLE hProcess, const std::filesystem::p
             }
             std::string dllName;
             if (ReadRemoteAnsiString(hProcess, imageBase + desc.Name, dllName)) {
-                auto it = shims.find(ToLowerAscii(dllName));
+                const std::string lowerName = ToLowerAscii(dllName);
+                if (discovered.unrepresentableKeys.count(lowerName) > 0) {
+                    std::string msg = "Cannot redirect static import '" + dllName +
+                                      "': shim directory path is not representable in CP_ACP";
+                    sc::log::Write(sc::log::Level::Error, "loader", "RedirectImports", msg.c_str());
+                    return false;
+                }
+                auto it = shims.find(lowerName);
                 if (it != shims.end()) {
                     patches.push_back({
                         descAddr + offsetof(IMAGE_IMPORT_DESCRIPTOR, Name),
@@ -245,7 +280,14 @@ bool RedirectImportsInSuspendedProcess(HANDLE hProcess, const std::filesystem::p
             }
             std::string dllName;
             if (ReadRemoteAnsiString(hProcess, imageBase + desc.DllNameRVA, dllName)) {
-                auto it = shims.find(ToLowerAscii(dllName));
+                const std::string lowerName = ToLowerAscii(dllName);
+                if (discovered.unrepresentableKeys.count(lowerName) > 0) {
+                    std::string msg = "Cannot redirect delay-load import '" + dllName +
+                                      "': shim directory path is not representable in CP_ACP";
+                    sc::log::Write(sc::log::Level::Error, "loader", "RedirectImports", msg.c_str());
+                    return false;
+                }
+                auto it = shims.find(lowerName);
                 if (it != shims.end()) {
                     patches.push_back({
                         descAddr + offsetof(IMAGE_DELAYLOAD_DESCRIPTOR, DllNameRVA),
@@ -388,7 +430,7 @@ bool InjectHookDllInSuspendedProcess(
         return false;
     }
 
-    std::string msg = "Queued pre-entrypoint APC -> " + hookDllPath.string();
+    std::string msg = "Queued pre-entrypoint APC -> " + sc::path::WideToUtf8(hookDllPath.wstring());
     sc::log::Write(sc::log::Level::Info, "loader", "InjectHook", msg.c_str());
     return true;
 }

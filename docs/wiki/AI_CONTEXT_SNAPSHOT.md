@@ -1,7 +1,7 @@
-# Scarlett Layer â€” AI Context Snapshot
+# Scarlett Layer — AI Context Snapshot
 
-**Commit:** `517c54d` (#113) | **Generated:** 2026-11-21 15:51 UTC  
-**Totals:** 76 files (22,876 LOC) | 12 shims | 64 CTest checks
+**Commit:** `4448b86` (#131) | **Generated:** 2026-11-22 01:19 UTC  
+**Totals:** 77 files (23,679 LOC) | 12 shims | 67 CTest checks
 
 ---
 
@@ -33,7 +33,7 @@
 
 ---
 
-# Scarlett Layer â€” Engineering Invariants & Sharp Edges
+# Scarlett Layer — Engineering Invariants & Sharp Edges
 
 > **Hand-maintained file.** `tools/build_wiki.py` never overwrites this document and embeds it verbatim into `AI_CONTEXT_SNAPSHOT.md`. Only record non-obvious architectural constraints, past failure modes, and hard rules here.
 
@@ -46,7 +46,7 @@
 
 ## 2. Graphics, PSO Caching & Binary RDNA2 Lifting (`d3d12_xs.dll`)
 - **No `D3DCOMPILE_DEBUG` on Cached Shaders:** Compiling HLSL with `D3DCOMPILE_DEBUG` embeds a `SPDB` chunk with a freshly generated GUID on every run, breaking cross-launch PSO cache determinism. Always compile runtime/lifted shaders with `D3DCOMPILE_OPTIMIZATION_LEVEL3`.
-- **Post-Translation Content Hashing:** Key `ID3D12PipelineLibrary` entries (`GFX_<hash>`, `CMP_<hash>`) on **post-translation** DXBC/DXIL bytes plus the content hash of serialized root-signature blobsâ€”never raw COM pointer addresses.
+- **Post-Translation Content Hashing:** Key `ID3D12PipelineLibrary` entries (`GFX_<hash>`, `CMP_<hash>`) on **post-translation** DXBC/DXIL bytes plus the content hash of serialized root-signature blobs—never raw COM pointer addresses.
 - **Translator Precedence & Error Contracts:** `Rdna2IsaTranslator` MUST be registered ahead of `ScxsContainerTranslator` in `ShaderTranslatorRegistry`. Corrupted `SCXS` checksums return `E_INVALIDARG`; missing required stage outputs (`EXP pos0` for VS, `EXP mrt0` for PS, `MUBUF` store for CS) return `E_NOTIMPL`.
 - **Cache-Stable HLSL Emission:** Keep lifted Pixel Shader HLSL byte-identical when no `SMEM` or `VINTRP` instructions are present so existing cached PSO keys (`GFX_F15306853EDC188B`) do not churn across refactors.
 - **Cross-Queue GPU Synchronization:** Handoffs between `COMPUTE` and `DIRECT` queues must transition resources through `D3D12_RESOURCE_STATE_COMMON` paired with GPU-side `Signal`/`Wait` fences to maintain zero D3D12 Debug Layer warnings. Buffer copies after compute writes require a UAV barrier plus `UNORDERED_ACCESS -> COPY_SOURCE`.
@@ -58,25 +58,26 @@
 
 ## 4. Build, Testing & Documentation Policy
 - **Toolchain & Encoding:** MSVC x64 C++23 (`/W4 /permissive-`), CMake + Ninja, UTF-8 without BOM. CTest always launches `scarlett_tests.exe` *through* `loader.exe` to verify full-stack interposition.
-- **Docs Cadence:** Update `docs/PROGRESS.md` every sprint; regenerate `docs/wiki/` locally via `py tools\build_wiki.py` every 3â€“5 commits (zero AI tokens); update `docs/ARCHITECTURE_PAPER.md` strictly every 5 sprints (next scheduled revision: **Sprint 26**).
+- **Docs Cadence:** Update `docs/PROGRESS.md` every sprint; regenerate `docs/wiki/` locally via `py tools\build_wiki.py` every 3–5 commits (zero AI tokens); update `docs/ARCHITECTURE_PAPER.md` strictly every 5 sprints (next scheduled revision: **Sprint 26**).
 
 ---
 
 ## 2. File Inventory
 ```text
-  201  CMakeLists.txt
+  258  CMakeLists.txt
+   99  src/common/ansi_path.hpp
   343  src/common/codecs.hpp
    69  src/common/config.hpp
    43  src/common/stub.hpp
-   76  src/common/vfs.hpp
-  161  src/common/xvd_container.hpp
+  173  src/common/vfs.hpp
+  202  src/common/xvd_container.hpp
   267  src/loader/auto_stub.hpp
   172  src/loader/game_config.hpp
   208  src/loader/main.cpp
   451  src/loader/pe_inspector.hpp
-  396  src/loader/pe_patcher.cpp
+  438  src/loader/pe_patcher.cpp
    19  src/loader/pe_patcher.hpp
-  729  src/loader/scarlett_hook.cpp
+  851  src/loader/scarlett_hook.cpp
   105  src/shims/acphal/acphal.cpp
     7  src/shims/acphal/acphal.def
    33  src/shims/acphal/acphal.hpp
@@ -130,13 +131,13 @@
    59  src/tests/engine_plugin/engine_plugin.cpp
     3  src/tests/engine_plugin/engine_plugin.def
   328  src/tests/scarlett_3d_demo/main.cpp
-  143  src/tests/scarlett_tests/main.cpp
+  180  src/tests/scarlett_tests/main.cpp
   176  src/tests/scarlett_tests/test_harness.hpp
  1312  src/tests/scarlett_tests/tests_d3d12_core.cpp
  1870  src/tests/scarlett_tests/tests_d3d12_shaders_present.cpp
- 1346  src/tests/scarlett_tests/tests_loader_e2e.cpp
+ 1581  src/tests/scarlett_tests/tests_loader_e2e.cpp
   876  src/tests/scarlett_tests/tests_runtime_io.cpp
- 1524  src/tests/scarlett_tests/tests_storage_swizzle.cpp
+ 1597  src/tests/scarlett_tests/tests_storage_swizzle.cpp
   242  tools/audit_imports.py
   505  tools/build_wiki.py
   108  tools/test_brief.py
@@ -398,7 +399,7 @@
 - `MimgOp`: kMimgImageSample = 0x20u
 - `InstFormat`: Sopp, Vop1, Vop2, Vop3, Exp, Mubuf, Smem, Vintrp, Mimg
 
-## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 64 total)
+## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 67 total)
 ```cpp
     {"VfsPathTranslation",                 TestVfsPathTranslation},
     {"RuntimeAndXUser",                    TestRuntimeAndXUser},
@@ -464,16 +465,19 @@
     {"DxbcDigestAndXboxChunkStripperE2E",  TestDxbcDigestAndXboxChunkStripperE2E},
     {"D3D12XsEnhancedBarriersE2E",         TestD3D12XsEnhancedBarriersE2E},
     {"D3D12XsFeatureCapsQueryE2E",         TestD3D12XsFeatureCapsQueryE2E},
+    {"VfsPathEscapeAndLongPaths",          TestVfsPathEscapeAndLongPaths},
+    {"XvdFlagsAndBoundsNegative",          TestXvdFlagsAndBoundsNegative},
+    {"NonAsciiShimAndFreeLibraryHook",     TestNonAsciiShimAndFreeLibraryHook},
 ```
 
 ## 6. Recent Git History
-- `517c54d Merge Sprint 64: JIT x64 auto-stub thunks & symbol coverage audit (61/61 CTests)`
-- `3c32f75 Sprint 64: JIT x64 W^X auto-stub thunks, symbol coverage CLI, and XAudio2CreateWithVersionInfo (61/61 CTests)`
-- `b03456b Merge Sprint 63: PE64 implicit TLS & XMem 16-byte alignment (59/59 CTests)`
-- `86d7633 Sprint 63: PE64 implicit TLS, isolated guest atexit, and XMem 16-byte alignment (59/59 CTests)`
-- `56bfe0e Merge docs refresh: Sprint 62 README, Sprints 63-72 roadmap, wiki test parser`
-- `ed5696e Docs: Add 10-sprint roadmap (Sprints 63-72), refresh README for sprint-62-baseline, fix build_wiki kTests parser`
-- `6b866ec Merge Sprint 62: COM/RAII hygiene & centralized config (57/57 CTests)`
-- `ef51508 Sprint 62: Centralized sc::config, MakeCom RAII factories, and /W4 hygiene`
-- `f8f6eeb Merge Sprint 61: Modularize scarlett_tests suite (57/57 CTests)`
-- `199d672 Sprint 61: Modularize scarlett_tests into subsystem suites + CLI filtering`
+- `4448b86 Update README.md`
+- `c356a4f Update AGENTS.md`
+- `640a813 Update AGENTS.md`
+- `b687986 Update NEXT_STEPS.md`
+- `9e30dad Update NEXT_STEPS.md`
+- `7e8550a Update NEXT_STEPS.md`
+- `5e13833 Update README.md`
+- `b08f3f6 Update README.md`
+- `6dee0c8 Merge pull request #1 from jadeowaowa/docs-refresh`
+- `58b3eab Update README.md`

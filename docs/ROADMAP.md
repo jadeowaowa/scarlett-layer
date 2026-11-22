@@ -1,16 +1,33 @@
-# Scarlett Layer — 10-Sprint Roadmap (Sprints 63–72)
+# Scarlett Layer — Roadmap (Sprint 66 Baseline)
 
-Baseline: `sprint-62-baseline` — **57/57 CTests passing**, zero `/W4 /permissive-` warnings, zero `d3d12_debug` errors/warnings under `SCARLETT_STRICT_D3D12=1`, modular `d3d12_xs` & `scarlett_tests`, centralized `sc::config`.
+**Current Baseline:** `sprint-66-baseline` — **67/67 individual CTests passing** (`36 cpu`, `31 gpu`), zero `/W4 /permissive-` warnings, zero `d3d12_debug` errors under `SCARLETT_STRICT_D3D12=1`, portable `vswhere` build scripts, and GitHub Actions Windows CI (`cpu` suite).
 
-| Sprint | Focus Area | Deliverables | Target Modules & Test Delta |
+## Completed Recently (Sprints 63–66)
+
+| Sprint | Completed Scope | Verification |
+| :---: | :--- | :--- |
+| **63** | PE64 implicit `.tls` inspection/callbacks, isolated guest `atexit`, `XMemAllocDefault` 16-byte minimum alignment | `59/59` tests |
+| **64** | W^X x64 `AutoStubEngine`, symbol-level PE coverage auditor (`loader --inspect`), `XAudio2` `@1` + `XAudio2CreateWithVersionInfo` | `61/61` tests |
+| **65** | DXBC modified-MD5 digest + Xbox-chunk stripper (`shader_stripper.hpp`), Enhanced Barriers (`Barrier()`), `CheckFeatureSupport()` | `64/64` tests |
+| **66** | VFS traversal/long-path hardening, XVD overflow + inverted encryption-bit fix (`emoose/xvdtool`), lossless ANSI/non-ASCII path handling, `FreeLibrary` stale-handle fix, portable `vswhere` build, 67 individual CTests, `SPEC_SOURCES.md`, CI & repo hygiene | `67/67` tests (`36 cpu` / `31 gpu`) |
+
+## Next Sprints (Reordered Around External Validation)
+
+Following an external architecture review, feature expansion (DXR, XMA2, additional shims) is paused until the layer is validated against **external, non-self-authored inputs** and a second execution environment:
+
+| Sprint | Focus Area | Deliverables | Acceptance Test |
 | :---: | :--- | :--- | :--- |
-| **63** | **Loader Implicit TLS & `XMem` Hardening** | PE64 `.tls` directory initialization/callbacks and isolated guest `atexit` teardown in the loader; enforce 16-byte minimum alignment in `XMemAllocDefault`. | `src/loader/`, `src/shims/xmem/` (+2 tests) |
-| **64** | **`dstorage_xs` Velocity Pipeline Parity** | Chained GDK 2610 pipeline (`ZlibDecompress` -> `BCPack` stage hook -> `Swizzle` via `IntermediateSize`), 4-tier priority queues, physical-page flags, and 64-bit mask/value tag cancellation. | `src/shims/dstorage_xs/` (+3 tests) |
-| **65** | **`d3d12_xs` Enhanced Barriers, Feature Caps & Xbox-Chunk Stripper** | Forward `ID3D12GraphicsCommandList7::Barrier()` through `ScarlettGraphicsCommandListX`; expose `CheckFeatureSupport` (Mesh Shaders, Sampler Feedback, Work Graphs); strip Xbox-specific DXIL/DXBC shader container chunks before native PSO creation. | `src/shims/d3d12_xs/command_list_x.cpp`, `device_x.cpp`, `shader_inspector.hpp` (+3 tests) |
-| **66** | **DXR Acceleration Structures & `XboxBvhBuilder`** | `d3d12_xs` RTAS prebuild/build/destroy hardware DXR pass-through + deterministic software BVH fallback and `XboxBvhBuilder.dll` shim. | `src/shims/d3d12_xs/`, `src/shims/xboxbvhbuilder/` (+2 tests) |
-| **67** | **`GameInput` v2 Parity & Impulse Triggers** | Verify ordinal `#1` (`GameInputCreate`), ring-buffered reading history (`Current`/`Next`/`Previous`), 4-motor rumble state tracking, and live XInput/HID forwarding. | `src/shims/gameinput/` (+2 tests) |
-| **68** | **`XAudio2_9` + `AcpHal` XMA2 Software Bridge** | Export `XAudio2_9` ordinal `#1`, wire SHAPE/`AcpHal` flowgraph submit contexts, and implement a software XMA2-to-PCM16 decode bridge with `SCARLETT_AUDIO_STATS=1`. | `src/shims/xaudio2_9/`, `src/shims/acphal/` (+2 tests) |
-| **69** | **RDNA2 (`gfx103x`) Shader Translator & Differential Suite** | Add FP16 (`min16float`/packed ops) and raw/structured UAV/SRV lowering to `shader_translator.hpp`, plus a golden-reference differential ISA-vs-DXIL corpus. | `src/shims/d3d12_xs/rdna2_isa.hpp`, `shader_translator.hpp` (+3 tests) |
-| **70** | **ERA / GDK System DLLs & `xgameruntime` Audit** | Add slim `EtwPlus.dll` and `toolhelpx.dll` shims; add graceful `XUserGetTokenAndSignatureAsync` (`E_NOTIMPL` + trace) and unnamed-slot telemetry in `xgameruntime`. | `src/shims/etwplus/`, `src/shims/toolhelpx/`, `src/shims/xgameruntime/` (+2 tests) |
-| **71** | **MSIXVC2 / `Chunkinfo.xml` & Middleware Shims** | Extend `xvd_container.hpp` and VFS for MSIXVC2 headers and `Chunkinfo.xml`; add clean-room offline HLE stubs for `Bink2Scarlett` and `amd_fidelityfx_*_xbox`. | `src/common/xvd_container.hpp`, `src/shims/middleware/` (+2 tests) |
-| **72** | **Automated Status Matrix, Telemetry & Frame Dumps** | Add `tools/generate_status.py` (reads CTest + export coverage into `README.md`/wiki), `--stats` FPS/draw-call telemetry and `SCARLETT_DUMP_FRAMES=1` offscreen frame capture in `d3d12_xs`, plus a full Gen9 capstone E2E test. | `tools/generate_status.py`, `src/shims/d3d12_xs/`, `README.md`, `docs/` (+1 capstone -> 79+ CTests) |
+| **67** | **Public Microsoft GDK Samples (External Validation)** | Build and run unmodified public samples from `microsoft/Xbox-GDK-Samples` (starting with `SimpleTriangle` and `SimpleTexture`) through `loader.exe`; fix real COM vtable/GUID mismatches exposed by the sample binaries rather than synthetic tests; add opt-in `SCARLETT_LOCAL_CORPUS_DIR` read-only audit mode for local retail metadata/headers. | `SimpleTriangle` launches through `loader.exe` with zero crashes and produces frame output matching reference pixels within tolerance (or bit-exact on WARP). |
+| **68** | **Differential RDNA2 Shader Lifter Corpus & Audit** | Expand `rdna2_isa.hpp` / `shader_translator.hpp` with a multi-case differential test corpus comparing lifted RDNA2 shaders against reference HLSL/DXBC outputs (ALU edge cases, CBVs, SRV/UAV loads/stores, FP16/packed ops, control flow); align `XvdContainer` header fields to real `emoose/xvdtool` offsets (`0x284`/`0x288`/`0x28C`). | Differential corpus runs >= 20 distinct shader cases with exact GPU readback match against reference shaders; real XVD offset parser passes negative/positive suite. |
+| **69** | **WARP Backend & Second-GPU CI Coverage** | Add `SCARLETT_USE_WARP=1` adapter selection in `d3d12_xs` so the `gpu` CTest suite executes on Microsoft WARP inside GitHub Actions CI without a discrete GPU; run local verification on a second GPU vendor when available. | GitHub Actions CI executes both `cpu` and `gpu` CTest labels on WARP with 100% pass rate and 0 D3D12 validation errors. |
+| **70** | **Independent Loader Audit & Release Cleanup** | **TODO(jade):** Arrange independent code review of `src/loader/pe_patcher.cpp` and `src/loader/scarlett_hook.cpp` (suspended-process APC/IAT patching); retitle the `v1.0.0` GitHub release to a `v0.x` pre-release; add `tools/generate_status.py` for factual coverage tables. | All review findings resolved or tracked; GitHub release accurately labeled `v0.x` pre-release; status table auto-generated from CTest + `.def` exports. |
+
+## Deferred Backlog (After External Binaries Run)
+
+These items remain on hold until Sprints 67–70 prove external binary execution and shader correctness:
+
+- **Chained `dstorage_xs` Pipeline Parity:** Zlib / GDeflate / BCPack stage hooks, 4-tier priorities, tag cancellation.
+- **`GameInput` v2 Parity:** Ring-buffered reading history, 4-motor rumble / impulse trigger state.
+- **DXR Acceleration Structures & `XboxBvhBuilder`:** Hardware DXR pass-through + software fallback.
+- **`XAudio2_9` + `AcpHal` XMA2 Software Bridge:** Software XMA2-to-PCM16 decode and SHAPE flowgraphs.
+- **ERA / GDK System DLLs & Metadata:** `EtwPlus.dll`, `toolhelpx.dll`, MSIXVC2 / `Chunkinfo.xml` metadata-only parsing (strictly no decryption or DRM circumvention).
