@@ -1,6 +1,6 @@
 # Specification Sources & Assumed Contracts
 
-This document separates behaviors backed by public documentation or open-source references from project-assumed contracts (`ASSUMED`). Anything in the `ASSUMED` column must be treated as synthetic scaffolding until matched against public headers or unmodified external binaries.
+This document separates behaviors backed by public documentation or open-source references from project-assumed contracts (`ASSUMED`). Anything in the `ASSUMED` column must be treated as synthetic scaffolding until matched against public headers or unmodified external binaries. See [`THIRD_PARTY.md`](../THIRD_PARTY.md) for the public-reference provenance ledger.
 
 ## 1. XVD / XVC Container Header (`src/common/xvd_container.hpp`)
 

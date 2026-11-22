@@ -1,6 +1,6 @@
 # Scarlett Layer — AI Context Snapshot
 
-**Commit:** `58e4fea` (#141) | **Generated:** 2026-11-22 04:34 UTC  
+**Commit:** `cac4aa2` (#142) | **Generated:** 2026-11-22 07:29 UTC  
 **Totals:** 80 files (26,386 LOC) | 12 shims | 72 CTest checks
 
 ---
@@ -30,6 +30,14 @@
 | Sprint 20 | Binary RDNA2 Compute ISA lifter (`v_mul_lo_u32`, `v_add_nc_u32`, `buffer_store_dword`) on `COMPUTE` queue | Done |
 | Sprint 21 | Binary RDNA2 Vertex Shader lifter (`SMEM` CBVs, `VINTRP`, `EXP pos0`/`param0`) + full VS+PS GPU pipeline | Done |
 | Sprint 22 | `xg_xs.dll` RDNA2 `64KB_S` swizzling & BC1/BC3/BC7 multi-mip block compression + GPU BC1 sample | Done |
+| Sprints 23-62 | DirectStorage GPU streaming, retail bring-up shims (`AcpHal`, `libHttpClient`, `XCurl`), PE/XVD inspection, `MicrosoftGame.Config`, RDNA2 textured draw & compute E2E, `d3d12_xs` command-list wrappers, 3D depth/PresentX/frame-pacing/async-compute E2E (see sprint notes below) | Done (Tier 1) |
+| Sprint 63 | PE64 implicit `.tls` inspection/callbacks, isolated guest `atexit`, `XMemAllocDefault` 16-byte min alignment | Done (Tier 1) |
+| Sprint 64 | W^X x64 `AutoStubEngine`, PE symbol coverage auditor (`loader --inspect`), `XAudio2` `@1` export parity | Done (Tier 1) |
+| Sprint 65 | DXBC modified-MD5 digest + Xbox-chunk stripper (`shader_stripper.hpp`), Enhanced Barriers, `CheckFeatureSupport` | Done (Tier 1) |
+| Sprint 66 | VFS path-escape & long-path hardening, XVD overflow + inverted encryption-flag fix (`emoose/xvdtool`), lossless ANSI/non-ASCII paths, `FreeLibrary` hook, portable `vswhere` build, 67 individual CTests, `SPEC_SOURCES.md`, CI | Done (Tier 1) |
+| Sprint 67 | `SCARLETT_USE_WARP=1` software D3D12 + full WARP CI, `loader --audit-dir`, Desktop GDK `261000` `SimpleTriangleDesktop` alignment (`libHttpClient.dll` 10/10), `PresentX(0)` & 5-arg `WaitFrameEventX` | Done (Tier 1) |
+| Sprint 68 | Real GDK `261000` `xgameruntime.dll` COM service broker (8 service vtables), `libHttpClient` async callbacks, local Desktop `SimpleTriangleDesktop.exe` boot (`code=0`, 0 auto-stubs), `scarlett_studio.exe` | Done (Tier 1 + Desktop sample) |
+| Sprint 69 | Direct2D 1.1 + DirectWrite + DirectComposition Liquid Glass UI on `scarlett_studio.exe`, Apache-2.0 `LICENSE`, wiki rebuild, `v0.69.0-pre` release archive | Done (72/72 Tier 1) |
 
 ---
 
@@ -482,6 +490,7 @@
 ```
 
 ## 6. Recent Git History
+- `cac4aa2 Remove duplicate roadmap row, clarify sample scope, and rebuild wiki`
 - `58e4fea Add Apache-2.0 LICENSE, sync roadmap/docs/wiki, and verify 72/72 tests`
 - `e7d0912 Merge sprint-69-studio-liquid-glass: Direct2D/DComp Liquid Glass UI & wiki`
 - `d2dac59 Sprint 69: Liquid Glass UI for Scarlett Studio, wiki update, and v0.69.0-pre prep`
@@ -491,4 +500,3 @@
 - `d10b665 Merge sprint-67-gdk-samples-and-warp: WARP CI, corpus auditor, GDK sample alignment`
 - `4c9333e Sprint 67: WARP CI backend, corpus auditor, and Microsoft GDK sample alignment`
 - `53d8336 Merge branch 'sprint-66-fix-and-clean' (Sprint 66 baseline, 67/67 CTests)`
-- `4d1904a Sprint 66: Fix VFS escape, XVD bounds/flags, non-ASCII/FreeLibrary hooks, portable build, 67 CTests & CI`
