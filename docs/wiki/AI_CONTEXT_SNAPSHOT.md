@@ -1,6 +1,6 @@
 # Scarlett Layer — AI Context Snapshot
 
-**Commit:** `bd18bca` (#138) | **Generated:** 2026-11-22 02:44 UTC  
+**Commit:** `e7d0912` (#140) | **Generated:** 2026-11-22 04:32 UTC  
 **Totals:** 80 files (26,386 LOC) | 12 shims | 72 CTest checks
 
 ---
@@ -482,6 +482,8 @@
 ```
 
 ## 6. Recent Git History
+- `e7d0912 Merge sprint-69-studio-liquid-glass: Direct2D/DComp Liquid Glass UI & wiki`
+- `d2dac59 Sprint 69: Liquid Glass UI for Scarlett Studio, wiki update, and v0.69.0-pre prep`
 - `bd18bca Fix escaped whitespace literals in studio_model.hpp ExtractXmlAttr`
 - `11d1057 Merge sprint-68-xgameruntime-broker: GDK broker ABI + Scarlett Studio GUI`
 - `03118c3 Sprint 68: GDK xgameruntime COM service broker, SimpleTriangleDesktop boot, and Scarlett Studio GUI`
@@ -490,5 +492,3 @@
 - `53d8336 Merge branch 'sprint-66-fix-and-clean' (Sprint 66 baseline, 67/67 CTests)`
 - `4d1904a Sprint 66: Fix VFS escape, XVD bounds/flags, non-ASCII/FreeLibrary hooks, portable build, 67 CTests & CI`
 - `4448b86 Update README.md`
-- `c356a4f Update AGENTS.md`
-- `640a813 Update AGENTS.md`
