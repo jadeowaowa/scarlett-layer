@@ -127,28 +127,44 @@ HRESULT WINAPI HCHttpCallRequestSetTimeout(HCCallHandle call, uint32_t timeoutIn
     return S_OK;
 }
 
-HRESULT WINAPI HCHttpCallPerformAsync(HCCallHandle call, void* /*asyncBlock*/) {
-    if (!call) return E_INVALIDARG;
-    std::lock_guard<std::mutex> lock(g_hcMtx);
-    if (!g_calls.contains(call)) return E_INVALIDARG;
+struct HcAsyncBlockView {
+    void* queue;
+    void* context;
+    void  (CALLBACK* callback)(void* asyncBlock);
+    unsigned char internal[sizeof(void*) * 4];
+};
 
-    bool matched = false;
-    for (const auto& rule : g_mocks) {
-        const bool methodOk = rule.method.empty() || rule.method == "*" || rule.method == call->method;
-        const bool urlOk = call->url.rfind(rule.urlPrefix, 0) == 0;
-        if (methodOk && urlOk) {
-            call->statusCode = rule.statusCode;
-            call->responseBody = rule.body;
-            call->networkError = S_OK;
-            call->respHeaders["Content-Type"] = "application/json";
-            matched = true;
-            break;
+HRESULT WINAPI HCHttpCallPerformAsync(HCCallHandle call, void* asyncBlock) {
+    if (!call) return E_INVALIDARG;
+    {
+        std::lock_guard<std::mutex> lock(g_hcMtx);
+        if (!g_calls.contains(call)) return E_INVALIDARG;
+
+        bool matched = false;
+        for (const auto& rule : g_mocks) {
+            const bool methodOk = rule.method.empty() || rule.method == "*" || rule.method == call->method;
+            const bool urlOk = call->url.rfind(rule.urlPrefix, 0) == 0;
+            if (methodOk && urlOk) {
+                call->statusCode = rule.statusCode;
+                call->responseBody = rule.body;
+                call->networkError = S_OK;
+                call->respHeaders["Content-Type"] = "application/json";
+                matched = true;
+                break;
+            }
+        }
+        if (!matched) {
+            call->statusCode = 503u;
+            call->responseBody.clear();
+            call->networkError = E_FAIL;
         }
     }
-    if (!matched) {
-        call->statusCode = 503u;
-        call->responseBody.clear();
-        call->networkError = E_FAIL;
+    if (asyncBlock) {
+        auto* ab = static_cast<HcAsyncBlockView*>(asyncBlock);
+        std::memset(ab->internal, 0, sizeof(ab->internal));
+        if (ab->callback) {
+            ab->callback(asyncBlock);
+        }
     }
     return S_OK;
 }

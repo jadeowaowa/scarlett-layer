@@ -27,3 +27,10 @@ EXPORTS
     XGameSaveSubmitUpdateResult
     XGameSaveReadBlobDataAsync
     XGameSaveReadBlobDataResult
+    DllCanUnloadNow
+    InitializeApiImpl
+    InitializeApiImplEx
+    InitializeApiImplEx2
+    QueryApiImpl
+    UninitializeApiImpl
+    XErrorReport
