@@ -5,11 +5,11 @@ An experimental Windows / Direct3D 12 compatibility layer for running **unpacked
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-Windows%20x64%20%7C%20D3D12-blue?style=flat-square)
 [![CI](https://github.com/jadeowaowa/scarlett-layer/actions/workflows/ci.yml/badge.svg)](https://github.com/jadeowaowa/scarlett-layer/actions/workflows/ci.yml)
-![Tier 1 Synthetic Checks](https://img.shields.io/badge/tier1_synthetic-72%2F72-2ea44f?style=flat-square)
+![Tier 1 Synthetic Checks](https://img.shields.io/badge/tier1_synthetic-74%2F74-2ea44f?style=flat-square)
 ![Tier 2 Xbox Binaries](https://img.shields.io/badge/tier2_xbox_binaries-0-lightgrey?style=flat-square)
 ![Status](https://img.shields.io/badge/status-experimental-orange?style=flat-square)
 
-> **Status: experimental (`v0.69.0-pre`).** All 72 automated CI checks today are **Tier 1 self-authored synthetic tests**. No unmodified Xbox-platform-targeted (`Gaming.Xbox.Scarlett.x64`) binary or commercial title runs end-to-end through the layer yet. See [Current status](#current-status).
+> **Status: experimental (`v0.69.0-pre`).** All 74 automated CI checks today are **Tier 1 self-authored synthetic tests**. No unmodified Xbox-platform-targeted (`Gaming.Xbox.Scarlett.x64`) binary or commercial title runs end-to-end through the layer yet. See [Current status](#current-status).
 
 ## What it does
 
@@ -61,14 +61,14 @@ Shared runtime flags live in `common/config.hpp`.
 
 ### What is demonstrated today
 
-- **Tier 1 (Self-Authored Synthetic Suite): 72/72 passing** (`40 cpu`, `32 gpu`) on both the author's NVIDIA RTX 5070 and Microsoft WARP (`SCARLETT_USE_WARP=1`), with 0 MSVC `/W4 /permissive-` warnings and 0 D3D12 debug-layer errors. Both `cpu` and `gpu` suites run on GitHub Actions Windows CI via WARP. (Includes 1 opt-in local read-only corpus audit test.)
+- **Tier 1 (Self-Authored Synthetic Suite): 74/74 passing** (`42 cpu`, `32 gpu`) on both the author's NVIDIA RTX 5070 and Microsoft WARP (`SCARLETT_USE_WARP=1`), with 0 MSVC `/W4 /permissive-` warnings and 0 D3D12 debug-layer errors. Both `cpu` and `gpu` suites run on GitHub Actions Windows CI via WARP. (Includes 1 opt-in local read-only corpus audit test.)
 - **Real D3D12 GPU readback inside Tier 1 tests:** textured RDNA2 draw, compute dispatch, 3D depth rendering, cross-queue fence sync, import/ordinal rewriting, synthetic `SCLZ` streaming, and a synthetic boot-to-frame-to-save test (`ScarlettTitleBringUpE2E`).
 - **Local Desktop GDK sample boot:** Unmodified Microsoft Public GDK `261000` `SimpleTriangleDesktop.exe` (**PC Desktop target**, not an Xbox console target) boots, renders, and exits cleanly (`code=0`) through `loader.exe --boot` with 0 auto-stub hits on `shims/libHttpClient.dll` and `shims/xgameruntime.dll`.
 
 ### What is **not** demonstrated yet
 
 - **Tier 2 (External Xbox-Platform-Targeted Binaries): 0 automated tests.** No unmodified `Gaming.Xbox.Scarlett.x64` GDK sample, homebrew build, or retail Xbox Series title runs end-to-end yet.
-- **Real console data formats & COM ABIs:** `SCLZ` compression, `SCXS` shader containers, synthetic XVD offsets `0x240..0x258`, and several `ID3D12*X` / `IXG*` / `IDStorage*X` COM interfaces are **project-defined (`ASSUMED`)** rather than matched to real Xbox Series binaries — see [`docs/SPEC_SOURCES.md`](docs/SPEC_SOURCES.md).
+- **Real console data formats & COM ABIs:** `SCLZ` compression, `SCXS` shader containers, and several `ID3D12*X` / `IXG*` / `IDStorage*X` COM interfaces are **project-defined (`ASSUMED`)** rather than matched to real Xbox Series binaries — see [`docs/SPEC_SOURCES.md`](docs/SPEC_SOURCES.md).
 - **Corpus-scale RDNA2 shader lifting:** Only a small subset of GFX10.3 instructions is exercised today; an independent-oracle differential suite and large-corpus translate/compile sweep are scheduled for Sprint 71.
 - **Multi-vendor GPU validation & independent loader audit:** Hardware GPU testing has only been run on one NVIDIA RTX 5070 (plus Microsoft WARP), and `src/loader/pe_patcher.cpp` / `src/loader/scarlett_hook.cpp` still await an independent human Windows-internals review (`TODO(jade)`).
 
@@ -112,7 +112,8 @@ ctest --test-dir build -L cpu --output-on-failure
 
 ## Documentation
 
-- [`docs/ROADMAP.md`](docs/ROADMAP.md): Sprints 70-73 timeline focused on real Xbox Series targets
+- [`docs/STATUS.md`](docs/STATUS.md): auto-generated shim export, test-tier, and spec-source matrix (`tools/generate_status.py`)
+- [`docs/ROADMAP.md`](docs/ROADMAP.md): Sprints 71-73 timeline focused on real Xbox Series targets
 - [`docs/SPEC_SOURCES.md`](docs/SPEC_SOURCES.md): sourced vs. `ASSUMED` specs and verification boundaries
 - [`THIRD_PARTY.md`](THIRD_PARTY.md): public specification provenance and attribution ledger
 - [`docs/PROGRESS.md`](docs/PROGRESS.md): sprint-by-sprint engineering log

@@ -14,10 +14,10 @@ Contributions are welcome, especially external validation (unmodified public GDK
 Requirements: Windows 10/11 x64, Visual Studio 2022+ (MSVC C++23), CMake 3.25+, Ninja, Python 3.
 
 ```powershell
-# Build and run all 72 individual Tier 1 CTest targets (40 cpu, 32 gpu) on hardware GPU
+# Build and run all 74 individual Tier 1 CTest targets (`42 cpu`, `32 gpu`) on hardware GPU
 .\tools\verify.bat --verbose
 
-# Run the full 72-test suite on Microsoft WARP (matches GitHub Actions Windows CI)
+# Run the full 74-test suite on Microsoft WARP (matches GitHub Actions Windows CI)
 $env:SCARLETT_USE_WARP = "1"
 .\tools\verify.bat --output-on-failure
 $env:SCARLETT_USE_WARP = $null

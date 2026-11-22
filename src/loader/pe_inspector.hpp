@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -33,6 +34,18 @@ struct PeImportAuditResult {
 
 namespace detail {
 
+inline constexpr size_t kMaxPeInspectBytes     = 512ull * 1024ull * 1024ull; // 512 MiB
+inline constexpr size_t kMaxImportDescriptors  = 4096u;
+inline constexpr size_t kMaxThunksPerDll       = 65536u;
+inline constexpr size_t kMaxExportEntries      = 65536u;
+
+struct ValidatedPe64 {
+    const IMAGE_NT_HEADERS64*   nt{nullptr};
+    const IMAGE_SECTION_HEADER* sections{nullptr};
+    uint16_t                    numSections{0};
+    uint32_t                    numDataDirs{0};
+};
+
 inline std::string ToLowerAscii(std::string s) {
     std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
         return static_cast<char>(std::tolower(c));
@@ -58,21 +71,125 @@ inline bool IsHostSystemDll(const std::string& lowerName) {
     return kHostDlls.contains(lowerName);
 }
 
+inline bool ReadFileBytesSafe(
+    const std::filesystem::path& path,
+    std::vector<uint8_t>& outBuf,
+    std::string& outError) {
+    std::ifstream f(path, std::ios::binary | std::ios::ate);
+    if (!f) {
+        outError = "Failed to open PE file: " + path.string();
+        return false;
+    }
+    const std::streampos rawSize = f.tellg();
+    if (rawSize < 0) {
+        outError = "Failed to query PE file size";
+        return false;
+    }
+    const auto fileSize = static_cast<uint64_t>(rawSize);
+    if (fileSize < sizeof(IMAGE_DOS_HEADER)) {
+        outError = "File too small to be a PE image";
+        return false;
+    }
+    if (fileSize > kMaxPeInspectBytes) {
+        outError = "PE file exceeds inspection size limit";
+        return false;
+    }
+
+    outBuf.resize(static_cast<size_t>(fileSize));
+    f.seekg(0, std::ios::beg);
+    f.read(reinterpret_cast<char*>(outBuf.data()), static_cast<std::streamsize>(outBuf.size()));
+    if (!f) {
+        outBuf.clear();
+        outError = "Failed to read PE file bytes";
+        return false;
+    }
+    return true;
+}
+
+inline bool ParseValidatedPe64Headers(
+    const std::vector<uint8_t>& buf,
+    ValidatedPe64& out,
+    std::string& outError) {
+    out = {};
+    const size_t fileSize = buf.size();
+    if (fileSize < sizeof(IMAGE_DOS_HEADER)) {
+        outError = "File too small to be a PE image";
+        return false;
+    }
+
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(buf.data());
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE || dos->e_lfanew < 0) {
+        outError = "Invalid DOS/NT PE64 header";
+        return false;
+    }
+    const auto ntOff = static_cast<size_t>(dos->e_lfanew);
+    if (ntOff > fileSize || fileSize - ntOff < sizeof(IMAGE_NT_HEADERS64)) {
+        outError = "Invalid DOS/NT PE64 header";
+        return false;
+    }
+
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(buf.data() + ntOff);
+    if (nt->Signature != IMAGE_NT_SIGNATURE ||
+        nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
+        outError = "Not a valid PE32+ (x64) executable";
+        return false;
+    }
+
+    const size_t optHdrOffset = offsetof(IMAGE_NT_HEADERS64, OptionalHeader);
+    const size_t optHdrSize = nt->FileHeader.SizeOfOptionalHeader;
+    if (optHdrSize < sizeof(IMAGE_OPTIONAL_HEADER64) ||
+        optHdrSize > fileSize - ntOff - optHdrOffset) {
+        outError = "Invalid PE64 OptionalHeader size";
+        return false;
+    }
+
+    const size_t secTableOff = ntOff + optHdrOffset + optHdrSize;
+    const uint16_t numSections = nt->FileHeader.NumberOfSections;
+    const size_t secTableBytes = static_cast<size_t>(numSections) * sizeof(IMAGE_SECTION_HEADER);
+    if (secTableOff > fileSize || secTableBytes > fileSize - secTableOff) {
+        outError = "PE64 section table exceeds file size";
+        return false;
+    }
+
+    out.nt = nt;
+    out.sections = (numSections > 0u)
+        ? reinterpret_cast<const IMAGE_SECTION_HEADER*>(buf.data() + secTableOff)
+        : nullptr;
+    out.numSections = numSections;
+    out.numDataDirs = (std::min)(
+        static_cast<uint32_t>(nt->OptionalHeader.NumberOfRvaAndSizes),
+        static_cast<uint32_t>(IMAGE_NUMBEROF_DIRECTORY_ENTRIES));
+    return true;
+}
+
+inline IMAGE_DATA_DIRECTORY GetDataDir(const ValidatedPe64& pe, uint32_t index) {
+    if (!pe.nt || index >= pe.numDataDirs) {
+        return {};
+    }
+    return pe.nt->OptionalHeader.DataDirectory[index];
+}
+
 inline bool RvaToFileOffset(
     uint32_t rva,
     const IMAGE_SECTION_HEADER* sections,
     uint16_t numSections,
     size_t fileSize,
     size_t& outOffset) {
+    if (!sections) {
+        return false;
+    }
+    const uint64_t rva64 = rva;
     for (uint16_t i = 0; i < numSections; ++i) {
-        const uint32_t va = sections[i].VirtualAddress;
-        const uint32_t span = (std::max)(sections[i].Misc.VirtualSize, sections[i].SizeOfRawData);
-        if (rva >= va && rva < va + span) {
-            const size_t off = static_cast<size_t>(sections[i].PointerToRawData) + (rva - va);
-            if (off < fileSize) {
-                outOffset = off;
-                return true;
-            }
+        const uint64_t va = sections[i].VirtualAddress;
+        const uint64_t rawSize = sections[i].SizeOfRawData;
+        const uint64_t rawPtr = sections[i].PointerToRawData;
+        if (rawSize == 0u || rva64 < va) {
+            continue;
+        }
+        const uint64_t delta = rva64 - va;
+        if (delta < rawSize && rawPtr <= fileSize && delta < fileSize - rawPtr) {
+            outOffset = static_cast<size_t>(rawPtr + delta);
+            return true;
         }
     }
     return false;
@@ -85,35 +202,16 @@ inline PeImportAuditResult InspectPeImports(
     const std::filesystem::path& shimDir) {
     PeImportAuditResult res{};
 
-    std::ifstream f(pePath, std::ios::binary | std::ios::ate);
-    if (!f) {
-        res.error = "Failed to open PE file: " + pePath.string();
+    std::vector<uint8_t> buf;
+    if (!detail::ReadFileBytesSafe(pePath, buf, res.error)) {
         return res;
     }
-    const auto fileSize = static_cast<size_t>(f.tellg());
-    if (fileSize < sizeof(IMAGE_DOS_HEADER)) {
-        res.error = "File too small to be a PE image";
-        return res;
-    }
-    std::vector<uint8_t> buf(fileSize);
-    f.seekg(0, std::ios::beg);
-    f.read(reinterpret_cast<char*>(buf.data()), static_cast<std::streamsize>(fileSize));
+    const size_t fileSize = buf.size();
 
-    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(buf.data());
-    if (dos->e_magic != IMAGE_DOS_SIGNATURE || dos->e_lfanew < 0 ||
-        static_cast<size_t>(dos->e_lfanew) + sizeof(IMAGE_NT_HEADERS64) > fileSize) {
-        res.error = "Invalid DOS/NT PE64 header";
+    detail::ValidatedPe64 pe{};
+    if (!detail::ParseValidatedPe64Headers(buf, pe, res.error)) {
         return res;
     }
-
-    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(buf.data() + dos->e_lfanew);
-    if (nt->Signature != IMAGE_NT_SIGNATURE ||
-        nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
-        res.error = "Not a valid PE32+ (x64) executable";
-        return res;
-    }
-
-    res.validPe64 = true;
 
     // Index available shims in shimDir (case-insensitive)
     std::unordered_set<std::string> shims;
@@ -127,8 +225,8 @@ inline PeImportAuditResult InspectPeImports(
         }
     }
 
-    const auto* sections = IMAGE_FIRST_SECTION(nt);
-    const uint16_t numSections = nt->FileHeader.NumberOfSections;
+    const IMAGE_SECTION_HEADER* sections = pe.sections;
+    const uint16_t numSections = pe.numSections;
 
     auto classifyDll = [&](uint32_t nameRva, bool isDelayLoad) {
         size_t nameOff = 0;
@@ -138,6 +236,9 @@ inline PeImportAuditResult InspectPeImports(
         const char* rawName = reinterpret_cast<const char*>(buf.data() + nameOff);
         const size_t maxLen = fileSize - nameOff;
         const size_t len = strnlen(rawName, maxLen);
+        if (len == 0u || len >= maxLen) {
+            return;
+        }
         std::string dllName(rawName, len);
         std::string lower = detail::ToLowerAscii(dllName);
 
@@ -158,7 +259,8 @@ inline PeImportAuditResult InspectPeImports(
         if (thunkRva == 0 || !detail::RvaToFileOffset(thunkRva, sections, numSections, fileSize, thunkOff)) {
             return;
         }
-        while (thunkOff + sizeof(uint64_t) <= fileSize) {
+        size_t seen = 0;
+        while (seen < detail::kMaxThunksPerDll && thunkOff + sizeof(uint64_t) <= fileSize) {
             uint64_t val = 0;
             std::memcpy(&val, buf.data() + thunkOff, sizeof(val));
             if (val == 0) break;
@@ -167,18 +269,21 @@ inline PeImportAuditResult InspectPeImports(
                 ++res.ordinalImportCount;
             }
             thunkOff += sizeof(uint64_t);
+            ++seen;
         }
     };
 
     // 1. Standard IAT (IMAGE_DIRECTORY_ENTRY_IMPORT)
-    const auto& impDir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+    const auto impDir = detail::GetDataDir(pe, IMAGE_DIRECTORY_ENTRY_IMPORT);
     if (impDir.VirtualAddress != 0 && impDir.Size != 0) {
         size_t descOff = 0;
         if (!detail::RvaToFileOffset(impDir.VirtualAddress, sections, numSections, fileSize, descOff)) {
             res.error = "Import directory RVA out of bounds";
             return res;
         }
-        while (descOff + sizeof(IMAGE_IMPORT_DESCRIPTOR) <= fileSize) {
+        size_t descCount = 0;
+        while (descCount < detail::kMaxImportDescriptors &&
+               descOff + sizeof(IMAGE_IMPORT_DESCRIPTOR) <= fileSize) {
             const auto* desc = reinterpret_cast<const IMAGE_IMPORT_DESCRIPTOR*>(buf.data() + descOff);
             if (desc->Name == 0 && desc->FirstThunk == 0) {
                 break;
@@ -187,15 +292,18 @@ inline PeImportAuditResult InspectPeImports(
             const uint32_t thunkRva = desc->OriginalFirstThunk ? desc->OriginalFirstThunk : desc->FirstThunk;
             countThunks(thunkRva);
             descOff += sizeof(IMAGE_IMPORT_DESCRIPTOR);
+            ++descCount;
         }
     }
 
     // 2. Delay-Load Imports (IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT)
-    const auto& delayDir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT];
+    const auto delayDir = detail::GetDataDir(pe, IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT);
     if (delayDir.VirtualAddress != 0 && delayDir.Size != 0) {
         size_t delayOff = 0;
         if (detail::RvaToFileOffset(delayDir.VirtualAddress, sections, numSections, fileSize, delayOff)) {
-            while (delayOff + sizeof(IMAGE_DELAYLOAD_DESCRIPTOR) <= fileSize) {
+            size_t descCount = 0;
+            while (descCount < detail::kMaxImportDescriptors &&
+                   delayOff + sizeof(IMAGE_DELAYLOAD_DESCRIPTOR) <= fileSize) {
                 const auto* ddesc = reinterpret_cast<const IMAGE_DELAYLOAD_DESCRIPTOR*>(buf.data() + delayOff);
                 if (ddesc->DllNameRVA == 0 && ddesc->ImportAddressTableRVA == 0) {
                     break;
@@ -204,12 +312,13 @@ inline PeImportAuditResult InspectPeImports(
                 const uint32_t thunkRva = ddesc->ImportNameTableRVA ? ddesc->ImportNameTableRVA : ddesc->ImportAddressTableRVA;
                 countThunks(thunkRva);
                 delayOff += sizeof(IMAGE_DELAYLOAD_DESCRIPTOR);
+                ++descCount;
             }
         }
     }
 
     // 3. Implicit TLS Directory (IMAGE_DIRECTORY_ENTRY_TLS)
-    const auto& tlsDir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_TLS];
+    const auto tlsDir = detail::GetDataDir(pe, IMAGE_DIRECTORY_ENTRY_TLS);
     if (tlsDir.VirtualAddress != 0 && tlsDir.Size != 0) {
         size_t tlsOff = 0;
         if (detail::RvaToFileOffset(tlsDir.VirtualAddress, sections, numSections, fileSize, tlsOff) &&
@@ -221,7 +330,7 @@ inline PeImportAuditResult InspectPeImports(
             if (tls->EndAddressOfRawData >= tls->StartAddressOfRawData) {
                 res.tlsRawDataSize = static_cast<size_t>(tls->EndAddressOfRawData - tls->StartAddressOfRawData);
             }
-            const uint64_t imageBase = nt->OptionalHeader.ImageBase;
+            const uint64_t imageBase = pe.nt->OptionalHeader.ImageBase;
             if (tls->AddressOfCallBacks >= imageBase) {
                 const uint64_t cbRva64 = tls->AddressOfCallBacks - imageBase;
                 if (cbRva64 <= 0xFFFFFFFFULL) {
@@ -243,6 +352,7 @@ inline PeImportAuditResult InspectPeImports(
         }
     }
 
+    res.validPe64 = true;
     return res;
 }
 
@@ -261,32 +371,23 @@ namespace detail {
 
 inline ShimExportTable ParsePeExports(const std::filesystem::path& dllPath) {
     ShimExportTable out{};
-    std::ifstream f(dllPath, std::ios::binary | std::ios::ate);
-    if (!f) return out;
-    const auto fileSize = static_cast<size_t>(f.tellg());
-    if (fileSize < sizeof(IMAGE_DOS_HEADER)) return out;
-    std::vector<uint8_t> buf(fileSize);
-    f.seekg(0);
-    f.read(reinterpret_cast<char*>(buf.data()), static_cast<std::streamsize>(fileSize));
-    if (!f) return out;
+    std::vector<uint8_t> buf;
+    std::string ignoredErr;
+    if (!ReadFileBytesSafe(dllPath, buf, ignoredErr)) {
+        return out;
+    }
+    const size_t fileSize = buf.size();
 
-    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(buf.data());
-    if (dos->e_magic != IMAGE_DOS_SIGNATURE) return out;
-    const size_t ntOff = static_cast<size_t>(dos->e_lfanew);
-    if (ntOff + sizeof(IMAGE_NT_HEADERS64) > fileSize) return out;
-    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(buf.data() + ntOff);
-    if (nt->Signature != IMAGE_NT_SIGNATURE ||
-        nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
+    ValidatedPe64 pe{};
+    if (!ParseValidatedPe64Headers(buf, pe, ignoredErr)) {
         return out;
     }
 
-    const uint16_t numSections = nt->FileHeader.NumberOfSections;
-    const auto* sections = IMAGE_FIRST_SECTION(nt);
-    const auto& expDir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+    const auto expDir = GetDataDir(pe, IMAGE_DIRECTORY_ENTRY_EXPORT);
     if (expDir.VirtualAddress == 0 || expDir.Size == 0) return out;
 
     size_t expOff = 0;
-    if (!RvaToFileOffset(expDir.VirtualAddress, sections, numSections, fileSize, expOff) ||
+    if (!RvaToFileOffset(expDir.VirtualAddress, pe.sections, pe.numSections, fileSize, expOff) ||
         expOff + sizeof(IMAGE_EXPORT_DIRECTORY) > fileSize) {
         return out;
     }
@@ -294,9 +395,10 @@ inline ShimExportTable ParsePeExports(const std::filesystem::path& dllPath) {
 
     size_t funcsOff = 0;
     if (exp->AddressOfFunctions != 0 &&
-        RvaToFileOffset(exp->AddressOfFunctions, sections, numSections, fileSize, funcsOff)) {
-        for (DWORD i = 0; i < exp->NumberOfFunctions; ++i) {
-            const size_t off = funcsOff + static_cast<size_t>(i) * sizeof(uint32_t);
+        RvaToFileOffset(exp->AddressOfFunctions, pe.sections, pe.numSections, fileSize, funcsOff)) {
+        const size_t funcCount = (std::min)(static_cast<size_t>(exp->NumberOfFunctions), kMaxExportEntries);
+        for (size_t i = 0; i < funcCount; ++i) {
+            const size_t off = funcsOff + i * sizeof(uint32_t);
             if (off + sizeof(uint32_t) > fileSize) break;
             uint32_t fnRva = 0;
             std::memcpy(&fnRva, buf.data() + off, sizeof(uint32_t));
@@ -308,14 +410,15 @@ inline ShimExportTable ParsePeExports(const std::filesystem::path& dllPath) {
 
     size_t namesOff = 0;
     if (exp->AddressOfNames != 0 &&
-        RvaToFileOffset(exp->AddressOfNames, sections, numSections, fileSize, namesOff)) {
-        for (DWORD i = 0; i < exp->NumberOfNames; ++i) {
-            const size_t off = namesOff + static_cast<size_t>(i) * sizeof(uint32_t);
+        RvaToFileOffset(exp->AddressOfNames, pe.sections, pe.numSections, fileSize, namesOff)) {
+        const size_t nameCount = (std::min)(static_cast<size_t>(exp->NumberOfNames), kMaxExportEntries);
+        for (size_t i = 0; i < nameCount; ++i) {
+            const size_t off = namesOff + i * sizeof(uint32_t);
             if (off + sizeof(uint32_t) > fileSize) break;
             uint32_t nameRva = 0;
             std::memcpy(&nameRva, buf.data() + off, sizeof(uint32_t));
             size_t strOff = 0;
-            if (RvaToFileOffset(nameRva, sections, numSections, fileSize, strOff)) {
+            if (RvaToFileOffset(nameRva, pe.sections, pe.numSections, fileSize, strOff)) {
                 const char* s = reinterpret_cast<const char*>(buf.data() + strOff);
                 const size_t maxLen = fileSize - strOff;
                 const size_t slen = ::strnlen(s, maxLen);
@@ -352,18 +455,20 @@ inline PeSymbolCoverageResult InspectPeSymbolCoverage(
         }
     }
 
-    std::ifstream f(pePath, std::ios::binary | std::ios::ate);
-    if (!f) return out;
-    const auto fileSize = static_cast<size_t>(f.tellg());
-    std::vector<uint8_t> buf(fileSize);
-    f.seekg(0);
-    f.read(reinterpret_cast<char*>(buf.data()), static_cast<std::streamsize>(fileSize));
-    if (!f) return out;
+    std::vector<uint8_t> buf;
+    std::string ignoredErr;
+    if (!detail::ReadFileBytesSafe(pePath, buf, ignoredErr)) {
+        return out;
+    }
+    const size_t fileSize = buf.size();
 
-    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(buf.data());
-    const auto* nt  = reinterpret_cast<const IMAGE_NT_HEADERS64*>(buf.data() + dos->e_lfanew);
-    const uint16_t numSections = nt->FileHeader.NumberOfSections;
-    const auto* sections = IMAGE_FIRST_SECTION(nt);
+    detail::ValidatedPe64 pe{};
+    if (!detail::ParseValidatedPe64Headers(buf, pe, ignoredErr)) {
+        return out;
+    }
+
+    const IMAGE_SECTION_HEADER* sections = pe.sections;
+    const uint16_t numSections = pe.numSections;
 
     auto inspectThunksForDll = [&](uint32_t nameRva, uint32_t thunkRva) {
         size_t nameOff = 0;
@@ -382,7 +487,8 @@ inline PeSymbolCoverageResult InspectPeSymbolCoverage(
 
         size_t tOff = 0;
         if (!detail::RvaToFileOffset(thunkRva, sections, numSections, fileSize, tOff)) return;
-        while (tOff + sizeof(uint64_t) <= fileSize) {
+        size_t seen = 0;
+        while (seen < detail::kMaxThunksPerDll && tOff + sizeof(uint64_t) <= fileSize) {
             uint64_t val = 0;
             std::memcpy(&val, buf.data() + tOff, sizeof(uint64_t));
             if (val == 0) break;
@@ -414,33 +520,40 @@ inline PeSymbolCoverageResult InspectPeSymbolCoverage(
                 }
             }
             tOff += sizeof(uint64_t);
+            ++seen;
         }
     };
 
-    const auto& impDir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+    const auto impDir = detail::GetDataDir(pe, IMAGE_DIRECTORY_ENTRY_IMPORT);
     if (impDir.VirtualAddress != 0 && impDir.Size != 0) {
         size_t descOff = 0;
         if (detail::RvaToFileOffset(impDir.VirtualAddress, sections, numSections, fileSize, descOff)) {
-            while (descOff + sizeof(IMAGE_IMPORT_DESCRIPTOR) <= fileSize) {
+            size_t descCount = 0;
+            while (descCount < detail::kMaxImportDescriptors &&
+                   descOff + sizeof(IMAGE_IMPORT_DESCRIPTOR) <= fileSize) {
                 const auto* desc = reinterpret_cast<const IMAGE_IMPORT_DESCRIPTOR*>(buf.data() + descOff);
                 if (desc->Name == 0 && desc->FirstThunk == 0) break;
                 const uint32_t thunkRva = desc->OriginalFirstThunk ? desc->OriginalFirstThunk : desc->FirstThunk;
                 inspectThunksForDll(desc->Name, thunkRva);
                 descOff += sizeof(IMAGE_IMPORT_DESCRIPTOR);
+                ++descCount;
             }
         }
     }
 
-    const auto& delayDir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT];
+    const auto delayDir = detail::GetDataDir(pe, IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT);
     if (delayDir.VirtualAddress != 0 && delayDir.Size != 0) {
         size_t delayOff = 0;
         if (detail::RvaToFileOffset(delayDir.VirtualAddress, sections, numSections, fileSize, delayOff)) {
-            while (delayOff + sizeof(IMAGE_DELAYLOAD_DESCRIPTOR) <= fileSize) {
+            size_t descCount = 0;
+            while (descCount < detail::kMaxImportDescriptors &&
+                   delayOff + sizeof(IMAGE_DELAYLOAD_DESCRIPTOR) <= fileSize) {
                 const auto* ddesc = reinterpret_cast<const IMAGE_DELAYLOAD_DESCRIPTOR*>(buf.data() + delayOff);
                 if (ddesc->DllNameRVA == 0 && ddesc->ImportAddressTableRVA == 0) break;
                 const uint32_t thunkRva = ddesc->ImportNameTableRVA ? ddesc->ImportNameTableRVA : ddesc->ImportAddressTableRVA;
                 inspectThunksForDll(ddesc->DllNameRVA, thunkRva);
                 delayOff += sizeof(IMAGE_DELAYLOAD_DESCRIPTOR);
+                ++descCount;
             }
         }
     }

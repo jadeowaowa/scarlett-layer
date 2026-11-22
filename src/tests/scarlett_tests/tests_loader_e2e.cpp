@@ -1391,25 +1391,29 @@ bool TestXvdFlagsAndBoundsNegative() {
         SC_EXPECT(!xvd.Header().IsEncrypted());
     }
 
-    // 2. Integer overflow in userDataOffset + userDataLength (UINT64_MAX - 16 + 64 wraps small)
+    // 2. Truncated image smaller than real 12 KiB (0x3000) XVD header
     {
-        auto img = sc::vfs::XvdContainer::BuildSyntheticUnencryptedXvd(payload);
-        writeU64(img.data() + 0x250, UINT64_MAX - 16ULL);
-        writeU64(img.data() + 0x258, 64ULL);
-        auto p = writeImg(L"overflow_offset.xvd", img);
+        std::vector<uint8_t> trunc(0x1000, 0u);
+        std::memcpy(trunc.data() + sc::vfs::kXvdMagicOffset, "msft-xvd", 8);
+        writeU32(trunc.data() + 0x208, sc::vfs::kXvdFlagEncryptionDisabled);
+        auto p = writeImg(L"truncated_4k.xvd", trunc);
         SC_EXPECT(!xvd.Open(p, err));
     }
 
-    // 3. Integer overflow via huge userDataLength
+    // 3. Out-of-bounds real uint32 UserDataLength (0x28C) and MutableDataPageCount (0x470)
     {
-        auto img = sc::vfs::XvdContainer::BuildSyntheticUnencryptedXvd(payload);
-        writeU64(img.data() + 0x250, sc::vfs::kXvdMinHeaderSize);
-        writeU64(img.data() + 0x258, UINT64_MAX - 0x800ULL);
-        auto p = writeImg(L"overflow_length.xvd", img);
-        SC_EXPECT(!xvd.Open(p, err));
+        auto imgLen = sc::vfs::XvdContainer::BuildSyntheticUnencryptedXvd(payload);
+        writeU32(imgLen.data() + 0x28C, 0xFFFFFFFFu);
+        auto pLen = writeImg(L"oob_userdata_len.xvd", imgLen);
+        SC_EXPECT(!xvd.Open(pLen, err));
+
+        auto imgMdu = sc::vfs::XvdContainer::BuildSyntheticUnencryptedXvd(payload);
+        imgMdu[0x470] = 0xFFu;
+        auto pMdu = writeImg(L"oob_mdu.xvd", imgMdu);
+        SC_EXPECT(!xvd.Open(pMdu, err));
     }
 
-    // 4. Out-of-bounds driveSize and embeddedXvdLen
+    // 4. Out-of-bounds driveSize (0x218) and real EmbeddedXVDLength (0x288)
     {
         auto imgDrive = sc::vfs::XvdContainer::BuildSyntheticUnencryptedXvd(payload);
         writeU64(imgDrive.data() + 0x218, UINT64_MAX);
@@ -1417,7 +1421,7 @@ bool TestXvdFlagsAndBoundsNegative() {
         SC_EXPECT(!xvd.Open(pDrive, err));
 
         auto imgEmb = sc::vfs::XvdContainer::BuildSyntheticUnencryptedXvd(payload);
-        writeU32(imgEmb.data() + 0x244, 0xFFFFFFFFu);
+        writeU32(imgEmb.data() + 0x288, 0xFFFFFFFFu);
         auto pEmb = writeImg(L"oob_embedded.xvd", imgEmb);
         SC_EXPECT(!xvd.Open(pEmb, err));
     }
@@ -1791,3 +1795,215 @@ bool TestScarlettStudioSelfTest() {
     SC_EXPECT(exitCode == 0);
     return true;
 }
+
+bool TestXvdRealOffsetsAndGeometry() {
+    const auto tmpDir = std::filesystem::temp_directory_path() / L"scarlett_s70_xvd_geometry";
+    std::error_code ec;
+    std::filesystem::remove_all(tmpDir, ec);
+    std::filesystem::create_directories(tmpDir, ec);
+
+    auto writeImg = [&](const wchar_t* name, const std::vector<uint8_t>& bytes) {
+        const auto p = tmpDir / name;
+        std::ofstream ofs(p, std::ios::binary | std::ios::trunc);
+        ofs.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+        return p;
+    };
+
+    const std::vector<uint8_t> payload = { 'S', 'C', 'A', 'R', 'L', 'E', 'T', 'T', '_', '7', '0' };
+    sc::vfs::XvdContainer xvd;
+    std::string err;
+
+    // 1. Real offsets (0x284/0x288/0x28C/0x470) + untouched TopHashBlockHash (0x240..0x25F)
+    {
+        auto img = sc::vfs::XvdContainer::BuildSyntheticUnencryptedXvd(
+            payload, 7u, sc::vfs::kXvdFlagEncryptionDisabled, 0x1500u, 2u);
+        // Confirm legacy synthetic offsets 0x240..0x25F are zero and corrupting them has no effect
+        for (size_t off = 0x240; off < 0x260; ++off) {
+            SC_EXPECT(img[off] == 0u);
+            img[off] = 0xABu;
+        }
+        const auto p = writeImg(L"real_layout.xvd", img);
+        SC_EXPECT(xvd.Open(p, err));
+        SC_EXPECT(xvd.Header().xvdType == 0u);
+        SC_EXPECT(xvd.Header().contentType == 7u);
+        SC_EXPECT(xvd.Header().embeddedXvdLen == 0x1500u);
+        SC_EXPECT(xvd.Header().mutableDataPageCount == 2u);
+        // EmbeddedXVD (0x1500 -> 2 pages = 0x2000) + MDU (2 pages = 0x2000) => hashTreeOffset = 0x7000
+        SC_EXPECT(xvd.Header().hashTreeOffset == 0x7000u);
+        SC_EXPECT(xvd.Header().hashTreeLength == 0x1000u);
+        SC_EXPECT(xvd.Header().userDataOffset == 0x8000u);
+        SC_EXPECT(xvd.Header().userDataLength == payload.size());
+
+        std::vector<uint8_t> out;
+        SC_EXPECT(xvd.ReadUserData(0, payload.size(), out, err));
+        SC_EXPECT(out == payload);
+    }
+
+    // 2. DataIntegrityDisabled (0x4) omits hash tree completely
+    {
+        auto img = sc::vfs::XvdContainer::BuildSyntheticUnencryptedXvd(
+            payload, 1u,
+            sc::vfs::kXvdFlagEncryptionDisabled | sc::vfs::kXvdFlagDataIntegrityDisabled,
+            0x0800u, 1u);
+        const auto p = writeImg(L"no_hash_tree.xvd", img);
+        SC_EXPECT(xvd.Open(p, err));
+        SC_EXPECT(!xvd.Header().IsDataIntegrityEnabled());
+        SC_EXPECT(xvd.Header().hashTreeOffset == 0x5000u);
+        SC_EXPECT(xvd.Header().hashTreeLength == 0u);
+        SC_EXPECT(xvd.Header().userDataOffset == 0x5000u);
+    }
+
+    // 3. ResiliencyEnabled (0x10) doubles hash-tree pages
+    {
+        auto img = sc::vfs::XvdContainer::BuildSyntheticUnencryptedXvd(
+            payload, 1u,
+            sc::vfs::kXvdFlagEncryptionDisabled | sc::vfs::kXvdFlagResiliencyEnabled,
+            0u, 0u);
+        const auto p = writeImg(L"resilient_hash_tree.xvd", img);
+        SC_EXPECT(xvd.Open(p, err));
+        SC_EXPECT(xvd.Header().hashTreeOffset == 0x3000u);
+        SC_EXPECT(xvd.Header().hashTreeLength == 0x2000u);
+        SC_EXPECT(xvd.Header().userDataOffset == 0x5000u);
+
+        std::vector<uint8_t> out;
+        SC_EXPECT(xvd.ReadUserData(0, payload.size(), out, err));
+        SC_EXPECT(out == payload);
+    }
+
+    std::filesystem::remove_all(tmpDir, ec);
+    return true;
+}
+
+bool TestMalformedPeAndConfigHardening() {
+    const auto tmpDir = std::filesystem::temp_directory_path() / L"scarlett_s70_parser_hardening";
+    std::error_code ec;
+    std::filesystem::remove_all(tmpDir, ec);
+    std::filesystem::create_directories(tmpDir, ec);
+
+    auto writeText = [&](const wchar_t* name, std::string_view text) {
+        const auto p = tmpDir / name;
+        std::ofstream ofs(p, std::ios::binary | std::ios::trunc);
+        ofs.write(text.data(), static_cast<std::streamsize>(text.size()));
+        return p;
+    };
+    auto writeBin = [&](const wchar_t* name, const std::vector<uint8_t>& bytes) {
+        const auto p = tmpDir / name;
+        std::ofstream ofs(p, std::ios::binary | std::ios::trunc);
+        ofs.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+        return p;
+    };
+
+    // 1. MicrosoftGame.Config path containment checks
+    const char* badExes[] = {
+        "..\\escape.exe",
+        "sub\\..\\..\\escape.exe",
+        "/rooted.exe",
+        "\\rooted.exe",
+        "C:\\Windows\\System32\\cmd.exe",
+        "game.exe:ads",
+        "bad\x01name.exe"
+    };
+    int idx = 0;
+    for (const char* badExe : badExes) {
+        std::string xml = "<Game><Identity Name=\"Bad\"/><ExecutableList><Executable Name=\"";
+        xml += badExe;
+        xml += "\" Id=\"Game\"/></ExecutableList></Game>";
+        const auto cfgPath = writeText((L"bad_cfg_" + std::to_wstring(idx++) + L".xml").c_str(), xml);
+        const auto parsed = sc::loader::ParseGameConfig(cfgPath);
+        SC_EXPECT(!parsed.valid);
+    }
+
+    // Valid nested relative executable stays inside packageRoot
+    {
+        const auto okPath = writeText(
+            L"good_cfg.xml",
+            "<Game><Identity Name=\"Good\"/><ExecutableList><Executable Name=\"Bin\\Title.exe\" Id=\"Game\"/></ExecutableList></Game>");
+        const auto parsed = sc::loader::ParseGameConfig(okPath);
+        SC_EXPECT(parsed.valid);
+        SC_EXPECT(parsed.executablePath.filename() == L"Title.exe");
+    }
+
+    // 2. Malformed PE64 inputs must fail safely with no crash or OOB read
+    const auto emptyShimDir = tmpDir / L"empty_shims";
+    std::filesystem::create_directories(emptyShimDir, ec);
+
+    // 2a. Truncated non-PE
+    {
+        const auto p = writeBin(L"trunc.exe", {'M', 'Z', 0x00, 0x01});
+        SC_EXPECT(!sc::loader::InspectPeImports(p, emptyShimDir).validPe64);
+        const auto sym = sc::loader::InspectPeSymbolCoverage(p, emptyShimDir);
+        SC_EXPECT(!sym.audit.validPe64 && sym.implementedSymbols.empty() && sym.autoStubSymbols.empty());
+        const auto exps = sc::loader::detail::ParsePeExports(p);
+        SC_EXPECT(exps.names.empty());
+    }
+
+    // 2b. Negative e_lfanew
+    {
+        std::vector<uint8_t> buf(sizeof(IMAGE_DOS_HEADER) + sizeof(IMAGE_NT_HEADERS64), 0u);
+        auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(buf.data());
+        dos->e_magic = IMAGE_DOS_SIGNATURE;
+        dos->e_lfanew = -64;
+        const auto p = writeBin(L"neg_lfanew.exe", buf);
+        SC_EXPECT(!sc::loader::InspectPeImports(p, emptyShimDir).validPe64);
+        SC_EXPECT(!sc::loader::InspectPeSymbolCoverage(p, emptyShimDir).audit.validPe64);
+    }
+
+    // 2c. NumberOfSections claiming 5000 sections inside tiny file
+    {
+        std::vector<uint8_t> buf(sizeof(IMAGE_DOS_HEADER) + sizeof(IMAGE_NT_HEADERS64) + 64u, 0u);
+        auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(buf.data());
+        dos->e_magic = IMAGE_DOS_SIGNATURE;
+        dos->e_lfanew = static_cast<LONG>(sizeof(IMAGE_DOS_HEADER));
+        auto* nt = reinterpret_cast<IMAGE_NT_HEADERS64*>(buf.data() + sizeof(IMAGE_DOS_HEADER));
+        nt->Signature = IMAGE_NT_SIGNATURE;
+        nt->FileHeader.NumberOfSections = 5000u;
+        nt->FileHeader.SizeOfOptionalHeader = static_cast<WORD>(sizeof(IMAGE_OPTIONAL_HEADER64));
+        nt->OptionalHeader.Magic = IMAGE_NT_OPTIONAL_HDR64_MAGIC;
+        nt->OptionalHeader.NumberOfRvaAndSizes = IMAGE_NUMBEROF_DIRECTORY_ENTRIES;
+        const auto p = writeBin(L"huge_sections.exe", buf);
+        SC_EXPECT(!sc::loader::InspectPeImports(p, emptyShimDir).validPe64);
+        SC_EXPECT(sc::loader::detail::ParsePeExports(p).names.empty());
+    }
+
+    // 2d. Oversized SizeOfOptionalHeader exceeding file
+    {
+        std::vector<uint8_t> buf(sizeof(IMAGE_DOS_HEADER) + sizeof(IMAGE_NT_HEADERS64) + 64u, 0u);
+        auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(buf.data());
+        dos->e_magic = IMAGE_DOS_SIGNATURE;
+        dos->e_lfanew = static_cast<LONG>(sizeof(IMAGE_DOS_HEADER));
+        auto* nt = reinterpret_cast<IMAGE_NT_HEADERS64*>(buf.data() + sizeof(IMAGE_DOS_HEADER));
+        nt->Signature = IMAGE_NT_SIGNATURE;
+        nt->FileHeader.NumberOfSections = 1u;
+        nt->FileHeader.SizeOfOptionalHeader = 0xFF00u;
+        nt->OptionalHeader.Magic = IMAGE_NT_OPTIONAL_HDR64_MAGIC;
+        const auto p = writeBin(L"huge_opthdr.exe", buf);
+        SC_EXPECT(!sc::loader::InspectPeImports(p, emptyShimDir).validPe64);
+    }
+
+    // 2e. Valid headers + out-of-bounds Import Directory RVA
+    {
+        std::vector<uint8_t> buf(sizeof(IMAGE_DOS_HEADER) + sizeof(IMAGE_NT_HEADERS64) + sizeof(IMAGE_SECTION_HEADER), 0u);
+        auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(buf.data());
+        dos->e_magic = IMAGE_DOS_SIGNATURE;
+        dos->e_lfanew = static_cast<LONG>(sizeof(IMAGE_DOS_HEADER));
+        auto* nt = reinterpret_cast<IMAGE_NT_HEADERS64*>(buf.data() + sizeof(IMAGE_DOS_HEADER));
+        nt->Signature = IMAGE_NT_SIGNATURE;
+        nt->FileHeader.NumberOfSections = 1u;
+        nt->FileHeader.SizeOfOptionalHeader = static_cast<WORD>(sizeof(IMAGE_OPTIONAL_HEADER64));
+        nt->OptionalHeader.Magic = IMAGE_NT_OPTIONAL_HDR64_MAGIC;
+        nt->OptionalHeader.NumberOfRvaAndSizes = IMAGE_NUMBEROF_DIRECTORY_ENTRIES;
+        nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress = 0x7FFF0000u;
+        nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size = 0x40u;
+        auto* sec = reinterpret_cast<IMAGE_SECTION_HEADER*>(
+            buf.data() + sizeof(IMAGE_DOS_HEADER) + sizeof(IMAGE_NT_HEADERS64));
+        sec->VirtualAddress = 0x1000u;
+        sec->SizeOfRawData = 0x200u;
+        sec->PointerToRawData = 0x400u;
+        const auto p = writeBin(L"oob_import_rva.exe", buf);
+        SC_EXPECT(!sc::loader::InspectPeImports(p, emptyShimDir).validPe64);
+    }
+
+    std::filesystem::remove_all(tmpDir, ec);
+    return true;
+}
+

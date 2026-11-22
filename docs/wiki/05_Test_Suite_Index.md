@@ -1,6 +1,6 @@
 # 05 — Automated Test Suite & Synthetic Title Index
 
-`scarlett_tests.exe` runs **72 checks** via `loader.exe` under CTest (`ctest --test-dir build`).
+`scarlett_tests.exe` runs **74 checks** via `loader.exe` under CTest (`ctest --test-dir build`).
 
 ## Exact `RunTest` Registration Order (`src/tests/scarlett_tests/main.cpp`)
 ```cpp
@@ -148,6 +148,10 @@
     {"XGameRuntimeComBrokerE2E",           TestXGameRuntimeComBrokerE2E},
 // 72
     {"ScarlettStudioSelfTest",             TestScarlettStudioSelfTest},
+// 73
+    {"XvdRealOffsetsAndGeometry",          TestXvdRealOffsetsAndGeometry},
+// 74
+    {"MalformedPeAndConfigHardening",      TestMalformedPeAndConfigHardening},
 ```
 
 ## Test & Title Files
@@ -155,10 +159,10 @@
 - `src/tests/engine_plugin/engine_plugin.cpp` (59 lines)
 - `src/tests/engine_plugin/engine_plugin.def` (3 lines)
 - `src/tests/scarlett_3d_demo/main.cpp` (328 lines)
-- `src/tests/scarlett_tests/main.cpp` (190 lines)
+- `src/tests/scarlett_tests/main.cpp` (194 lines)
 - `src/tests/scarlett_tests/test_harness.hpp` (176 lines)
 - `src/tests/scarlett_tests/tests_d3d12_core.cpp` (1312 lines)
 - `src/tests/scarlett_tests/tests_d3d12_shaders_present.cpp` (1949 lines)
-- `src/tests/scarlett_tests/tests_loader_e2e.cpp` (1793 lines)
+- `src/tests/scarlett_tests/tests_loader_e2e.cpp` (2009 lines)
 - `src/tests/scarlett_tests/tests_runtime_io.cpp` (967 lines)
 - `src/tests/scarlett_tests/tests_storage_swizzle.cpp` (1597 lines)

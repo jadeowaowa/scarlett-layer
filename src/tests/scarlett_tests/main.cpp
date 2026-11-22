@@ -11,6 +11,8 @@ bool TestLocalCorpusReadOnlyAudit();
 bool TestD3D12XsGdkSampleAlignmentE2E();
 bool TestXGameRuntimeComBrokerE2E();
 bool TestScarlettStudioSelfTest();
+bool TestXvdRealOffsetsAndGeometry();
+bool TestMalformedPeAndConfigHardening();
 
 namespace {
 
@@ -92,6 +94,8 @@ constexpr TestEntry kTests[] = {
     {"D3D12XsGdkSampleAlignmentE2E",       TestD3D12XsGdkSampleAlignmentE2E},
     {"XGameRuntimeComBrokerE2E",           TestXGameRuntimeComBrokerE2E},
     {"ScarlettStudioSelfTest",             TestScarlettStudioSelfTest},
+    {"XvdRealOffsetsAndGeometry",          TestXvdRealOffsetsAndGeometry},
+    {"MalformedPeAndConfigHardening",      TestMalformedPeAndConfigHardening},
 };
 
 bool EqualsCaseInsensitive(std::string_view a, std::string_view b) {
