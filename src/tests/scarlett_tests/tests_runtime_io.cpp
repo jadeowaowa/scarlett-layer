@@ -1,3 +1,4 @@
+#include <unknwn.h>
 #include "test_harness.hpp"
 
 using Microsoft::WRL::ComPtr;
@@ -872,5 +873,95 @@ bool TestRetailBringUpShims() {
     curl_easy_cleanup(curl);
     curl_global_cleanup();
 
+    return true;
+}
+
+bool TestXGameRuntimeComBrokerE2E() {
+    HMODULE mod = GetModuleHandleW(L"xgameruntime.dll");
+    if (!mod) {
+        mod = LoadLibraryW(L"xgameruntime.dll");
+    }
+    SC_EXPECT(mod != nullptr);
+
+    using PFN_InitEx2  = HRESULT(WINAPI*)(uint64_t, uint64_t, uint64_t, void*);
+    using PFN_Query    = HRESULT(WINAPI*)(const GUID*, const GUID*, void**);
+    using PFN_Uninit   = void(WINAPI*)();
+    using PFN_CanUnload = HRESULT(WINAPI*)();
+
+    auto pInitEx2   = reinterpret_cast<PFN_InitEx2>(GetProcAddress(mod, "InitializeApiImplEx2"));
+    auto pQuery     = reinterpret_cast<PFN_Query>(GetProcAddress(mod, "QueryApiImpl"));
+    auto pUninit    = reinterpret_cast<PFN_Uninit>(GetProcAddress(mod, "UninitializeApiImpl"));
+    auto pCanUnload = reinterpret_cast<PFN_CanUnload>(GetProcAddress(mod, "DllCanUnloadNow"));
+    SC_EXPECT(pInitEx2 && pQuery && pUninit && pCanUnload);
+
+    SC_EXPECT(SUCCEEDED(pInitEx2(0x6336, 0x2712, 1, nullptr)));
+    SC_EXPECT(pCanUnload() == S_FALSE);
+
+    // 1. XSystemAnalyticsInfo hidden-sret (0x90 bytes)
+    const GUID kAnalytics = { 0xb884675d, 0xb738, 0x4a9c, { 0x81, 0x5d, 0x9a, 0x9a, 0x1e, 0x0c, 0x6c, 0x9b } };
+    struct IAnalyticsVtbl : public IUnknown {
+        virtual XSystemAnalyticsInfo STDMETHODCALLTYPE GetAnalyticsInfo() = 0;
+    };
+    IAnalyticsVtbl* analytics = nullptr;
+    SC_EXPECT(SUCCEEDED(pQuery(&kAnalytics, &kAnalytics, reinterpret_cast<void**>(&analytics))) && analytics);
+    XSystemAnalyticsInfo info = analytics->GetAnalyticsInfo();
+    SC_EXPECT(info.osVersion.major == 10 && info.osVersion.build >= 20000);
+    SC_EXPECT(std::strcmp(info.family, "Windows.Xbox") == 0);
+    analytics->Release();
+
+    // 2. XSystem (ConsoleId + SandboxId)
+    const GUID kSysClsid = { 0xe349bd1a, 0xfc20, 0x4e40, { 0xb9, 0x9c, 0x41, 0x78, 0xcc, 0x6b, 0x40, 0x9f } };
+    const GUID kSysIid   = { 0x1861cf2e, 0xe18b, 0x4834, { 0xa9, 0xf5, 0xb4, 0xa4, 0xe6, 0xef, 0xb4, 0xcf } };
+    struct ISystemVtbl : public IUnknown {
+        virtual HRESULT STDMETHODCALLTYPE GetConsoleId(size_t, char*, size_t*) = 0;
+        virtual HRESULT STDMETHODCALLTYPE GetXboxLiveSandboxId(size_t, char*, size_t*) = 0;
+    };
+    ISystemVtbl* sys = nullptr;
+    SC_EXPECT(SUCCEEDED(pQuery(&kSysClsid, &kSysIid, reinterpret_cast<void**>(&sys))) && sys);
+    char cid[64]{}; size_t cidUsed = 0;
+    char sbx[32]{}; size_t sbxUsed = 0;
+    SC_EXPECT(SUCCEEDED(sys->GetConsoleId(sizeof(cid), cid, &cidUsed)) && cidUsed > 0);
+    SC_EXPECT(SUCCEEDED(sys->GetXboxLiveSandboxId(sizeof(sbx), sbx, &sbxUsed)) && std::strcmp(sbx, "RETAIL") == 0);
+    sys->Release();
+
+    // 3. XGame (TitleId)
+    const GUID kGameClsid = { 0x973a344e, 0x24bf, 0x4d0f, { 0x84, 0x57, 0x56, 0xc5, 0x34, 0x89, 0x2b, 0x29 } };
+    const GUID kGameIid   = { 0x2549f142, 0x6419, 0x4a06, { 0x97, 0xb5, 0x93, 0x1a, 0xab, 0x7c, 0x2f, 0x34 } };
+    struct IGameVtbl : public IUnknown {
+        virtual HRESULT STDMETHODCALLTYPE GetXboxTitleId(uint32_t*) = 0;
+    };
+    IGameVtbl* game = nullptr;
+    SC_EXPECT(SUCCEEDED(pQuery(&kGameClsid, &kGameIid, reinterpret_cast<void**>(&game))) && game);
+    uint32_t titleId = 0;
+    SC_EXPECT(SUCCEEDED(game->GetXboxTitleId(&titleId)) && titleId != 0);
+    game->Release();
+
+    // 4. XAsync::Run (slot 6) invokes work + completion callback
+    const GUID kAsyncClsid = { 0x073b7dcb, 0x1fcf, 0x4030, { 0x94, 0xbe, 0xe3, 0xc9, 0xeb, 0x62, 0x34, 0x28 } };
+    struct IAsyncVtbl : public IUnknown {
+        virtual HRESULT STDMETHODCALLTYPE GetStatus(XAsyncBlock*, bool) = 0;
+        virtual HRESULT STDMETHODCALLTYPE GetResultSize(XAsyncBlock*, size_t*) = 0;
+        virtual void    STDMETHODCALLTYPE Cancel(XAsyncBlock*) = 0;
+        virtual HRESULT STDMETHODCALLTYPE Run(XAsyncBlock*, XAsyncWork) = 0;
+    };
+    IAsyncVtbl* asyncSvc = nullptr;
+    SC_EXPECT(SUCCEEDED(pQuery(&kAsyncClsid, &kAsyncClsid, reinterpret_cast<void**>(&asyncSvc))) && asyncSvc);
+    struct RunState { bool workRan{false}; bool cbRan{false}; } st{};
+    XAsyncBlock ab{};
+    ab.context = &st;
+    ab.callback = [](XAsyncBlock* b) { static_cast<RunState*>(b->context)->cbRan = true; };
+    SC_EXPECT(SUCCEEDED(asyncSvc->Run(&ab, [](XAsyncBlock* b) -> HRESULT {
+        static_cast<RunState*>(b->context)->workRan = true;
+        return S_OK;
+    })));
+    SC_EXPECT(st.workRan && st.cbRan);
+    asyncSvc->Release();
+
+    // 5. Unknown GUID cleanly returns REGDB_E_CLASSNOTREG (0x80040154)
+    const GUID kUnknown = { 0x11111111, 0x2222, 0x3333, { 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb } };
+    void* dummy = nullptr;
+    SC_EXPECT(pQuery(&kUnknown, &kUnknown, &dummy) == static_cast<HRESULT>(0x80040154L));
+
+    pUninit();
     return true;
 }

@@ -39,6 +39,7 @@ add_library(xgameruntime SHARED
     src/shims/xgameruntime/xgameruntime.cpp
     src/shims/xgameruntime/task_queue.cpp
     src/shims/xgameruntime/game_save.cpp
+    src/shims/xgameruntime/api_broker.cpp
     src/shims/xgameruntime/xgameruntime.def
 )
 target_link_libraries(xgameruntime PRIVATE sc_common)
@@ -179,7 +180,7 @@ add_executable(scarlett_tests
     src/tests/scarlett_tests/tests_loader_e2e.cpp
 )
 target_link_libraries(scarlett_tests PRIVATE sc_common xgameruntime d3d12_xs gameinput xg_xs dstorage_xs xaudio2_9 xmem kernelx acphal libhttpclient xcurl d3dcompiler)
-add_dependencies(scarlett_tests pixevt engine_plugin)
+add_dependencies(scarlett_tests pixevt engine_plugin scarlett_studio)
 sc_set_runtime_dir(scarlett_tests "${SC_BIN_DIR}/titles/scarlett_tests")
 
 # Live interactive 3D cube demo -> build/bin/titles/scarlett_3d_demo/
@@ -196,6 +197,15 @@ add_executable(loader
 )
 target_link_libraries(loader PRIVATE sc_common)
 add_dependencies(loader scarlett_hook)
+
+# Desktop GUI Launcher & Test Hub -> build/bin/scarlett_studio.exe
+add_executable(scarlett_studio WIN32
+    src/gui/scarlett_studio.cpp
+)
+target_compile_definitions(scarlett_studio PRIVATE UNICODE _UNICODE)
+target_link_libraries(scarlett_studio PRIVATE sc_common user32 gdi32 comctl32 comdlg32 shell32 ole32)
+add_dependencies(scarlett_studio loader)
+sc_set_runtime_dir(scarlett_studio "${SC_BIN_DIR}")
 sc_set_runtime_dir(loader "${SC_BIN_DIR}")
 
 # Register each test from scarlett_tests/main.cpp individually in CTest

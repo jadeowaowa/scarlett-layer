@@ -1768,3 +1768,26 @@ bool TestLocalCorpusReadOnlyAudit() {
     }
     return true;
 }
+
+bool TestScarlettStudioSelfTest() {
+    wchar_t exeBuf[MAX_PATH * 4]{};
+    SC_EXPECT(GetModuleFileNameW(nullptr, exeBuf, static_cast<DWORD>(std::size(exeBuf))) > 0);
+    // scarlett_tests.exe lives at build/bin/titles/scarlett_tests/scarlett_tests.exe
+    const std::filesystem::path binDir = std::filesystem::path(exeBuf).parent_path().parent_path().parent_path();
+    const std::filesystem::path studioExe = binDir / L"scarlett_studio.exe";
+    SC_EXPECT(std::filesystem::exists(studioExe));
+
+    std::wstring cmd = L"\"" + studioExe.wstring() + L"\" --self-test";
+    STARTUPINFOW si{};
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi{};
+    SC_EXPECT(CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW,
+                             nullptr, binDir.c_str(), &si, &pi) != FALSE);
+    SC_EXPECT(WaitForSingleObject(pi.hProcess, 15000) == WAIT_OBJECT_0);
+    DWORD exitCode = 999;
+    GetExitCodeProcess(pi.hProcess, &exitCode);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+    SC_EXPECT(exitCode == 0);
+    return true;
+}

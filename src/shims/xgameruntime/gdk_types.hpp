@@ -99,3 +99,21 @@ struct XGameSaveBlob {
 inline constexpr HRESULT E_GS_INVALID_CONTAINER_NAME   = static_cast<HRESULT>(0x80830002L);
 inline constexpr HRESULT E_GS_BLOB_NOT_FOUND           = static_cast<HRESULT>(0x80830008L);
 inline constexpr HRESULT E_GS_PROVIDED_BUFFER_TOO_SMALL = static_cast<HRESULT>(0x8083000CL);
+
+struct XVersion {
+    uint16_t major;
+    uint16_t minor;
+    uint16_t build;
+    uint16_t revision;
+};
+static_assert(sizeof(XVersion) == 8, "XVersion ABI mismatch");
+
+struct XSystemAnalyticsInfo {
+    XVersion osVersion;
+    XVersion hostingOsVersion;
+    char     family[64];
+    char     form[64];
+};
+static_assert(sizeof(XSystemAnalyticsInfo) == 0x90, "XSystemAnalyticsInfo x64 ABI mismatch");
+
+using XAsyncWork = HRESULT(CALLBACK*)(XAsyncBlock* asyncBlock);
