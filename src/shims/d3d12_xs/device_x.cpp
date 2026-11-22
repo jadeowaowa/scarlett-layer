@@ -1,7 +1,6 @@
 #include "d3d12_xs_internal.hpp"
 #include "shader_inspector.hpp"
 #include "shader_stripper.hpp"
-#include "shader_stripper.hpp"
 #include "shader_translator.hpp"
 #include "common/stub.hpp"
 
@@ -24,6 +23,23 @@ using sc::d3d12xs::HashGraphicsPsoDesc;
 using sc::d3d12xs::ResolvePsoCachePath;
 
 namespace {
+
+D3D12_RESOURCE_DESC SanitizeXboxResourceDesc(const D3D12_RESOURCE_DESC& desc, const char* caller) {
+    const uint32_t rawFlags = static_cast<uint32_t>(desc.Flags);
+    if ((rawFlags & D3D12XBOX_RESOURCE_FLAG_MASK) == 0u) {
+        return desc;
+    }
+    D3D12_RESOURCE_DESC clean = desc;
+    clean.Flags = static_cast<D3D12_RESOURCE_FLAGS>(rawFlags & ~D3D12XBOX_RESOURCE_FLAG_MASK);
+    char buf[128];
+    std::snprintf(buf, sizeof(buf),
+                  "-> stripped console-only resource flags 0x%08X (kept 0x%08X)",
+                  rawFlags & D3D12XBOX_RESOURCE_FLAG_MASK,
+                  static_cast<uint32_t>(clean.Flags));
+    sc::log::Write(sc::log::Level::Info, "d3d12_xs", caller, buf);
+    return clean;
+}
+
 class ScarlettDeviceX final : public ID3D12DeviceX {
 public:
     ScarlettDeviceX(
@@ -130,13 +146,35 @@ public:
         const D3D12_HEAP_PROPERTIES* pHeapProperties, D3D12_HEAP_FLAGS HeapFlags,
         const D3D12_RESOURCE_DESC* pDesc, D3D12_RESOURCE_STATES InitialResourceState,
         const D3D12_CLEAR_VALUE* pOptimizedClearValue, REFIID riidResource, void** ppvResource) override {
+        D3D12_RESOURCE_DESC cleanDesc{};
+        const D3D12_RESOURCE_DESC* descPtr = pDesc;
+        if (pDesc && (static_cast<uint32_t>(pDesc->Flags) & D3D12XBOX_RESOURCE_FLAG_MASK) != 0u) {
+            cleanDesc = SanitizeXboxResourceDesc(*pDesc, "CreateCommittedResource");
+            descPtr = &cleanDesc;
+        }
         return m_device->CreateCommittedResource(
-            pHeapProperties, HeapFlags, pDesc, InitialResourceState,
+            pHeapProperties, HeapFlags, descPtr, InitialResourceState,
             pOptimizedClearValue, riidResource, ppvResource);
     }
 
     D3D12_RESOURCE_ALLOCATION_INFO STDMETHODCALLTYPE GetResourceAllocationInfo(
         UINT visibleMask, UINT numResourceDescs, const D3D12_RESOURCE_DESC* pResourceDescs) override {
+        if (pResourceDescs && numResourceDescs > 0) {
+            bool anyConsoleFlags = false;
+            for (UINT i = 0; i < numResourceDescs; ++i) {
+                if ((static_cast<uint32_t>(pResourceDescs[i].Flags) & D3D12XBOX_RESOURCE_FLAG_MASK) != 0u) {
+                    anyConsoleFlags = true;
+                    break;
+                }
+            }
+            if (anyConsoleFlags) {
+                std::vector<D3D12_RESOURCE_DESC> clean(numResourceDescs);
+                for (UINT i = 0; i < numResourceDescs; ++i) {
+                    clean[i] = SanitizeXboxResourceDesc(pResourceDescs[i], "GetResourceAllocationInfo");
+                }
+                return m_device->GetResourceAllocationInfo(visibleMask, numResourceDescs, clean.data());
+            }
+        }
         return m_device->GetResourceAllocationInfo(visibleMask, numResourceDescs, pResourceDescs);
     }
 
@@ -166,8 +204,14 @@ public:
         if (!pHeap || !pDesc || !ppvResource) {
             return E_INVALIDARG;
         }
+        D3D12_RESOURCE_DESC cleanDesc{};
+        const D3D12_RESOURCE_DESC* descPtr = pDesc;
+        if ((static_cast<uint32_t>(pDesc->Flags) & D3D12XBOX_RESOURCE_FLAG_MASK) != 0u) {
+            cleanDesc = SanitizeXboxResourceDesc(*pDesc, "CreatePlacedResource");
+            descPtr = &cleanDesc;
+        }
         HRESULT hr = m_device->CreatePlacedResource(
-            pHeap, HeapOffset, pDesc, InitialState, pOptimizedClearValue, riid, ppvResource);
+            pHeap, HeapOffset, descPtr, InitialState, pOptimizedClearValue, riid, ppvResource);
         if (SUCCEEDED(hr)) {
             char buf[160];
             std::snprintf(buf, sizeof(buf),
@@ -423,7 +467,7 @@ public:
 
     HRESULT STDMETHODCALLTYPE WaitFrameEventX(
         D3D12XBOX_FRAME_EVENT /*Event*/, DWORD TimeoutInMilliseconds,
-        HANDLE hEvent, D3D12XBOX_FRAME_PIPELINE_TOKEN* pToken) override {
+        HANDLE hEvent, uint32_t /*Flags*/, D3D12XBOX_FRAME_PIPELINE_TOKEN* pToken) override {
         if (hEvent) {
             DWORD waitRes = WaitForSingleObject(hEvent, TimeoutInMilliseconds);
             if (waitRes == WAIT_TIMEOUT) {

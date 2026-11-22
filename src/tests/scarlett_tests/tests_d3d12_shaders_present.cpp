@@ -1437,7 +1437,7 @@ bool TestD3D12XsFramePacingTokensE2E() {
     D3D12XBOX_FRAME_PIPELINE_TOKEN prevToken = D3D12XBOX_FRAME_PIPELINE_TOKEN_NULL;
     for (uint32_t i = 0; i < 4; ++i) {
         D3D12XBOX_FRAME_PIPELINE_TOKEN tok = D3D12XBOX_FRAME_PIPELINE_TOKEN_NULL;
-        SC_EXPECT(SUCCEEDED(devX->WaitFrameEventX(D3D12XBOX_FRAME_EVENT_ORIGIN, 1000, nullptr, &tok)));
+        SC_EXPECT(SUCCEEDED(devX->WaitFrameEventX(D3D12XBOX_FRAME_EVENT_ORIGIN, 1000, nullptr, D3D12XBOX_WAIT_FRAME_EVENT_FLAG_NONE, &tok)));
         SC_EXPECT(tok != D3D12XBOX_FRAME_PIPELINE_TOKEN_NULL);
         if (i > 0) {
             SC_EXPECT(tok == prevToken + 1);
@@ -1469,8 +1469,10 @@ bool TestD3D12XsPresentXSwapChainE2E() {
     ComPtr<ID3D12CommandQueueX> queueX;
     SC_EXPECT(SUCCEEDED(devX->CreateCommandQueueX(&qd, queueX.GetAddressOf())));
 
-    // 1. Invalid arguments must return E_INVALIDARG
-    SC_EXPECT(queueX->PresentX(0, nullptr, nullptr) == E_INVALIDARG);
+    // 1. PresentX(0, nullptr, nullptr) clears display planes (S_OK per Microsoft SimpleTriangle);
+    //    non-zero PlaneCount with null pPlaneParameters must return E_INVALIDARG.
+    SC_EXPECT(queueX->PresentX(0, nullptr, nullptr) == S_OK);
+    SC_EXPECT(queueX->PresentX(1, nullptr, nullptr) == E_INVALIDARG);
 
     // 2. Create 128x128 RGBA8 render target in PRESENT state and present 3 frames via DXGI SwapChain
     D3D12_HEAP_PROPERTIES defHeap{ D3D12_HEAP_TYPE_DEFAULT };
@@ -1515,8 +1517,9 @@ bool TestPresentXDescriptorAudit() {
     ID3D12CommandQueueX* queue = nullptr;
     SC_EXPECT(SUCCEEDED(dev->CreateCommandQueueX(&qDesc, &queue)) && queue != nullptr);
 
-    // Reject invalid PresentX arguments cleanly
-    SC_EXPECT(FAILED(queue->PresentX(0, nullptr, nullptr)));
+    // PresentX(0, nullptr, nullptr) is a valid clear-plane call; (1, nullptr, nullptr) must fail.
+    SC_EXPECT(SUCCEEDED(queue->PresentX(0, nullptr, nullptr)));
+    SC_EXPECT(FAILED(queue->PresentX(1, nullptr, nullptr)));
 
     ID3D12DescriptorHeap* rtvHeap = nullptr;
     D3D12_DESCRIPTOR_HEAP_DESC heapDesc{};
@@ -1866,5 +1869,81 @@ bool TestD3D12XsFeatureCapsQueryE2E() {
 
     // Invalid arg contract check
     SC_EXPECT(FAILED(devX->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS7, nullptr, sizeof(opts7))));
+    return true;
+}
+
+bool TestD3D12XsGdkSampleAlignmentE2E() {
+    using Microsoft::WRL::ComPtr;
+
+    D3D12XBOX_CREATE_DEVICE_PARAMETERS params{};
+    params.Version = 1;
+    ComPtr<ID3D12DeviceX> devX;
+    SC_EXPECT(SUCCEEDED(D3D12XboxCreateDevice(
+        nullptr, &params, IID_ID3D12DeviceX, reinterpret_cast<void**>(devX.GetAddressOf()))));
+
+    D3D12_COMMAND_QUEUE_DESC qd{};
+    qd.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+    ComPtr<ID3D12CommandQueueX> queueX;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommandQueueX(&qd, queueX.GetAddressOf())));
+
+    // 1. SimpleTriangle init/teardown clear-plane PresentX(0, nullptr, nullptr) + SuspendX/ResumeX
+    SC_EXPECT(queueX->PresentX(0, nullptr, nullptr) == S_OK);
+    SC_EXPECT(queueX->PresentX(1, nullptr, nullptr) == E_INVALIDARG);
+    queueX->SuspendX(0);
+    queueX->ResumeX();
+
+    // 2. Real 5-argument WaitFrameEventX + ScheduleFrameEventX
+    SC_EXPECT(SUCCEEDED(devX->SetFrameIntervalX(nullptr, D3D12XBOX_FRAME_INTERVAL_60_HZ, 1, D3D12XBOX_FRAME_INTERVAL_FLAG_NONE)));
+    SC_EXPECT(SUCCEEDED(devX->ScheduleFrameEventX(D3D12XBOX_FRAME_EVENT_ORIGIN, 0, nullptr, D3D12XBOX_SCHEDULE_FRAME_EVENT_FLAG_NONE)));
+    D3D12XBOX_FRAME_PIPELINE_TOKEN tok = D3D12XBOX_FRAME_PIPELINE_TOKEN_NULL;
+    SC_EXPECT(SUCCEEDED(devX->WaitFrameEventX(
+        D3D12XBOX_FRAME_EVENT_ORIGIN, 1000, nullptr, D3D12XBOX_WAIT_FRAME_EVENT_FLAG_NONE, &tok)));
+    SC_EXPECT(tok != D3D12XBOX_FRAME_PIPELINE_TOKEN_NULL);
+
+    // 3. Console-only upper-16-bit D3D12XBOX_RESOURCE_FLAG_* bits must be stripped cleanly
+    constexpr D3D12_RESOURCE_FLAGS kSyntheticXboxFlags =
+        static_cast<D3D12_RESOURCE_FLAGS>(D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET | 0x10000000u | 0x00040000u);
+    D3D12_RESOURCE_DESC rtDesc{};
+    rtDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    rtDesc.Width = 64; rtDesc.Height = 64; rtDesc.DepthOrArraySize = 1; rtDesc.MipLevels = 1;
+    rtDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM; rtDesc.SampleDesc.Count = 1;
+    rtDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+    rtDesc.Flags = kSyntheticXboxFlags;
+
+    const D3D12_RESOURCE_ALLOCATION_INFO allocInfo = devX->GetResourceAllocationInfo(0, 1, &rtDesc);
+    SC_EXPECT(allocInfo.SizeInBytes > 0 && allocInfo.SizeInBytes != UINT64_MAX);
+
+    D3D12_HEAP_PROPERTIES defHeap{ D3D12_HEAP_TYPE_DEFAULT };
+    D3D12_CLEAR_VALUE clearVal{};
+    clearVal.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    ComPtr<ID3D12Resource> rtTex;
+    SC_EXPECT(SUCCEEDED(devX->CreateCommittedResource(
+        &defHeap, D3D12_HEAP_FLAG_NONE, &rtDesc,
+        D3D12_RESOURCE_STATE_RENDER_TARGET, &clearVal, IID_PPV_ARGS(&rtTex))));
+    SC_EXPECT(rtTex != nullptr);
+
+    // 4. Desktop GDK libHttpClient.dll alias + HCHttpCallRequestSetRequestBodyString export
+    HMODULE hcMod = LoadLibraryW(L"libHttpClient.dll");
+    SC_EXPECT(hcMod != nullptr);
+    using PFN_HCInit = HRESULT(WINAPI*)(void*);
+    using PFN_HCCleanup = void(WINAPI*)(void);
+    using PFN_HCCreate = HRESULT(WINAPI*)(void**);
+    using PFN_HCClose = HRESULT(WINAPI*)(void*);
+    using PFN_HCSetBodyStr = HRESULT(WINAPI*)(void*, const char*);
+    auto pInit = reinterpret_cast<PFN_HCInit>(GetProcAddress(hcMod, "HCInitialize"));
+    auto pClean = reinterpret_cast<PFN_HCCleanup>(GetProcAddress(hcMod, "HCCleanup"));
+    auto pCreate = reinterpret_cast<PFN_HCCreate>(GetProcAddress(hcMod, "HCHttpCallCreate"));
+    auto pClose = reinterpret_cast<PFN_HCClose>(GetProcAddress(hcMod, "HCHttpCallCloseHandle"));
+    auto pSetBodyStr = reinterpret_cast<PFN_HCSetBodyStr>(GetProcAddress(hcMod, "HCHttpCallRequestSetRequestBodyString"));
+    SC_EXPECT(pInit && pClean && pCreate && pClose && pSetBodyStr);
+    SC_EXPECT(SUCCEEDED(pInit(nullptr)));
+    void* call = nullptr;
+    SC_EXPECT(SUCCEEDED(pCreate(&call)) && call != nullptr);
+    SC_EXPECT(SUCCEEDED(pSetBodyStr(call, "{\"sample\":\"SimpleTriangleDesktop\"}")));
+    SC_EXPECT(pSetBodyStr(call, nullptr) == E_INVALIDARG);
+    SC_EXPECT(SUCCEEDED(pClose(call)));
+    pClean();
+    FreeLibrary(hcMod);
+
     return true;
 }

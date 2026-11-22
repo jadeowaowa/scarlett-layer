@@ -109,6 +109,16 @@ HRESULT WINAPI HCHttpCallRequestSetRequestBodyBytes(
     return S_OK;
 }
 
+HRESULT WINAPI HCHttpCallRequestSetRequestBodyString(
+    HCCallHandle call, const char* requestBodyString) {
+    if (!call || !requestBodyString) return E_INVALIDARG;
+    const size_t len = std::strlen(requestBodyString);
+    return HCHttpCallRequestSetRequestBodyBytes(
+        call,
+        reinterpret_cast<const uint8_t*>(requestBodyString),
+        static_cast<uint32_t>(len));
+}
+
 HRESULT WINAPI HCHttpCallRequestSetTimeout(HCCallHandle call, uint32_t timeoutInSeconds) {
     if (!call) return E_INVALIDARG;
     std::lock_guard<std::mutex> lock(g_hcMtx);

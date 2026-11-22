@@ -15,9 +15,23 @@
 using D3D12XBOX_FRAME_PIPELINE_TOKEN = uint64_t;
 inline constexpr D3D12XBOX_FRAME_PIPELINE_TOKEN D3D12XBOX_FRAME_PIPELINE_TOKEN_NULL = 0;
 
+inline constexpr uint32_t D3D12XBOX_FRAME_INTERVAL_60_HZ = 16667u;
+
 enum D3D12XBOX_FRAME_INTERVAL_FLAGS : uint32_t {
     D3D12XBOX_FRAME_INTERVAL_FLAG_NONE = 0
 };
+
+enum D3D12XBOX_SCHEDULE_FRAME_EVENT_FLAGS : uint32_t {
+    D3D12XBOX_SCHEDULE_FRAME_EVENT_FLAG_NONE = 0
+};
+
+enum D3D12XBOX_WAIT_FRAME_EVENT_FLAGS : uint32_t {
+    D3D12XBOX_WAIT_FRAME_EVENT_FLAG_NONE = 0
+};
+
+// Console-only D3D12XBOX_RESOURCE_FLAG_* bits live in the upper 16 bits of D3D12_RESOURCE_FLAGS
+// (e.g. ALLOW_DCC, ALLOW_AUTOMATIC_GAMEDVR_TONE_MAP, FORCE_TEXTURE_COMPATIBILITY).
+inline constexpr uint32_t D3D12XBOX_RESOURCE_FLAG_MASK = 0xFFFF0000u;
 
 enum D3D12XBOX_FRAME_EVENT : uint32_t {
     D3D12XBOX_FRAME_EVENT_ORIGIN  = 0,
@@ -64,6 +78,8 @@ struct ID3D12CommandQueueX : public IUnknown {
         UINT PlaneCount,
         const D3D12XBOX_PRESENT_PLANE_PARAMETERS* pPlaneParameters,
         const D3D12XBOX_PRESENT_PARAMETERS* pPresentParameters) = 0;
+    virtual void    STDMETHODCALLTYPE SuspendX(UINT32 Flags) = 0;
+    virtual void    STDMETHODCALLTYPE ResumeX() = 0;
 };
 
 struct ID3D12GraphicsCommandListX : public IUnknown {
@@ -228,6 +244,7 @@ struct ID3D12DeviceX : public IUnknown {
         D3D12XBOX_FRAME_EVENT Event,
         DWORD TimeoutInMilliseconds,
         HANDLE hEvent,
+        uint32_t Flags,
         D3D12XBOX_FRAME_PIPELINE_TOKEN* pToken) = 0;
     virtual HRESULT STDMETHODCALLTYPE CheckFeatureSupport(
         D3D12_FEATURE Feature,

@@ -22,6 +22,10 @@ inline bool IsStrictD3D12() {
     return IsFlagEnabled("SCARLETT_STRICT_D3D12");
 }
 
+inline bool UseWarp() {
+    return IsFlagEnabled("SCARLETT_USE_WARP");
+}
+
 inline std::optional<std::filesystem::path> GetShimDir() {
     DWORD len = GetEnvironmentVariableW(L"SCARLETT_SHIM_DIR", nullptr, 0);
     if (len <= 1) {

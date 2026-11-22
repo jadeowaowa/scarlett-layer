@@ -2,6 +2,7 @@
 #include "pe_patcher.hpp"
 #include "pe_inspector.hpp"
 #include "game_config.hpp"
+#include "common/ansi_path.hpp"
 #include "common/xvd_container.hpp"
 
 #include <cstdio>
@@ -115,6 +116,71 @@ int wmain(int argc, wchar_t* argv[]) {
         std::printf("[package] Executable: %s (exists=%s)\n",
                     pkg.executablePath.string().c_str(),
                     std::filesystem::exists(pkg.executablePath) ? "yes" : "no");
+        return 0;
+    }
+
+    if (argc >= 3 && std::wstring_view(argv[1]) == L"--audit-dir") {
+        const std::filesystem::path rootDir = std::filesystem::absolute(argv[2]);
+        std::error_code ec;
+        if (!std::filesystem::exists(rootDir, ec) || !std::filesystem::is_directory(rootDir, ec)) {
+            std::fprintf(stderr, "[audit-dir] ERROR: directory not found: %s\n",
+                         sc::path::WideToUtf8(rootDir.wstring()).c_str());
+            return 1;
+        }
+
+        size_t cfgCount = 0, peCount = 0, xvdEncRejected = 0, xvdUnencOk = 0, xvdErr = 0;
+        std::filesystem::recursive_directory_iterator it(
+            rootDir, std::filesystem::directory_options::skip_permission_denied, ec);
+        std::filesystem::recursive_directory_iterator end;
+        for (; it != end; it.increment(ec)) {
+            if (ec) {
+                ec.clear();
+                continue;
+            }
+            if (!it->is_regular_file(ec)) {
+                continue;
+            }
+            const auto& p = it->path();
+            const std::string fname = sc::loader::detail::ToLowerAscii(sc::path::WideToUtf8(p.filename().wstring()));
+            const std::string ext   = sc::loader::detail::ToLowerAscii(sc::path::WideToUtf8(p.extension().wstring()));
+            const std::string utf8p = sc::path::WideToUtf8(p.wstring());
+
+            if (fname == "microsoftgame.config") {
+                const auto pkg = sc::loader::ParseGameConfig(p.parent_path());
+                ++cfgCount;
+                std::printf("[audit][config] %s -> valid=%s id=%s exe=%s\n",
+                            utf8p.c_str(), pkg.valid ? "yes" : "no",
+                            pkg.identityName.c_str(), pkg.executableName.c_str());
+            } else if (ext == ".xvd" || ext == ".xvc") {
+                sc::vfs::XvdContainer xvd;
+                std::string err;
+                if (xvd.Open(p, err)) {
+                    ++xvdUnencOk;
+                    std::printf("[audit][xvd]    %s -> OK-UNENCRYPTED (flags=0x%X ver=%u)\n",
+                                utf8p.c_str(), xvd.Header().volumeFlags, xvd.Header().formatVersion);
+                } else if (err.find("Encrypted") != std::string::npos) {
+                    ++xvdEncRejected;
+                    std::printf("[audit][xvd]    %s -> REJECTED-ENCRYPTED (%s)\n",
+                                utf8p.c_str(), err.c_str());
+                } else {
+                    ++xvdErr;
+                    std::printf("[audit][xvd]    %s -> ERROR (%s)\n", utf8p.c_str(), err.c_str());
+                }
+            } else if (ext == ".exe" || ext == ".dll") {
+                const auto cov = sc::loader::InspectPeSymbolCoverage(p, shimDir);
+                if (cov.audit.validPe64) {
+                    ++peCount;
+                    std::printf("[audit][pe64]   %s -> shimmed=%zu missing=%zu impl=%zu auto_stub=%zu\n",
+                                utf8p.c_str(),
+                                cov.audit.shimmedImports.size(),
+                                cov.audit.missingImports.size(),
+                                cov.implementedSymbols.size(),
+                                cov.autoStubSymbols.size());
+                }
+            }
+        }
+        std::printf("[audit-dir] Summary: configs=%zu pe64=%zu xvd_encrypted_rejected=%zu xvd_unencrypted_ok=%zu xvd_errors=%zu\n",
+                    cfgCount, peCount, xvdEncRejected, xvdUnencOk, xvdErr);
         return 0;
     }
 
