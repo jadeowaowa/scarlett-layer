@@ -56,9 +56,9 @@
 - `HRESULT WINAPI ApuFree(void* virtualAddress)`
 
 ## `libhttpclient.dll`
-**Files:** `src/shims/libhttpclient/libhttpclient.cpp` (220 L), `src/shims/libhttpclient/libhttpclient.def` (21 L), `src/shims/libhttpclient/libhttpclient.hpp` (33 L)
+**Files:** `src/shims/libhttpclient/libhttpclient.cpp` (246 L), `src/shims/libhttpclient/libhttpclient.def` (22 L), `src/shims/libhttpclient/libhttpclient.hpp` (34 L)
 
-**DLL Exports (`.def`):** `HCInitialize`, `HCCleanup`, `HCIsInitialized`, `HCGetLibVersion`, `HCHttpCallCreate`, `HCHttpCallCloseHandle`, `HCHttpCallRequestSetUrl`, `HCHttpCallRequestSetHeader`, `HCHttpCallRequestSetRequestBodyBytes`, `HCHttpCallRequestSetTimeout`, `HCHttpCallPerformAsync`, `HCHttpCallResponseGetStatusCode`, `HCHttpCallResponseGetNetworkErrorCode`, `HCHttpCallResponseGetResponseString`, `HCHttpCallResponseGetResponseBodyBytesSize`, `HCHttpCallResponseGetResponseBodyBytes`, `HCHttpCallResponseGetHeader`, `HCHttpCallRegisterMock`, `HCHttpCallClearMocks`
+**DLL Exports (`.def`):** `HCInitialize`, `HCCleanup`, `HCIsInitialized`, `HCGetLibVersion`, `HCHttpCallCreate`, `HCHttpCallCloseHandle`, `HCHttpCallRequestSetUrl`, `HCHttpCallRequestSetHeader`, `HCHttpCallRequestSetRequestBodyBytes`, `HCHttpCallRequestSetRequestBodyString`, `HCHttpCallRequestSetTimeout`, `HCHttpCallPerformAsync`, `HCHttpCallResponseGetStatusCode`, `HCHttpCallResponseGetNetworkErrorCode`, `HCHttpCallResponseGetResponseString`, `HCHttpCallResponseGetResponseBodyBytesSize`, `HCHttpCallResponseGetResponseBodyBytes`, `HCHttpCallResponseGetHeader`, `HCHttpCallRegisterMock`, `HCHttpCallClearMocks`
 
 **C Entrypoints:**
 - `HRESULT WINAPI HCInitialize(void* args)`
@@ -70,6 +70,7 @@
 - `HRESULT WINAPI HCHttpCallRequestSetUrl(HCCallHandle call, const char* method, const char* url)`
 - `HRESULT WINAPI HCHttpCallRequestSetHeader(HCCallHandle call, const char* name, const char* value, uint32_t allowTracing)`
 - `HRESULT WINAPI HCHttpCallRequestSetRequestBodyBytes(HCCallHandle call, const uint8_t* bodyBytes, uint32_t bodySize)`
+- `HRESULT WINAPI HCHttpCallRequestSetRequestBodyString(HCCallHandle call, const char* requestBodyString)`
 - `HRESULT WINAPI HCHttpCallRequestSetTimeout(HCCallHandle call, uint32_t timeoutInSeconds)`
 - `HRESULT WINAPI HCHttpCallPerformAsync(HCCallHandle call, void* asyncBlock)`
 - `HRESULT WINAPI HCHttpCallResponseGetStatusCode(HCCallHandle call, uint32_t* statusCode)`

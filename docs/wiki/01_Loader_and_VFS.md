@@ -1,16 +1,16 @@
 # 01 — Loader, Runtime IAT Hooking & Common Utilities
 
 ## Source Files
-- `CMakeLists.txt` (258 lines)
+- `CMakeLists.txt` (276 lines)
 - `src/common/ansi_path.hpp` (99 lines)
 - `src/common/codecs.hpp` (343 lines)
-- `src/common/config.hpp` (69 lines)
+- `src/common/config.hpp` (73 lines)
 - `src/common/stub.hpp` (43 lines)
 - `src/common/vfs.hpp` (173 lines)
 - `src/common/xvd_container.hpp` (202 lines)
 - `src/loader/auto_stub.hpp` (267 lines)
 - `src/loader/game_config.hpp` (172 lines)
-- `src/loader/main.cpp` (208 lines)
+- `src/loader/main.cpp` (274 lines)
 - `src/loader/pe_inspector.hpp` (451 lines)
 - `src/loader/pe_patcher.cpp` (438 lines)
 - `src/loader/pe_patcher.hpp` (19 lines)
