@@ -1,11 +1,14 @@
 #pragma once
 
+#include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace sc::loader {
 
@@ -28,6 +31,8 @@ struct GameConfig {
 
 namespace detail {
 
+inline constexpr uint64_t kMaxGameConfigBytes = 4u * 1024u * 1024u; // 4 MiB safety cap
+
 inline std::string Trim(std::string_view sv) {
     size_t start = 0;
     while (start < sv.size() && std::isspace(static_cast<unsigned char>(sv[start]))) {
@@ -38,6 +43,94 @@ inline std::string Trim(std::string_view sv) {
         --end;
     }
     return std::string(sv.substr(start, end - start));
+}
+
+inline std::wstring ToLowerAsciiWide(std::wstring s) {
+    for (wchar_t& ch : s) {
+        if (ch >= L'A' && ch <= L'Z') {
+            ch = static_cast<wchar_t>(ch - L'A' + L'a');
+        }
+    }
+    return s;
+}
+
+inline std::vector<std::wstring> SplitPathComponents(const std::filesystem::path& p) {
+    std::vector<std::wstring> parts;
+    for (const auto& comp : p) {
+        std::wstring s = comp.wstring();
+        if (s.empty() || s == L".") {
+            continue;
+        }
+        parts.push_back(ToLowerAsciiWide(std::move(s)));
+    }
+    return parts;
+}
+
+inline bool ResolveSafePackageExecutable(
+    const std::filesystem::path& packageRoot,
+    std::string_view exeName,
+    std::filesystem::path& outResolved,
+    std::string& outError) {
+    if (exeName.empty() || exeName.size() > 512u) {
+        outError = "invalid <Executable Name> length";
+        return false;
+    }
+    if (exeName.front() == '/' || exeName.front() == '\\') {
+        outError = "executable path must be relative to package root";
+        return false;
+    }
+    for (char ch : exeName) {
+        const auto uch = static_cast<unsigned char>(ch);
+        if (uch < 0x20u || ch == ':') {
+            outError = "executable path contains disallowed character";
+            return false;
+        }
+    }
+
+    const std::filesystem::path relPath(exeName);
+    if (relPath.is_absolute() || relPath.has_root_name() || relPath.has_root_directory()) {
+        outError = "executable path must not be absolute or rooted";
+        return false;
+    }
+
+    for (const auto& comp : relPath) {
+        if (comp == L"..") {
+            outError = "executable path must not contain parent traversal ('..')";
+            return false;
+        }
+    }
+
+    const std::filesystem::path normRel = relPath.lexically_normal();
+    if (normRel.empty() || normRel == L"." || normRel.is_absolute() ||
+        normRel.has_root_name() || normRel.has_root_directory()) {
+        outError = "normalized executable path is invalid";
+        return false;
+    }
+    for (const auto& comp : normRel) {
+        if (comp == L"..") {
+            outError = "executable path escapes package root";
+            return false;
+        }
+    }
+
+    const std::filesystem::path normRoot = packageRoot.lexically_normal();
+    const std::filesystem::path normCandidate = (normRoot / normRel).lexically_normal();
+
+    const auto rootParts = SplitPathComponents(normRoot);
+    const auto candParts = SplitPathComponents(normCandidate);
+    if (candParts.size() <= rootParts.size()) {
+        outError = "executable path escapes package root";
+        return false;
+    }
+    for (size_t i = 0; i < rootParts.size(); ++i) {
+        if (candParts[i] != rootParts[i]) {
+            outError = "executable path escapes package root";
+            return false;
+        }
+    }
+
+    outResolved = normCandidate;
+    return true;
 }
 
 inline std::string ExtractTagText(const std::string& xml, std::string_view tagName) {
@@ -129,8 +222,15 @@ inline GameConfig ParseGameConfig(const std::filesystem::path& pathOrDir) {
         cfg.packageRoot = absInput.parent_path();
     }
 
-    if (!std::filesystem::exists(cfg.configPath, ec)) {
+    if (!std::filesystem::exists(cfg.configPath, ec) ||
+        !std::filesystem::is_regular_file(cfg.configPath, ec)) {
         cfg.error = "MicrosoftGame.Config not found";
+        return cfg;
+    }
+
+    const uint64_t cfgSize = std::filesystem::file_size(cfg.configPath, ec);
+    if (ec || cfgSize == 0u || cfgSize > detail::kMaxGameConfigBytes) {
+        cfg.error = "MicrosoftGame.Config size out of bounds";
         return cfg;
     }
 
@@ -164,7 +264,12 @@ inline GameConfig ParseGameConfig(const std::filesystem::path& pathOrDir) {
         return cfg;
     }
 
-    cfg.executablePath = cfg.packageRoot / cfg.executableName;
+    std::filesystem::path resolvedExe;
+    if (!detail::ResolveSafePackageExecutable(cfg.packageRoot, cfg.executableName, resolvedExe, cfg.error)) {
+        return cfg;
+    }
+
+    cfg.executablePath = std::move(resolvedExe);
     cfg.valid = true;
     return cfg;
 }

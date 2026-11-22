@@ -11,10 +11,13 @@ This document separates behaviors backed by public documentation or open-source 
 | Encryption check | `(volumeFlags & 0x2u) == 0u` | Sourced | `emoose/xvdtool` (`XVDFile.cs`): `IsEncrypted => (VolumeFlags & EncryptionDisabled) == 0`. Fixed in Sprint 66 (was previously inverted as `(volumeFlags & 0x1u) != 0`). Encrypted images are rejected unconditionally. |
 | `FormatVersion` (`uint32_t`) | `0x20C` | Sourced | `emoose/xvdtool` (`XVDStructs.cs`); observed `3` on retail Series X\|S `.xvc` |
 | `DriveSize` (`uint64_t`) | `0x218` | Sourced | `emoose/xvdtool` (`XVDStructs.cs`); bounds-checked against file size in `XvdContainer::Open` |
-| `ContentType` (`uint32_t`) | Currently read at `0x240` | **ASSUMED** | Real `emoose/xvdtool` offset is `0x284` (observed `1` on retail `.xvc`). Current `0x240` lies inside `TopHashBlockHash` in retail headers and is used only by `BuildSyntheticUnencryptedXvd` tests. |
-| `EmbeddedXVDLength` (`uint32_t`) | Currently read at `0x244` | **ASSUMED** | Real `emoose/xvdtool` offset is `0x288`. Current `0x244` is synthetic test layout only. |
-| `UserDataOffset` (`uint64_t`) | Currently read at `0x250` | **ASSUMED** | Real XVD computes user-data offset from header/hash-table/embedded-XVD geometry rather than storing a `uint64_t` at `0x250`. |
-| `UserDataLength` (`uint64_t`) | Currently read at `0x258` | **ASSUMED** | Real `emoose/xvdtool` stores `UserDataLength` as `uint32_t` at `0x28C`. Current `0x258` is synthetic test layout only. |
+| Header total size (`0x3000`) | `0x000..0x2FFF` (12 KiB) | Sourced | `emoose/xvdtool` (`XVDFile.cs`): `0x200` RSA signature + `0x2E00` XVD header (`3` pages of `0x1000`). |
+| `Type` (`uint32_t`) | `0x280` | Sourced | `emoose/xvdtool` (`XVDStructs.cs`): `0` = Fixed, `1` = Dynamic. |
+| `ContentType` (`uint32_t`) | `0x284` | Sourced | `emoose/xvdtool` (`XVDStructs.cs`); observed `1` on retail `.xvc`. Migrated off synthetic `0x240`. |
+| `EmbeddedXVDLength` (`uint32_t`) | `0x288` | Sourced | `emoose/xvdtool` (`XVDStructs.cs`). Migrated off synthetic `0x244`. |
+| `UserDataLength` (`uint32_t`) | `0x28C` | Sourced | `emoose/xvdtool` (`XVDStructs.cs`). Migrated off synthetic `0x258`. |
+| `MutableDataPageCount` (`uint8_t`) | `0x470` (`0x200 + 0x270`) | Sourced | `emoose/xvdtool` (`XVDStructs.cs`); contributes `MutableDataPageCount * 0x1000` bytes before `HashTreeOffset`. |
+| `UserDataOffset` (computed) | `0x3000` + aligned embedded XVD + mutable data + hash tree | Sourced | Computed from `emoose/xvdtool` (`XVDFile.cs`) section geometry (`0xAA` hash entries/page when `DataIntegrityDisabled` is clear). |
 
 ## 2. Project-Defined & Modeled Formats
 
@@ -31,7 +34,6 @@ This document separates behaviors backed by public documentation or open-source 
 ## 3. Verification Boundaries
 
 - **TODO(jade):** Audit `src/loader/pe_patcher.cpp` and `src/loader/scarlett_hook.cpp` with an independent reviewer (suspended-process APC/IAT patching).
-- **TODO(jade):** Migrate `XvdContainer` header parsing from the `ASSUMED` `0x240..0x258` synthetic layout to the real `emoose/xvdtool` `0x284`/`0x288`/`0x28C` offsets when unencrypted retail XVD metadata support is scheduled.
 - **TODO(jade):** Retitle the existing GitHub `v1.0.0` release ("Golden Master") to a `v0.x` pre-release to match the experimental status.
 
 ## 4. Microsoft Public GDK 261000 & `Xbox-GDK-Samples` Findings (Sprint 67)
