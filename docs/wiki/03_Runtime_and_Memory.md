@@ -1,4 +1,4 @@
-# 03 â€” Runtime (`xgameruntime`), Kernel (`kernelx`), Memory (`xmem`), Input & PIX
+# 03 — Runtime (`xgameruntime`), Kernel (`kernelx`), Memory (`xmem`), Input & PIX
 
 ## `xgameruntime.dll`
 **Files:** `src/shims/xgameruntime/game_save.cpp` (485 L), `src/shims/xgameruntime/gdk_types.hpp` (101 L), `src/shims/xgameruntime/runtime_internal.hpp` (87 L), `src/shims/xgameruntime/task_queue.cpp` (191 L), `src/shims/xgameruntime/task_queue.hpp` (13 L), `src/shims/xgameruntime/xgameruntime.cpp` (173 L), `src/shims/xgameruntime/xgameruntime.def` (29 L)

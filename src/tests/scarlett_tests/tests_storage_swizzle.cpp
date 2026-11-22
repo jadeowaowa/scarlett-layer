@@ -1522,3 +1522,76 @@ bool TestXMemMin16ByteAlignment() {
     XMemFreeDefault(p4, attr4B);
     return true;
 }
+
+bool TestVfsPathEscapeAndLongPaths() {
+    bool isVirt = false;
+
+    // 1. Direct parent-directory escapes must be rejected (empty path)
+    auto esc1 = sc::vfs::TranslatePath(L"G:\\..\\..\\x", &isVirt);
+    SC_EXPECT(isVirt);
+    SC_EXPECT(esc1.empty());
+
+    auto esc2 = sc::vfs::TranslatePath(L"T:\\..\\save_temp\\x", &isVirt);
+    SC_EXPECT(isVirt);
+    SC_EXPECT(esc2.empty());
+
+    // 2. Mixed slash traversal escaping root must be rejected
+    auto esc3 = sc::vfs::TranslatePath(L"G:/sub\\..\\../escape", &isVirt);
+    SC_EXPECT(isVirt);
+    SC_EXPECT(esc3.empty());
+
+    // 3. Embedded drive prefix / colon injection must be rejected
+    auto esc4 = sc::vfs::TranslatePath(L"G:\\C:\\Windows\\System32\\cmd.exe", &isVirt);
+    SC_EXPECT(isVirt);
+    SC_EXPECT(esc4.empty());
+
+    // 4. Dot-only segment (> 2 dots) must be rejected
+    auto esc5 = sc::vfs::TranslatePath(L"G:\\...\\escape", &isVirt);
+    SC_EXPECT(isVirt);
+    SC_EXPECT(esc5.empty());
+
+    // 5. Trailing dots on path components must be stripped cleanly while staying inside root
+    auto dotPath = sc::vfs::TranslatePath(L"G:\\dir..\\file.", &isVirt);
+    SC_EXPECT(isVirt);
+    SC_EXPECT(!dotPath.empty());
+    SC_EXPECT(dotPath.filename() == L"file");
+    SC_EXPECT(dotPath.parent_path().filename() == L"dir");
+
+    // 6. Paths longer than MAX_PATH (> 260 chars) must translate without truncation
+    std::wstring longVirt = L"G:\\";
+    for (int i = 0; i < 10; ++i) {
+        longVirt += L"segment_0123456789_abcdefghij_";
+        longVirt += std::to_wstring(i);
+        longVirt += L"\\";
+    }
+    longVirt += L"deep_asset.bin";
+    auto longHost = sc::vfs::TranslatePath(longVirt.c_str(), &isVirt);
+    SC_EXPECT(isVirt);
+    SC_EXPECT(!longHost.empty());
+    SC_EXPECT(longHost.wstring().size() > MAX_PATH);
+    SC_EXPECT(longHost.filename() == L"deep_asset.bin");
+
+    // 7. Environment variable override longer than MAX_PATH via ReadEnvPath / GetEnvPath
+    const auto savedScratch = sc::config::GetEnvPath(L"SCARLETT_SCRATCH_DIR");
+    struct RestoreEnv {
+        std::optional<std::filesystem::path> orig;
+        ~RestoreEnv() {
+            SetEnvironmentVariableW(L"SCARLETT_SCRATCH_DIR", orig ? orig->c_str() : nullptr);
+        }
+    } guard{ savedScratch };
+
+    std::wstring longRoot = L"C:\\scarlett_long_root";
+    for (int i = 0; i < 9; ++i) {
+        longRoot += L"\\long_env_dir_0123456789_abcdef_";
+        longRoot += std::to_wstring(i);
+    }
+    SC_EXPECT(longRoot.size() > MAX_PATH);
+    SC_EXPECT(SetEnvironmentVariableW(L"SCARLETT_SCRATCH_DIR", longRoot.c_str()) != FALSE);
+
+    auto longEnvPath = sc::vfs::TranslatePath(L"T:\\sub\\probe.bin", &isVirt);
+    SC_EXPECT(isVirt);
+    SC_EXPECT(!longEnvPath.empty());
+    SC_EXPECT(longEnvPath.wstring().size() > longRoot.size());
+    SC_EXPECT(longEnvPath.filename() == L"probe.bin");
+    return true;
+}

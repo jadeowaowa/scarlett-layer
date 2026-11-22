@@ -1,4 +1,4 @@
-# 04 â€” Velocity Storage (`dstorage_xs`) & Audio Proxy (`xaudio2_9`)
+# 04 — Velocity Storage (`dstorage_xs`) & Audio Proxy (`xaudio2_9`)
 
 ## `dstorage_xs.dll`
 **Files:** `src/shims/dstorage_xs/dstorage_xs.cpp` (1269 L), `src/shims/dstorage_xs/dstorage_xs.def` (4 L), `src/shims/dstorage_xs/dstorage_xs.hpp` (181 L)
@@ -42,3 +42,67 @@
 **Files:** `src/shims/xaudio2_9/xaudio2_9.cpp` (660 L), `src/shims/xaudio2_9/xaudio2_9.def` (4 L)
 
 **DLL Exports (`.def`):** `XAudio2Create = ScarlettXAudio2Create @1`, `XAudio2CreateWithVersionInfo = ScarlettXAudio2CreateWithVersionInfo`
+
+## `acphal.dll`
+**Files:** `src/shims/acphal/acphal.cpp` (105 L), `src/shims/acphal/acphal.def` (7 L), `src/shims/acphal/acphal.hpp` (33 L)
+
+**DLL Exports (`.def`):** `AcpHalCreate`, `AcpHalAllocateShapeContexts`, `AcpHalReleaseShapeContexts`, `ApuAlloc`, `ApuFree`
+
+**C Entrypoints:**
+- `HRESULT WINAPI AcpHalCreate(void** acpHal)`
+- `HRESULT WINAPI AcpHalAllocateShapeContexts(ACP_SHAPE_CONTEXT_COUNTS* ctx)`
+- `HRESULT WINAPI AcpHalReleaseShapeContexts(void)`
+- `HRESULT WINAPI ApuAlloc(void** virtualAddress, void* physicalAddress, uint32_t sizeInBytes, uint32_t alignmentInBytes)`
+- `HRESULT WINAPI ApuFree(void* virtualAddress)`
+
+## `libhttpclient.dll`
+**Files:** `src/shims/libhttpclient/libhttpclient.cpp` (220 L), `src/shims/libhttpclient/libhttpclient.def` (21 L), `src/shims/libhttpclient/libhttpclient.hpp` (33 L)
+
+**DLL Exports (`.def`):** `HCInitialize`, `HCCleanup`, `HCIsInitialized`, `HCGetLibVersion`, `HCHttpCallCreate`, `HCHttpCallCloseHandle`, `HCHttpCallRequestSetUrl`, `HCHttpCallRequestSetHeader`, `HCHttpCallRequestSetRequestBodyBytes`, `HCHttpCallRequestSetTimeout`, `HCHttpCallPerformAsync`, `HCHttpCallResponseGetStatusCode`, `HCHttpCallResponseGetNetworkErrorCode`, `HCHttpCallResponseGetResponseString`, `HCHttpCallResponseGetResponseBodyBytesSize`, `HCHttpCallResponseGetResponseBodyBytes`, `HCHttpCallResponseGetHeader`, `HCHttpCallRegisterMock`, `HCHttpCallClearMocks`
+
+**C Entrypoints:**
+- `HRESULT WINAPI HCInitialize(void* args)`
+- `void WINAPI HCCleanup(void)`
+- `uint32_t WINAPI HCIsInitialized(void)`
+- `HRESULT WINAPI HCGetLibVersion(const char** version)`
+- `HRESULT WINAPI HCHttpCallCreate(HCCallHandle* call)`
+- `HRESULT WINAPI HCHttpCallCloseHandle(HCCallHandle call)`
+- `HRESULT WINAPI HCHttpCallRequestSetUrl(HCCallHandle call, const char* method, const char* url)`
+- `HRESULT WINAPI HCHttpCallRequestSetHeader(HCCallHandle call, const char* name, const char* value, uint32_t allowTracing)`
+- `HRESULT WINAPI HCHttpCallRequestSetRequestBodyBytes(HCCallHandle call, const uint8_t* bodyBytes, uint32_t bodySize)`
+- `HRESULT WINAPI HCHttpCallRequestSetTimeout(HCCallHandle call, uint32_t timeoutInSeconds)`
+- `HRESULT WINAPI HCHttpCallPerformAsync(HCCallHandle call, void* asyncBlock)`
+- `HRESULT WINAPI HCHttpCallResponseGetStatusCode(HCCallHandle call, uint32_t* statusCode)`
+- `HRESULT WINAPI HCHttpCallResponseGetNetworkErrorCode(HCCallHandle call, HRESULT* networkErrorCode, uint32_t* platformErrorCode)`
+- `HRESULT WINAPI HCHttpCallResponseGetResponseString(HCCallHandle call, const char** responseString)`
+- `HRESULT WINAPI HCHttpCallResponseGetResponseBodyBytesSize(HCCallHandle call, size_t* bufferSize)`
+- `HRESULT WINAPI HCHttpCallResponseGetResponseBodyBytes(HCCallHandle call, size_t bufferSize, uint8_t* buffer, size_t* bufferUsed)`
+- `HRESULT WINAPI HCHttpCallResponseGetHeader(HCCallHandle call, const char* headerName, const char** headerValue)`
+- `HRESULT WINAPI HCHttpCallRegisterMock(const char* method, const char* urlPrefix, uint32_t statusCode, const char* responseBody)`
+- `void WINAPI HCHttpCallClearMocks(void)`
+
+## `xcurl.dll`
+**Files:** `src/shims/xcurl/xcurl.cpp` (206 L), `src/shims/xcurl/xcurl.def` (16 L), `src/shims/xcurl/xcurl.hpp` (51 L)
+
+**DLL Exports (`.def`):** `curl_global_init`, `curl_global_cleanup`, `curl_easy_init`, `curl_easy_cleanup`, `curl_easy_reset`, `curl_easy_setopt`, `curl_easy_perform`, `curl_easy_getinfo`, `curl_easy_strerror`, `curl_slist_append`, `curl_slist_free_all`, `curl_version`, `xcurl_register_mock_response`, `xcurl_clear_mocks`
+
+**C Entrypoints:**
+- `CURLcode curl_global_init(int64_t flags)`
+- `void curl_global_cleanup(void)`
+- `CURL* curl_easy_init(void)`
+- `void curl_easy_cleanup(CURL* curl)`
+- `void curl_easy_reset(CURL* curl)`
+- `CURLcode curl_easy_setopt(CURL* curl, CURLoption option, ...)`
+- `CURLcode curl_easy_perform(CURL* curl)`
+- `CURLcode curl_easy_getinfo(CURL* curl, CURLINFO info, ...)`
+- `const char* curl_easy_strerror(CURLcode code)`
+- `curl_slist* curl_slist_append(curl_slist* list, const char* string)`
+- `void curl_slist_free_all(curl_slist* list)`
+- `const char* curl_version(void)`
+- `CURLcode xcurl_register_mock_response(const char* urlPrefix, long statusCode, const char* body)`
+- `void xcurl_clear_mocks(void)`
+
+**Key Enums:**
+- `CURLcode`: CURLE_OK = 0, CURLE_UNSUPPORTED_PROTOCOL = 1, CURLE_COULDNT_CONNECT = 7, CURLE_OUT_OF_MEMORY = 27, CURLE_BAD_FUNCTION_ARGUMENT = 43
+- `CURLoption`: CURLOPT_WRITEDATA = 10001, CURLOPT_URL = 10002, CURLOPT_HTTPHEADER = 10023, CURLOPT_WRITEFUNCTION = 20011, CURLOPT_TIMEOUT = 13
+- `CURLINFO`: CURLINFO_RESPONSE_CODE = 0x200002

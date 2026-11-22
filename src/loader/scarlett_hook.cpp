@@ -1,4 +1,5 @@
 #include "auto_stub.hpp"
+#include "common/ansi_path.hpp"
 #include "common/config.hpp"
 #include "common/stub.hpp"
 
@@ -12,7 +13,6 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 namespace {
@@ -25,55 +25,108 @@ using GetModuleHandleAFn   = HMODULE(WINAPI*)(LPCSTR);
 using GetModuleHandleWFn   = HMODULE(WINAPI*)(LPCWSTR);
 using GetModuleHandleExAFn = BOOL(WINAPI*)(DWORD, LPCSTR, HMODULE*);
 using GetModuleHandleExWFn = BOOL(WINAPI*)(DWORD, LPCWSTR, HMODULE*);
-using GetProcAddressFn     = FARPROC(WINAPI*)(HMODULE, LPCSTR);
+using GetProcAddressFn        = FARPROC(WINAPI*)(HMODULE, LPCSTR);
+using FreeLibraryFn           = BOOL(WINAPI*)(HMODULE);
 using K32EnumProcessModulesFn = BOOL(WINAPI*)(HANDLE, HMODULE*, DWORD, LPDWORD);
 
-HMODULE          g_selfModule         = nullptr;
-HMODULE          g_exeModule          = nullptr;
-LoadLibraryAFn   g_origLoadLibraryA   = nullptr;
-LoadLibraryWFn   g_origLoadLibraryW   = nullptr;
-LoadLibraryExAFn g_origLoadLibraryExA = nullptr;
+struct ModuleIdentity {
+    DWORD timeDateStamp{0};
+    DWORD sizeOfImage{0};
+
+    bool operator==(const ModuleIdentity& other) const {
+        return timeDateStamp == other.timeDateStamp && sizeOfImage == other.sizeOfImage;
+    }
+};
+
+HMODULE              g_selfModule             = nullptr;
+HMODULE              g_exeModule              = nullptr;
+LoadLibraryAFn       g_origLoadLibraryA       = nullptr;
+LoadLibraryWFn       g_origLoadLibraryW       = nullptr;
+LoadLibraryExAFn     g_origLoadLibraryExA     = nullptr;
 LoadLibraryExWFn     g_origLoadLibraryExW     = nullptr;
 GetModuleHandleAFn   g_origGetModuleHandleA   = nullptr;
 GetModuleHandleWFn   g_origGetModuleHandleW   = nullptr;
 GetModuleHandleExAFn g_origGetModuleHandleExA = nullptr;
 GetModuleHandleExWFn g_origGetModuleHandleExW = nullptr;
 GetProcAddressFn     g_origGetProcAddress     = nullptr;
+FreeLibraryFn        g_origFreeLibrary        = nullptr;
 volatile LONG        g_delayPatchedCount      = 0;
 volatile LONG        g_ordinalLookupCount     = 0;
 
 std::wstring g_shimDirLower;
 std::wstring g_winDirLower;
+std::mutex   g_shimMapMtx;
 std::unordered_map<std::wstring, std::wstring> g_shimsWide;
-std::unordered_map<std::string, std::string>   g_shimsAnsi;
 
 std::mutex g_hookMtx;
-std::unordered_set<HMODULE> g_seenModules;
+std::unordered_map<HMODULE, ModuleIdentity> g_seenModules;
 
 std::string WideToUtf8(const std::wstring& w) {
-    if (w.empty()) {
+    return sc::path::WideToUtf8(w);
+}
+
+std::wstring AnsiToWide(const std::string& s) {
+    if (s.empty()) {
         return {};
     }
-    int len = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, nullptr, 0, nullptr, nullptr);
-    if (len <= 1) {
+    const int needed = MultiByteToWideChar(CP_ACP, 0, s.c_str(), -1, nullptr, 0);
+    if (needed <= 1) {
         return {};
     }
-    std::string out(static_cast<size_t>(len - 1), '\0');
-    WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, out.data(), len, nullptr, nullptr);
+    std::wstring out(static_cast<size_t>(needed - 1), L'\0');
+    MultiByteToWideChar(CP_ACP, 0, s.c_str(), -1, out.data(), needed);
     return out;
 }
 
-std::string WideToAnsi(const std::wstring& w) {
-    if (w.empty()) {
+std::wstring GetModulePathWide(HMODULE mod) {
+    if (!mod) {
         return {};
     }
-    int len = WideCharToMultiByte(CP_ACP, 0, w.c_str(), -1, nullptr, 0, nullptr, nullptr);
-    if (len <= 1) {
-        return {};
+    std::wstring buf(MAX_PATH, L'\0');
+    for (int attempt = 0; attempt < 6; ++attempt) {
+        const DWORD len = GetModuleFileNameW(mod, buf.data(), static_cast<DWORD>(buf.size()));
+        if (len == 0) {
+            return {};
+        }
+        if (len < buf.size()) {
+            buf.resize(len);
+            return buf;
+        }
+        buf.resize(buf.size() * 2);
     }
-    std::string out(static_cast<size_t>(len - 1), '\0');
-    WideCharToMultiByte(CP_ACP, 0, w.c_str(), -1, out.data(), len, nullptr, nullptr);
-    return out;
+    return {};
+}
+
+bool ReadModuleIdentity(HMODULE mod, ModuleIdentity& out) {
+    if (!mod) {
+        return false;
+    }
+    const auto* base = reinterpret_cast<const uint8_t*>(mod);
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) {
+        return false;
+    }
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(base + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE ||
+        nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
+        return false;
+    }
+    out.timeDateStamp = nt->FileHeader.TimeDateStamp;
+    out.sizeOfImage   = nt->OptionalHeader.SizeOfImage;
+    return true;
+}
+
+bool FindShimWide(const std::wstring& keyW, std::wstring& outFullWide) {
+    if (keyW.empty()) {
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(g_shimMapMtx);
+    auto it = g_shimsWide.find(keyW);
+    if (it == g_shimsWide.end()) {
+        return false;
+    }
+    outFullWide = it->second;
+    return true;
 }
 
 std::wstring ToLowerW(std::wstring s) {
@@ -155,6 +208,7 @@ HMODULE WINAPI HookGetModuleHandleA(LPCSTR lpModuleName);
 BOOL    WINAPI HookGetModuleHandleExW(DWORD dwFlags, LPCWSTR lpModuleName, HMODULE* phModule);
 BOOL    WINAPI HookGetModuleHandleExA(DWORD dwFlags, LPCSTR lpModuleName, HMODULE* phModule);
 FARPROC WINAPI HookGetProcAddress(HMODULE hModule, LPCSTR lpProcName);
+BOOL    WINAPI HookFreeLibrary(HMODULE hLibModule);
 
 uint32_t PatchModuleIat(HMODULE mod) {
     if (!mod) {
@@ -181,6 +235,7 @@ uint32_t PatchModuleIat(HMODULE mod) {
         if (std::strcmp(name, "GetModuleHandleExW") == 0)   return reinterpret_cast<void*>(&HookGetModuleHandleExW);
         if (std::strcmp(name, "GetModuleHandleExA") == 0)   return reinterpret_cast<void*>(&HookGetModuleHandleExA);
         if (std::strcmp(name, "GetProcAddress") == 0)       return reinterpret_cast<void*>(&HookGetProcAddress);
+        if (std::strcmp(name, "FreeLibrary") == 0)          return reinterpret_cast<void*>(&HookFreeLibrary);
         return nullptr;
     };
 
@@ -248,13 +303,17 @@ uint32_t HookModuleIfEligible(HMODULE mod, bool logSubModule) {
         return 0;
     }
 
-    wchar_t pathBuf[MAX_PATH]{};
-    DWORD pathLen = GetModuleFileNameW(mod, pathBuf, MAX_PATH);
-    if (pathLen == 0 || pathLen >= MAX_PATH) {
+    const std::wstring modPath = GetModulePathWide(mod);
+    if (modPath.empty()) {
         return 0;
     }
 
-    std::wstring pathLower = ToLowerW(std::wstring(pathBuf, pathLen));
+    ModuleIdentity id{};
+    if (!ReadModuleIdentity(mod, id)) {
+        return 0;
+    }
+
+    const std::wstring pathLower = ToLowerW(modPath);
     const bool isSystemOrShim =
         StartsWithW(pathLower, g_winDirLower) ||
         StartsWithW(pathLower, g_shimDirLower);
@@ -262,9 +321,11 @@ uint32_t HookModuleIfEligible(HMODULE mod, bool logSubModule) {
     uint32_t patched = 0;
     {
         std::lock_guard<std::mutex> lock(g_hookMtx);
-        if (!g_seenModules.insert(mod).second) {
+        auto it = g_seenModules.find(mod);
+        if (it != g_seenModules.end() && it->second == id) {
             return 0;
         }
+        g_seenModules[mod] = id;
         if (isSystemOrShim) {
             return 0;
         }
@@ -272,7 +333,7 @@ uint32_t HookModuleIfEligible(HMODULE mod, bool logSubModule) {
     }
 
     if (logSubModule && mod != g_exeModule && patched > 0) {
-        std::wstring fileName(pathBuf, pathLen);
+        std::wstring fileName = modPath;
         size_t slash = fileName.find_last_of(L"\\/");
         if (slash != std::wstring::npos) {
             fileName = fileName.substr(slash + 1);
@@ -286,14 +347,33 @@ uint32_t HookModuleIfEligible(HMODULE mod, bool logSubModule) {
     return patched;
 }
 
+BOOL WINAPI HookFreeLibrary(HMODULE hLibModule) {
+    const BOOL ok = g_origFreeLibrary ? g_origFreeLibrary(hLibModule) : FALSE;
+    if (ok && hLibModule) {
+        const DWORD savedErr = GetLastError();
+        HMODULE checkMod = nullptr;
+        const BOOL stillLoaded = g_origGetModuleHandleExW
+            ? g_origGetModuleHandleExW(
+                  GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                  reinterpret_cast<LPCWSTR>(hLibModule),
+                  &checkMod)
+            : FALSE;
+        if (!stillLoaded || checkMod != hLibModule) {
+            std::lock_guard<std::mutex> lock(g_hookMtx);
+            g_seenModules.erase(hLibModule);
+        }
+        SetLastError(savedErr);
+    }
+    return ok;
+}
+
 HMODULE WINAPI HookLoadLibraryW(LPCWSTR lpLibFileName) {
-    std::wstring key = NormalizeDllKeyW(lpLibFileName);
-    auto it = g_shimsWide.find(key);
-    if (it != g_shimsWide.end()) {
+    std::wstring targetWide;
+    if (FindShimWide(NormalizeDllKeyW(lpLibFileName), targetWide)) {
         std::string msg = "[dynamic] " + WideToUtf8(lpLibFileName ? lpLibFileName : L"")
-                        + " -> " + WideToUtf8(it->second);
+                        + " -> " + WideToUtf8(targetWide);
         sc::log::Write(sc::log::Level::Info, "scarlett_hook", "LoadLibraryW", msg.c_str());
-        return g_origLoadLibraryW(it->second.c_str());
+        return g_origLoadLibraryW(targetWide.c_str());
     }
     HMODULE mod = g_origLoadLibraryW(lpLibFileName);
     if (mod) {
@@ -303,13 +383,13 @@ HMODULE WINAPI HookLoadLibraryW(LPCWSTR lpLibFileName) {
 }
 
 HMODULE WINAPI HookLoadLibraryA(LPCSTR lpLibFileName) {
-    std::string key = NormalizeDllKeyA(lpLibFileName);
-    auto it = g_shimsAnsi.find(key);
-    if (it != g_shimsAnsi.end()) {
+    // Route shim redirects directly through g_shimsWide + LoadLibraryW to avoid ANSI path mangling.
+    std::wstring targetWide;
+    if (g_origLoadLibraryW && FindShimWide(AnsiToWide(NormalizeDllKeyA(lpLibFileName)), targetWide)) {
         std::string msg = "[dynamic] " + std::string(lpLibFileName ? lpLibFileName : "")
-                        + " -> " + it->second;
+                        + " -> " + WideToUtf8(targetWide);
         sc::log::Write(sc::log::Level::Info, "scarlett_hook", "LoadLibraryA", msg.c_str());
-        return g_origLoadLibraryA(it->second.c_str());
+        return g_origLoadLibraryW(targetWide.c_str());
     }
     HMODULE mod = g_origLoadLibraryA(lpLibFileName);
     if (mod) {
@@ -319,13 +399,12 @@ HMODULE WINAPI HookLoadLibraryA(LPCSTR lpLibFileName) {
 }
 
 HMODULE WINAPI HookLoadLibraryExW(LPCWSTR lpLibFileName, HANDLE hFile, DWORD dwFlags) {
-    std::wstring key = NormalizeDllKeyW(lpLibFileName);
-    auto it = g_shimsWide.find(key);
-    if (it != g_shimsWide.end()) {
+    std::wstring targetWide;
+    if (FindShimWide(NormalizeDllKeyW(lpLibFileName), targetWide)) {
         std::string msg = "[dynamic] " + WideToUtf8(lpLibFileName ? lpLibFileName : L"")
-                        + " -> " + WideToUtf8(it->second);
+                        + " -> " + WideToUtf8(targetWide);
         sc::log::Write(sc::log::Level::Info, "scarlett_hook", "LoadLibraryExW", msg.c_str());
-        return g_origLoadLibraryExW(it->second.c_str(), hFile, SanitizeFlagsForAbsoluteShim(dwFlags));
+        return g_origLoadLibraryExW(targetWide.c_str(), hFile, SanitizeFlagsForAbsoluteShim(dwFlags));
     }
     HMODULE mod = g_origLoadLibraryExW(lpLibFileName, hFile, dwFlags);
     if (mod && !IsDataOnlyLoad(dwFlags)) {
@@ -335,13 +414,12 @@ HMODULE WINAPI HookLoadLibraryExW(LPCWSTR lpLibFileName, HANDLE hFile, DWORD dwF
 }
 
 HMODULE WINAPI HookLoadLibraryExA(LPCSTR lpLibFileName, HANDLE hFile, DWORD dwFlags) {
-    std::string key = NormalizeDllKeyA(lpLibFileName);
-    auto it = g_shimsAnsi.find(key);
-    if (it != g_shimsAnsi.end()) {
+    std::wstring targetWide;
+    if (g_origLoadLibraryExW && FindShimWide(AnsiToWide(NormalizeDllKeyA(lpLibFileName)), targetWide)) {
         std::string msg = "[dynamic] " + std::string(lpLibFileName ? lpLibFileName : "")
-                        + " -> " + it->second;
+                        + " -> " + WideToUtf8(targetWide);
         sc::log::Write(sc::log::Level::Info, "scarlett_hook", "LoadLibraryExA", msg.c_str());
-        return g_origLoadLibraryExA(it->second.c_str(), hFile, SanitizeFlagsForAbsoluteShim(dwFlags));
+        return g_origLoadLibraryExW(targetWide.c_str(), hFile, SanitizeFlagsForAbsoluteShim(dwFlags));
     }
     HMODULE mod = g_origLoadLibraryExA(lpLibFileName, hFile, dwFlags);
     if (mod && !IsDataOnlyLoad(dwFlags)) {
@@ -352,21 +430,19 @@ HMODULE WINAPI HookLoadLibraryExA(LPCSTR lpLibFileName, HANDLE hFile, DWORD dwFl
 
 HMODULE WINAPI HookGetModuleHandleW(LPCWSTR lpModuleName) {
     if (lpModuleName) {
-        std::wstring key = NormalizeDllKeyW(lpModuleName);
-        auto it = g_shimsWide.find(key);
-        if (it != g_shimsWide.end()) {
-            return g_origGetModuleHandleW(it->second.c_str());
+        std::wstring targetWide;
+        if (FindShimWide(NormalizeDllKeyW(lpModuleName), targetWide)) {
+            return g_origGetModuleHandleW(targetWide.c_str());
         }
     }
     return g_origGetModuleHandleW(lpModuleName);
 }
 
 HMODULE WINAPI HookGetModuleHandleA(LPCSTR lpModuleName) {
-    if (lpModuleName) {
-        std::string key = NormalizeDllKeyA(lpModuleName);
-        auto it = g_shimsAnsi.find(key);
-        if (it != g_shimsAnsi.end()) {
-            return g_origGetModuleHandleA(it->second.c_str());
+    if (lpModuleName && g_origGetModuleHandleW) {
+        std::wstring targetWide;
+        if (FindShimWide(AnsiToWide(NormalizeDllKeyA(lpModuleName)), targetWide)) {
+            return g_origGetModuleHandleW(targetWide.c_str());
         }
     }
     return g_origGetModuleHandleA(lpModuleName);
@@ -374,21 +450,19 @@ HMODULE WINAPI HookGetModuleHandleA(LPCSTR lpModuleName) {
 
 BOOL WINAPI HookGetModuleHandleExW(DWORD dwFlags, LPCWSTR lpModuleName, HMODULE* phModule) {
     if (lpModuleName && (dwFlags & GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS) == 0) {
-        std::wstring key = NormalizeDllKeyW(lpModuleName);
-        auto it = g_shimsWide.find(key);
-        if (it != g_shimsWide.end()) {
-            return g_origGetModuleHandleExW(dwFlags, it->second.c_str(), phModule);
+        std::wstring targetWide;
+        if (FindShimWide(NormalizeDllKeyW(lpModuleName), targetWide)) {
+            return g_origGetModuleHandleExW(dwFlags, targetWide.c_str(), phModule);
         }
     }
     return g_origGetModuleHandleExW(dwFlags, lpModuleName, phModule);
 }
 
 BOOL WINAPI HookGetModuleHandleExA(DWORD dwFlags, LPCSTR lpModuleName, HMODULE* phModule) {
-    if (lpModuleName && (dwFlags & GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS) == 0) {
-        std::string key = NormalizeDllKeyA(lpModuleName);
-        auto it = g_shimsAnsi.find(key);
-        if (it != g_shimsAnsi.end()) {
-            return g_origGetModuleHandleExA(dwFlags, it->second.c_str(), phModule);
+    if (lpModuleName && (dwFlags & GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS) == 0 && g_origGetModuleHandleExW) {
+        std::wstring targetWide;
+        if (FindShimWide(AnsiToWide(NormalizeDllKeyA(lpModuleName)), targetWide)) {
+            return g_origGetModuleHandleExW(dwFlags, targetWide.c_str(), phModule);
         }
     }
     return g_origGetModuleHandleExA(dwFlags, lpModuleName, phModule);
@@ -400,12 +474,11 @@ bool TryGetShimDllName(HMODULE hModule, std::string& outDllLower) {
     if (!hModule || g_shimDirLower.empty()) {
         return false;
     }
-    wchar_t pathBuf[MAX_PATH]{};
-    const DWORD len = GetModuleFileNameW(hModule, pathBuf, MAX_PATH);
-    if (len == 0 || len >= MAX_PATH) {
+    const std::wstring modPath = GetModulePathWide(hModule);
+    if (modPath.empty()) {
         return false;
     }
-    const std::wstring lowerPath = ToLowerW(std::wstring(pathBuf, len));
+    const std::wstring lowerPath = ToLowerW(modPath);
     if (lowerPath.rfind(g_shimDirLower, 0) != 0) {
         return false;
     }
@@ -471,11 +544,16 @@ void DiscoverShimsWin32() {
         std::wstring fileName(fd.cFileName);
         std::wstring fullWide = shimDir + L"\\" + fileName;
         std::wstring keyW = NormalizeDllKeyW(fileName.c_str());
-        std::string keyA = WideToAnsi(keyW);
-        std::string fullA = WideToAnsi(fullWide);
 
+        std::string fullA;
+        if (!sc::path::WidePathToAnsiLossless(fullWide, fullA)) {
+            std::string msg = "Shim path is not CP_ACP-representable (ANSI callers redirect via wide LoadLibraryW): " +
+                              WideToUtf8(fullWide);
+            sc::log::Write(sc::log::Level::Warn, "scarlett_hook", "DiscoverShims", msg.c_str());
+        }
+
+        std::lock_guard<std::mutex> lock(g_shimMapMtx);
         g_shimsWide.emplace(std::move(keyW), std::move(fullWide));
-        g_shimsAnsi.emplace(std::move(keyA), std::move(fullA));
     } while (FindNextFileW(hFind, &fd));
 
     FindClose(hFind);
@@ -530,6 +608,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID) {
             g_origGetModuleHandleExA = reinterpret_cast<GetModuleHandleExAFn>(GetProcAddress(k32, "GetModuleHandleExA"));
             g_origGetModuleHandleExW = reinterpret_cast<GetModuleHandleExWFn>(GetProcAddress(k32, "GetModuleHandleExW"));
             g_origGetProcAddress     = reinterpret_cast<GetProcAddressFn>(GetProcAddress(k32, "GetProcAddress"));
+            g_origFreeLibrary        = reinterpret_cast<FreeLibraryFn>(GetProcAddress(k32, "FreeLibrary"));
         }
 
         DiscoverShimsWin32();
@@ -726,4 +805,47 @@ extern "C" __declspec(dllexport) void WINAPI ScarlettHookSetAutoStubPolicy(
 extern "C" __declspec(dllexport) uint32_t WINAPI ScarlettHookDumpAutoStubReport(
     const char* reportPathUtf8) {
     return g_autoStubs.DumpHotlist(reportPathUtf8, false);
+}
+
+extern "C" __declspec(dllexport) BOOL WINAPI ScarlettHookIsModuleTracked(HMODULE mod) {
+    std::lock_guard<std::mutex> lock(g_hookMtx);
+    return g_seenModules.find(mod) != g_seenModules.end() ? TRUE : FALSE;
+}
+
+extern "C" __declspec(dllexport) uint32_t WINAPI ScarlettHookTrackAndPatchForTest(HMODULE mod) {
+    ModuleIdentity id{};
+    if (!ReadModuleIdentity(mod, id)) {
+        return 0;
+    }
+    std::lock_guard<std::mutex> lock(g_hookMtx);
+    auto it = g_seenModules.find(mod);
+    if (it != g_seenModules.end() && it->second == id) {
+        return 0;
+    }
+    g_seenModules[mod] = id;
+    return PatchModuleIat(mod);
+}
+
+extern "C" __declspec(dllexport) void WINAPI ScarlettHookUntrackModuleForTest(HMODULE mod) {
+    std::lock_guard<std::mutex> lock(g_hookMtx);
+    g_seenModules.erase(mod);
+}
+
+extern "C" __declspec(dllexport) BOOL WINAPI ScarlettHookRegisterTestShim(
+    const wchar_t* dllName,
+    const wchar_t* fullWidePath) {
+    if (!dllName || !*dllName) {
+        return FALSE;
+    }
+    const std::wstring keyW = NormalizeDllKeyW(dllName);
+    if (keyW.empty()) {
+        return FALSE;
+    }
+    std::lock_guard<std::mutex> lock(g_shimMapMtx);
+    if (!fullWidePath || !*fullWidePath) {
+        g_shimsWide.erase(keyW);
+        return TRUE;
+    }
+    g_shimsWide[keyW] = fullWidePath;
+    return TRUE;
 }

@@ -1,4 +1,5 @@
 #include "test_harness.hpp"
+#include "common/ansi_path.hpp"
 
 using Microsoft::WRL::ComPtr;
 
@@ -100,7 +101,7 @@ bool TestLoaderInspectAndXvdMount() {
 
     const std::string payloadStr = "SCARLETT_XVD_VFS_PAYLOAD_OK";
     std::vector<uint8_t> payload(payloadStr.begin(), payloadStr.end());
-    auto validImg = sc::vfs::XvdContainer::BuildSyntheticUnencryptedXvd(payload, 1u, 0u);
+    auto validImg = sc::vfs::XvdContainer::BuildSyntheticUnencryptedXvd(payload, 1u, sc::vfs::kXvdFlagEncryptionDisabled);
     {
         std::ofstream out(validXvd, std::ios::binary);
         out.write(reinterpret_cast<const char*>(validImg.data()), static_cast<std::streamsize>(validImg.size()));
@@ -116,7 +117,7 @@ bool TestLoaderInspectAndXvdMount() {
     SC_EXPECT(readBack == payload);
 
     // 3. Encrypted XVD must be cleanly rejected
-    auto encImg = sc::vfs::XvdContainer::BuildSyntheticUnencryptedXvd(payload, 1u, sc::vfs::kXvdFlagEncrypted);
+    auto encImg = sc::vfs::XvdContainer::BuildSyntheticUnencryptedXvd(payload, 1u, 0u);
     {
         std::ofstream out(encXvd, std::ios::binary);
         out.write(reinterpret_cast<const char*>(encImg.data()), static_cast<std::streamsize>(encImg.size()));
@@ -201,7 +202,7 @@ bool TestLoaderXvdAndGameConfigE2E() {
 
     // 1. Verify encrypted XVD rejection
     const auto encImg = sc::vfs::XvdContainer::BuildSyntheticUnencryptedXvd(
-        payload, 1u, sc::vfs::kXvdFlagEncrypted);
+        payload, 1u, 0u);
     const auto encPath = tmpDir / "encrypted_reject.xvd";
     {
         std::ofstream ofs(encPath, std::ios::binary);
@@ -214,7 +215,7 @@ bool TestLoaderXvdAndGameConfigE2E() {
     }
 
     // 2. Build & open unencrypted XVD, extract embedded MicrosoftGame.Config
-    const auto rawImg = sc::vfs::XvdContainer::BuildSyntheticUnencryptedXvd(payload, 1u, 0u);
+    const auto rawImg = sc::vfs::XvdContainer::BuildSyntheticUnencryptedXvd(payload, 1u, sc::vfs::kXvdFlagEncryptionDisabled);
     const auto xvdPath = tmpDir / "title_pkg.xvd";
     {
         std::ofstream ofs(xvdPath, std::ios::binary);
@@ -733,7 +734,7 @@ bool TestScarlettFullStack50SprintCapstoneE2E() {
         "  <ExecutableList><Executable Name=\"ScarlettCapstone.exe\" Id=\"Game\" /></ExecutableList>\n"
         "</Game>\n";
     std::vector<uint8_t> manifestBytes(xmlManifest.begin(), xmlManifest.end());
-    const auto xvdImg = sc::vfs::XvdContainer::BuildSyntheticUnencryptedXvd(manifestBytes, 1u, 0u);
+    const auto xvdImg = sc::vfs::XvdContainer::BuildSyntheticUnencryptedXvd(manifestBytes, 1u, sc::vfs::kXvdFlagEncryptionDisabled);
     const auto xvdPath = tmpDir / "golden_master.xvd";
     { std::ofstream ofs(xvdPath, std::ios::binary); ofs.write(reinterpret_cast<const char*>(xvdImg.data()), static_cast<std::streamsize>(xvdImg.size())); }
 
@@ -1342,5 +1343,239 @@ bool TestLoaderSymbolCoverageAuditE2E() {
                         "xmem.dll!XMemFutureUnimplementedApi") != cov.autoStubSymbols.end());
     SC_EXPECT(std::find(cov.autoStubSymbols.begin(), cov.autoStubSymbols.end(),
                         "xmem.dll!#777") != cov.autoStubSymbols.end());
+    return true;
+}
+
+bool TestXvdFlagsAndBoundsNegative() {
+    const auto tmpDir = std::filesystem::temp_directory_path() / L"scarlett_s66_xvd_tests";
+    std::error_code ec;
+    std::filesystem::remove_all(tmpDir, ec);
+    std::filesystem::create_directories(tmpDir, ec);
+
+    auto writeImg = [&](const wchar_t* name, const std::vector<uint8_t>& bytes) {
+        const auto p = tmpDir / name;
+        std::ofstream ofs(p, std::ios::binary | std::ios::trunc);
+        ofs.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+        return p;
+    };
+    auto writeU32 = [](uint8_t* p, uint32_t v) {
+        p[0] = static_cast<uint8_t>(v & 0xFFu);
+        p[1] = static_cast<uint8_t>((v >> 8) & 0xFFu);
+        p[2] = static_cast<uint8_t>((v >> 16) & 0xFFu);
+        p[3] = static_cast<uint8_t>((v >> 24) & 0xFFu);
+    };
+    auto writeU64 = [&](uint8_t* p, uint64_t v) {
+        writeU32(p, static_cast<uint32_t>(v & 0xFFFFFFFFull));
+        writeU32(p + 4, static_cast<uint32_t>((v >> 32) & 0xFFFFFFFFull));
+    };
+
+    const std::vector<uint8_t> payload = { 'X', 'V', 'D', '_', 'S', '6', '6' };
+    sc::vfs::XvdContainer xvd;
+    std::string err;
+
+    // 1. Flag matrix per emoose/xvdtool (EncryptionDisabled = 0x2, ReadOnly = 0x1)
+    {
+        auto p0 = writeImg(L"flags_0x0.xvd", sc::vfs::XvdContainer::BuildSyntheticUnencryptedXvd(payload, 1u, 0x0u));
+        SC_EXPECT(!xvd.Open(p0, err)); // Encrypted -> must reject
+
+        auto p1 = writeImg(L"flags_0x1.xvd", sc::vfs::XvdContainer::BuildSyntheticUnencryptedXvd(payload, 1u, sc::vfs::kXvdFlagReadOnly));
+        SC_EXPECT(!xvd.Open(p1, err)); // ReadOnly + Encrypted -> must reject
+
+        auto p2 = writeImg(L"flags_0x2.xvd", sc::vfs::XvdContainer::BuildSyntheticUnencryptedXvd(payload, 1u, sc::vfs::kXvdFlagEncryptionDisabled));
+        SC_EXPECT(xvd.Open(p2, err));
+        SC_EXPECT(!xvd.Header().IsEncrypted());
+
+        auto p3 = writeImg(L"flags_0x3.xvd", sc::vfs::XvdContainer::BuildSyntheticUnencryptedXvd(
+            payload, 1u, sc::vfs::kXvdFlagReadOnly | sc::vfs::kXvdFlagEncryptionDisabled));
+        SC_EXPECT(xvd.Open(p3, err));
+        SC_EXPECT(!xvd.Header().IsEncrypted());
+    }
+
+    // 2. Integer overflow in userDataOffset + userDataLength (UINT64_MAX - 16 + 64 wraps small)
+    {
+        auto img = sc::vfs::XvdContainer::BuildSyntheticUnencryptedXvd(payload);
+        writeU64(img.data() + 0x250, UINT64_MAX - 16ULL);
+        writeU64(img.data() + 0x258, 64ULL);
+        auto p = writeImg(L"overflow_offset.xvd", img);
+        SC_EXPECT(!xvd.Open(p, err));
+    }
+
+    // 3. Integer overflow via huge userDataLength
+    {
+        auto img = sc::vfs::XvdContainer::BuildSyntheticUnencryptedXvd(payload);
+        writeU64(img.data() + 0x250, sc::vfs::kXvdMinHeaderSize);
+        writeU64(img.data() + 0x258, UINT64_MAX - 0x800ULL);
+        auto p = writeImg(L"overflow_length.xvd", img);
+        SC_EXPECT(!xvd.Open(p, err));
+    }
+
+    // 4. Out-of-bounds driveSize and embeddedXvdLen
+    {
+        auto imgDrive = sc::vfs::XvdContainer::BuildSyntheticUnencryptedXvd(payload);
+        writeU64(imgDrive.data() + 0x218, UINT64_MAX);
+        auto pDrive = writeImg(L"oob_drivesize.xvd", imgDrive);
+        SC_EXPECT(!xvd.Open(pDrive, err));
+
+        auto imgEmb = sc::vfs::XvdContainer::BuildSyntheticUnencryptedXvd(payload);
+        writeU32(imgEmb.data() + 0x244, 0xFFFFFFFFu);
+        auto pEmb = writeImg(L"oob_embedded.xvd", imgEmb);
+        SC_EXPECT(!xvd.Open(pEmb, err));
+    }
+
+    std::filesystem::remove_all(tmpDir, ec);
+    return true;
+}
+
+bool TestNonAsciiShimAndFreeLibraryHook() {
+    // Non-CP1252 folder suffix using ASCII \u escapes: U+30C6 U+30B9 U+30C8 (Katakana) + U+03B2 (beta)
+    const std::wstring kNonAsciiFolder = L"scarlett_s66_\u30C6\u30B9\u30C8_\u03B2_shims";
+
+    // 1. Lossless codepage helper must reject unrepresentable characters instead of corrupting them
+    {
+        std::string outAnsi;
+        SC_EXPECT(sc::path::WideToCodePageLossless(1252u, L"C:\\shims\\pixevt.dll", outAnsi));
+        SC_EXPECT(outAnsi == "C:\\shims\\pixevt.dll");
+
+        const std::wstring sampleBad = L"C:\\" + kNonAsciiFolder + L"\\pixevt.dll";
+        SC_EXPECT(!sc::path::WideToCodePageLossless(1252u, sampleBad, outAnsi));
+        SC_EXPECT(outAnsi.empty());
+
+        if (GetACP() != CP_UTF8) {
+            const std::wstring missingBad = L"Z:\\nonexistent_" + kNonAsciiFolder + L"\\pixevt.dll";
+            SC_EXPECT(!sc::path::WidePathToAnsiLossless(missingBad, outAnsi));
+            SC_EXPECT(outAnsi.empty());
+        }
+    }
+
+    HMODULE hookMod = GetModuleHandleW(L"scarlett_hook.dll");
+    SC_EXPECT(hookMod != nullptr);
+
+    using PFN_RegisterShim   = BOOL(WINAPI*)(const wchar_t*, const wchar_t*);
+    using PFN_IsTracked      = BOOL(WINAPI*)(HMODULE);
+    using PFN_TrackAndPatch  = uint32_t(WINAPI*)(HMODULE);
+    using PFN_Untrack        = void(WINAPI*)(HMODULE);
+
+    auto pRegisterShim  = reinterpret_cast<PFN_RegisterShim>(GetProcAddress(hookMod, "ScarlettHookRegisterTestShim"));
+    auto pIsTracked     = reinterpret_cast<PFN_IsTracked>(GetProcAddress(hookMod, "ScarlettHookIsModuleTracked"));
+    auto pTrackAndPatch = reinterpret_cast<PFN_TrackAndPatch>(GetProcAddress(hookMod, "ScarlettHookTrackAndPatchForTest"));
+    auto pUntrack       = reinterpret_cast<PFN_Untrack>(GetProcAddress(hookMod, "ScarlettHookUntrackModuleForTest"));
+    SC_EXPECT(pRegisterShim && pIsTracked && pTrackAndPatch && pUntrack);
+
+    // 2. Non-ASCII shim directory (characters outside CP1252) loaded via LoadLibraryA / GetModuleHandleA
+    {
+        auto shimDirOpt = sc::config::GetShimDir();
+        SC_EXPECT(shimDirOpt.has_value());
+        const auto srcPix = *shimDirOpt / L"pixevt.dll";
+        SC_EXPECT(std::filesystem::exists(srcPix));
+
+        const auto nonAsciiDir = std::filesystem::temp_directory_path() / kNonAsciiFolder;
+        std::error_code ec;
+        std::filesystem::remove_all(nonAsciiDir, ec);
+        std::filesystem::create_directories(nonAsciiDir, ec);
+        const auto dstPix = nonAsciiDir / L"pixevt.dll";
+        std::filesystem::copy_file(srcPix, dstPix, std::filesystem::copy_options::overwrite_existing, ec);
+        SC_EXPECT(!ec && std::filesystem::exists(dstPix));
+
+        SC_EXPECT(pRegisterShim(L"s66_nonascii_probe.dll", dstPix.c_str()) == TRUE);
+        HMODULE hModA = LoadLibraryA("s66_nonascii_probe.dll");
+        SC_EXPECT(hModA != nullptr);
+
+        HMODULE hQueryA = GetModuleHandleA("s66_nonascii_probe.dll");
+        HMODULE hQueryExA = nullptr;
+        SC_EXPECT(hQueryA == hModA);
+        SC_EXPECT(GetModuleHandleExA(
+            GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, "s66_nonascii_probe.dll", &hQueryExA) != FALSE);
+        SC_EXPECT(hQueryExA == hModA);
+
+        wchar_t loadedPath[1024]{};
+        const DWORD len = GetModuleFileNameW(hModA, loadedPath, 1024);
+        SC_EXPECT(len > 0);
+        SC_EXPECT(std::wstring(loadedPath, len).find(kNonAsciiFolder) != std::wstring::npos);
+        SC_EXPECT(GetProcAddress(hModA, "PIXBeginEvent") != nullptr);
+
+        FreeLibrary(hModA);
+        pRegisterShim(L"s66_nonascii_probe.dll", nullptr);
+        std::filesystem::remove_all(nonAsciiDir, ec);
+    }
+
+    // 3. FreeLibrary hook untracks unloaded DLL and re-tracks + re-patches on reload
+    {
+        HMODULE hPlugin1 = LoadLibraryW(L"..\\dummy_title\\engine_plugin.dll");
+        SC_EXPECT(hPlugin1 != nullptr);
+        SC_EXPECT(pIsTracked(hPlugin1) == TRUE);
+
+        using PluginFn = bool(WINAPI*)();
+        auto runDiag1 = reinterpret_cast<PluginFn>(GetProcAddress(hPlugin1, "PluginRunDiagnostics"));
+        SC_EXPECT(runDiag1 != nullptr && runDiag1());
+
+        SC_EXPECT(FreeLibrary(hPlugin1) != FALSE);
+        SC_EXPECT(pIsTracked(hPlugin1) == FALSE);
+
+        HMODULE hPlugin2 = LoadLibraryW(L"..\\dummy_title\\engine_plugin.dll");
+        SC_EXPECT(hPlugin2 != nullptr);
+        SC_EXPECT(pIsTracked(hPlugin2) == TRUE);
+
+        auto runDiag2 = reinterpret_cast<PluginFn>(GetProcAddress(hPlugin2, "PluginRunDiagnostics"));
+        SC_EXPECT(runDiag2 != nullptr && runDiag2());
+
+        SC_EXPECT(FreeLibrary(hPlugin2) != FALSE);
+        SC_EXPECT(pIsTracked(hPlugin2) == FALSE);
+    }
+
+    // 4. Stale handle reuse at identical base address with new PE identity (TimeDateStamp / SizeOfImage)
+    {
+        uint8_t* img = static_cast<uint8_t*>(
+            VirtualAlloc(nullptr, 0x2000, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
+        SC_EXPECT(img != nullptr);
+
+        auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(img);
+        dos->e_magic  = IMAGE_DOS_SIGNATURE;
+        dos->e_lfanew = 0x80;
+
+        auto* nt = reinterpret_cast<IMAGE_NT_HEADERS64*>(img + 0x80);
+        nt->Signature = IMAGE_NT_SIGNATURE;
+        nt->FileHeader.Machine = IMAGE_FILE_MACHINE_AMD64;
+        nt->FileHeader.TimeDateStamp = 0x11111111u;
+        nt->FileHeader.SizeOfOptionalHeader = sizeof(IMAGE_OPTIONAL_HEADER64);
+        nt->OptionalHeader.Magic = IMAGE_NT_OPTIONAL_HDR64_MAGIC;
+        nt->OptionalHeader.SizeOfImage = 0x2000u;
+        nt->OptionalHeader.NumberOfRvaAndSizes = IMAGE_NUMBEROF_DIRECTORY_ENTRIES;
+        nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress = 0x1000;
+        nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size = sizeof(IMAGE_IMPORT_DESCRIPTOR) * 2;
+
+        std::strcpy(reinterpret_cast<char*>(img + 0x1300), "kernel32.dll");
+        auto* ibn = reinterpret_cast<IMAGE_IMPORT_BY_NAME*>(img + 0x1320);
+        std::strcpy(ibn->Name, "FreeLibrary");
+
+        auto* desc = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(img + 0x1000);
+        desc[0].OriginalFirstThunk = 0x1100;
+        desc[0].Name               = 0x1300;
+        desc[0].FirstThunk         = 0x1200;
+
+        auto* intThunks = reinterpret_cast<IMAGE_THUNK_DATA64*>(img + 0x1100);
+        intThunks[0].u1.AddressOfData = 0x1320;
+        intThunks[1].u1.AddressOfData = 0;
+
+        auto* iatThunks = reinterpret_cast<IMAGE_THUNK_DATA64*>(img + 0x1200);
+        iatThunks[0].u1.Function = 0xDEAD0001ULL;
+        iatThunks[1].u1.Function = 0;
+
+        HMODULE fakeMod = reinterpret_cast<HMODULE>(img);
+        SC_EXPECT(pTrackAndPatch(fakeMod) == 1u);
+        SC_EXPECT(iatThunks[0].u1.Function != 0xDEAD0001ULL);
+
+        // Same base + same (TimeDateStamp, SizeOfImage) -> already seen, no re-patch
+        SC_EXPECT(pTrackAndPatch(fakeMod) == 0u);
+
+        // Simulate unhooked unload + reload of different module at the exact same base address
+        iatThunks[0].u1.Function = 0xDEAD0002ULL;
+        nt->FileHeader.TimeDateStamp = 0x22222222u;
+        SC_EXPECT(pTrackAndPatch(fakeMod) == 1u);
+        SC_EXPECT(iatThunks[0].u1.Function != 0xDEAD0002ULL);
+
+        pUntrack(fakeMod);
+        VirtualFree(img, 0, MEM_RELEASE);
+    }
+
     return true;
 }

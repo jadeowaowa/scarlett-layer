@@ -1,4 +1,4 @@
-# Scarlett Layer â€” Progress & API Coverage
+# Scarlett Layer — Progress & API Coverage
 
 ## Sprint Log
 
@@ -108,7 +108,7 @@
 - Added CTest #25 (`RetailBringUpShims`) verifying `gameinput.dll` dynamic hook + ordinal `#1`, `AcpHal` lifecycle/alignment, and `libHttpClient`/`XCurl` mock round-trips (`25 passed, 0 failed`).
 
 ## Sprint 27: Loader PE Import Inspector & Unencrypted XVD Container
-- Added `src/common/xvd_container.hpp` implementing clean-room unencrypted XVD header parsing (`msft-xvd` magic at `0x200`), encryption rejection, bounds-checked `ReadUserData`, and a synthetic XVD builder.
+- Added `src/common/xvd_container.hpp` implementing independent unencrypted XVD header parsing (`msft-xvd` magic at `0x200`), encryption rejection, bounds-checked `ReadUserData`, and a synthetic XVD builder.
 - Added `src/loader/pe_inspector.hpp` to audit PE64 import tables against `build/bin/shims/` and classify imports into Shimmed, System (including MSVC Debug/Release CRTs), and Missing.
 - Added `loader.exe --inspect <target.exe>` and `--inspect-xvd <file.xvd>` CLI modes in `src/loader/main.cpp`.
 - Added CTest #26 (`LoaderInspectAndXvdMount`) verifying PE64 import auditing and unencrypted/encrypted XVD handling (`26 passed, 0 failed`).
@@ -119,7 +119,7 @@
 - Added CTest #27 (`Rdna2ImageSampleShader`) verifying binary decode, HLSL lifting, and `D3DCompile` (`ps_5_0`) bytecode compilation (`27 passed, 0 failed`).
 
 ## Sprint 29: PresentX & Descriptor-Handle Audit
-- Hardened `PresentX` in `src/shims/d3d12_xs/d3d12_xs.cpp` with `Texture2D` dimension/size validation and a clamped `CopyTextureRegion` fallback when source and swapchain backbuffer dimensions or formats differ.
+- Updated `PresentX` in `src/shims/d3d12_xs/d3d12_xs.cpp` with `Texture2D` dimension/size validation and a clamped `CopyTextureRegion` fallback when source and swapchain backbuffer dimensions or formats differ.
 - Added CTest #28 (`PresentXDescriptorAudit`) verifying all 4 `GetDescriptorHandleIncrementSize` strides, `CreateRenderTargetView` -> `OMSetRenderTargets` -> `ClearRenderTargetView` -> `PresentX` submission, and non-white RGBA GPU readback (`28 passed, 0 failed`).
 
 ## Sprint 30: ScarlettX ABI Conformance & Synthetic Game Manifest Suite
@@ -204,8 +204,8 @@
 ## Sprint 49: Loader Packaging — Unencrypted XVD & MicrosoftGame.config E2E
 - Added CTest #48 (`LoaderXvdAndGameConfigE2E`) in `src/tests/scarlett_tests/main.cpp` validating encrypted XVD rejection, unencrypted XVD `ReadUserData` extraction, and `sc::loader::ParseGameConfig` manifest/executable resolution (`48 passed, 0 failed`).
 
-## Sprint 50: Phase 4 Closeout & 50-Sprint Golden Master Capstone (`v1.0.0`)
-- Added CTest #49 (`ScarlettFullStack50SprintCapstoneE2E`) in `src/tests/scarlett_tests/main.cpp` uniting all 9 shims (`d3d12_xs`, `xgameruntime`, `gameinput`, `dstorage_xs`, `xmem`, `kernelx`, `pixevt`, `xaudio2_9`, `xg_xs`) plus unencrypted XVD / `MicrosoftGame.Config` packaging into a single end-to-end boot-to-frame-to-save Golden Master pipeline (`49 passed, 0 failed`, zero leaks).
+## Sprint 50: Phase 4 Closeout & 50-Sprint Full-Stack Synthetic E2E (`v1.0.0` tag — pending retitle to `v0.x` pre-release)
+- Added CTest #49 (`ScarlettFullStack50SprintCapstoneE2E`) in `src/tests/scarlett_tests/main.cpp` uniting all 9 shims (`d3d12_xs`, `xgameruntime`, `gameinput`, `dstorage_xs`, `xmem`, `kernelx`, `pixevt`, `xaudio2_9`, `xg_xs`) plus unencrypted XVD / `MicrosoftGame.Config` packaging into a single end-to-end boot-to-frame-to-save synthetic full-stack pipeline (`49 passed, 0 failed`, zero leaks).
 - Completed all **50 Sprints (Phases 1–4)** and tagged **`sprint-50-baseline`** + **`v1.0.0-scarlett-layer`**.
 
 ## Sprint 51: Phase 5 Kickoff — PE64 Delay-Load & Ordinal Import Auditing
@@ -232,7 +232,7 @@
 - Configured `scarlett_shim_suite` in `CMakeLists.txt` with `ENVIRONMENT "SCARLETT_HEADLESS=1"` and added CTest #56 (`D3D12XsHeadlessPresentXModeE2E`) in `src/tests/scarlett_tests/main.cpp` (`56 passed, 0 failed`).
 
 ## Sprint 58: Async Compute & Cross-Queue Fence Synchronization
-- Hardened `ScarlettCommandQueueX` in `src/shims/d3d12_xs/d3d12_xs.cpp`: release backbuffers and `IDXGISwapChain3` before `DestroyWindow`, back `SCARLETT_HEADLESS=1` with offscreen `ID3D12Resource` ring buffers, retain in-flight `PresentX` source resources until their GPU copy fence completes, and register an `ID3D12InfoQueue1` debug callback in `_DEBUG` builds.
+- Updated `ScarlettCommandQueueX` in `src/shims/d3d12_xs/d3d12_xs.cpp`: release backbuffers and `IDXGISwapChain3` before `DestroyWindow`, back `SCARLETT_HEADLESS=1` with offscreen `ID3D12Resource` ring buffers, retain in-flight `PresentX` source resources until their GPU copy fence completes, and register an `ID3D12InfoQueue1` debug callback in `_DEBUG` builds.
 - Added CTest #57 (`D3D12XsAsyncComputeCrossQueueSyncE2E`) in `src/tests/scarlett_tests/main.cpp` verifying `D3D12_COMMAND_LIST_TYPE_COMPUTE` and `D3D12_COMMAND_LIST_TYPE_DIRECT` queues running a CS 5.0 producer with GPU-to-GPU `Signal()`/`Wait()` synchronization and readback validation (`57 passed, 0 failed`).
 
 ## Sprint 59: Zero-Warning D3D12 Validation & Strict Mode
@@ -256,7 +256,7 @@
 - Verified clean `/W4 /permissive-` build with zero compiler warnings and `57 passed, 0 failed` with zero `d3d12_debug` output under `SCARLETT_STRICT_D3D12=1`.
 
 ## Sprint 63: PE64 Implicit TLS, Isolated Guest `atexit` & `XMem` 16-Byte Alignment
-- Hardened `XMemAllocDefault` (`src/shims/xmem/xmem.cpp`) to enforce a 16-byte minimum alignment floor even for sub-16B alignment codes (matching Xbox Series X|S / `SlimEra` ABI invariants).
+- Updated `XMemAllocDefault` (`src/shims/xmem/xmem.cpp`) to enforce a 16-byte minimum alignment floor even for sub-16B alignment codes (matching Xbox Series X|S / `SlimEra` ABI invariants).
 - Extended `sc::loader::InspectPeImports` (`src/loader/pe_inspector.hpp`) to parse `IMAGE_DIRECTORY_ENTRY_TLS` (`IMAGE_TLS_DIRECTORY64`) raw template size, zero-fill size, characteristics, and callback table counts.
 - Added runtime implicit TLS initialization/teardown (`ScarlettHookInspectModuleTls`, `ScarlettHookInitImplicitTls`, `ScarlettHookFreeImplicitTls`) and an isolated LIFO guest `atexit` registry (`ScarlettHookRegisterGuestAtExit`, `ScarlettHookRunGuestAtExit`, auto-drained on `DLL_PROCESS_DETACH`) to `src/loader/scarlett_hook.cpp`.
 - Added `XMemMin16ByteAlignment` and `Pe64ImplicitTlsAndGuestAtExitE2E` (`59 passed, 0 failed`, zero `/W4` warnings, zero `d3d12_debug` output under `SCARLETT_STRICT_D3D12=1`).
@@ -269,7 +269,17 @@
 - Added `.gitignore` rule for `docs/internal/` and 2 new CTests (`AutoStubThunkSurvivalE2E`, `LoaderSymbolCoverageAuditE2E`) -> `61 passed, 0 failed`, zero `/W4` warnings, zero `d3d12_debug` output.
 
 ## Sprint 65: DXIL/DXBC Xbox-Chunk Stripper, Enhanced Barriers & Hardware Feature Caps
-- Added `src/shims/d3d12_xs/shader_stripper.hpp` with clean-room DXBC modified-MD5 digest calculation (`ComputeDxbcDigest`), PC chunk whitelist validation (`HasNonPcDxbcChunks`), and Xbox-chunk stripping + container rebuilding (`StripXboxDxbcChunks`).
+- Added `src/shims/d3d12_xs/shader_stripper.hpp` with independent DXBC modified-MD5 digest calculation (`ComputeDxbcDigest`), PC chunk whitelist validation (`HasNonPcDxbcChunks`), and Xbox-chunk stripping + container rebuilding (`StripXboxDxbcChunks`).
 - Integrated automatic Xbox-chunk stripping into `ScarlettDeviceX::TranslateStage` (`src/shims/d3d12_xs/device_x.cpp`) with zero-overhead passthrough for clean PC DXBC/DXIL and FNV-1a cache memoization for stripped containers.
 - Appended `ID3D12GraphicsCommandListX::Barrier()` (forwarding to `ID3D12GraphicsCommandList7::Barrier` for Enhanced Barriers) and `ID3D12DeviceX::CheckFeatureSupport()` (Mesh Shaders / Sampler Feedback / Enhanced Barriers / Shader Model queries) while preserving all existing COM vtable slots.
 - Added `DxbcDigestAndXboxChunkStripperE2E`, `D3D12XsEnhancedBarriersE2E`, and `D3D12XsFeatureCapsQueryE2E` (`64 passed, 0 failed`, zero `/W4` warnings).
+
+## Sprint 66: Fix & Clean — Security, Bounds, XVD Flags, Portable Build, Individual CTests & CI
+- **66.1 VFS Path Escape (`src/common/vfs.hpp`):** Replaced fixed `MAX_PATH` `ReadEnvPath` with `sc::config::GetEnvPath`; added component-level path normalization, trailing-dot stripping, mixed-slash handling, >`MAX_PATH` support, and case-insensitive root containment checks rejecting `..` escapes and embedded drive/colon tokens. Added `VfsPathEscapeAndLongPaths`.
+- **66.2 XVD Bounds Overflow (`src/common/xvd_container.hpp`):** Replaced overflow-prone `userDataOffset + userDataLength > fileSize` with subtraction-safe bounds checks and added `driveSize` and `embeddedXvdLen` validation.
+- **66.3 XVD Encryption Flag & Header Audit (`src/common/xvd_container.hpp`, `docs/SPEC_SOURCES.md`):** Fixed an inverted encryption check against public `emoose/xvdtool` (`kXvdFlagEncryptionDisabled = 0x2u`; encrypted when `(volumeFlags & 0x2u) == 0u`). Previously, `kXvdFlagEncrypted = 0x1u` erroneously accepted encrypted images (`0x0`) and rejected unencrypted read-only images (`0x3`). Also documented an honest header-layout discrepancy: `0x200`/`0x208`/`0x20C`/`0x218` match real XVD/XVC headers (confirmed against a local retail `.xvc` with `volumeFlags=0x41`), while `0x240`/`0x244`/`0x250`/`0x258` are project-assumed (`ASSUMED`) synthetic test offsets (real `ContentType`/`EmbeddedXVDLength`/`UserDataLength` are at `0x284`/`0x288`/`0x28C`). Updated 5 test call sites in `tests_loader_e2e.cpp` and added `XvdFlagsAndBoundsNegative`.
+- **66.4 Non-ASCII Paths (`src/common/ansi_path.hpp`, `src/loader/pe_patcher.cpp`, `src/loader/scarlett_hook.cpp`):** Replaced silent lossy `WideCharToMultiByte(CP_ACP, ...)` with `WC_NO_BEST_FIT_CHARS` + `usedDefault` detection and `GetShortPathNameW` 8.3 fallback (failing loudly if still unrepresentable). Routed `HookLoadLibraryA`/`ExA` and `HookGetModuleHandleA`/`ExA` directly through `g_shimsWide` -> wide `g_orig*W` APIs.
+- **66.5 Stale Module Handles (`src/loader/scarlett_hook.cpp`):** Hooked `FreeLibrary` to untrack unloaded modules and switched `g_seenModules` to `std::unordered_map<HMODULE, ModuleIdentity>` keyed on PE `(TimeDateStamp, SizeOfImage)` so unhooked unload/reload at the same base address re-patches cleanly. Added `NonAsciiShimAndFreeLibraryHook`.
+- **66.6 Portable Build (`tools/build.bat`, `tools/verify.bat`):** Removed hardcoded Visual Studio 18 paths; scripts now use `cl.exe`/`cmake.exe`/`ctest.exe` on `PATH` when available and otherwise locate Visual Studio via `vswhere.exe`.
+- **66.7 Individual CTest Targets (`CMakeLists.txt`, `src/tests/scarlett_tests/main.cpp`):** Added `--exact` matching to `scarlett_tests.exe` and registered all **67 tests** individually in CTest with `cpu` (36 tests) and `gpu` (31 tests) labels (`67 passed, 0 failed`, 0 `/W4` warnings).
+- **66.8–66.9 Docs, Mojibake, CI & Repo Hygiene:** Fixed double-encoded UTF-8 mojibake across `docs/` and `tools/build_wiki.py`; created `docs/SPEC_SOURCES.md`, reordered `docs/ROADMAP.md` to prioritize external GDK samples, differential shaders, and WARP/CI; added `.github/workflows/ci.yml`, `SECURITY.md`, `CONTRIBUTING.md`, and `.gitattributes`.

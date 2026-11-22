@@ -191,11 +191,68 @@ target_link_libraries(loader PRIVATE sc_common)
 add_dependencies(loader scarlett_hook)
 sc_set_runtime_dir(loader "${SC_BIN_DIR}")
 
-# Register headless verification suite via loader.exe in CTest
-add_test(
-    NAME scarlett_shim_suite
-    COMMAND $<TARGET_FILE:loader> $<TARGET_FILE:scarlett_tests>
+# Register each test from scarlett_tests/main.cpp individually in CTest
+set(_sc_tests_main "${CMAKE_SOURCE_DIR}/src/tests/scarlett_tests/main.cpp")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_sc_tests_main}")
+file(STRINGS "${_sc_tests_main}" _sc_test_lines REGEX "^[ \t]*\\{\"([A-Za-z0-9_]+)\",")
+
+set(_sc_gpu_tests
+    D3D12HeadlessDeviceAndPso
+    D3D12PlacedResourcesAndHeap
+    ScxsTranslatorAndPsoCache
+    D3D12ComputePsoAndUavExecution
+    Rdna2IsaDecoderAndGpuExecution
+    D3D12AsyncComputeCrossQueueSync
+    Rdna2ComputeIsaExecution
+    Rdna2VertexAndPixelPipelineWithCbv
+    XgXs64KbsAndBcnBlockSwizzle
+    DStorageGpuBufferStreaming
+    DStorageGpuTextureStreaming
+    DStorageDeviceXBridgeAndMipChain
+    Rdna2ImageSampleShader
+    PresentXDescriptorAudit
+    Rdna2TexturedDrawE2E
+    DStorageGpuBufferAndFenceE2E
+    Rdna2ComputeDispatchE2E
+    D3D12XsCommandListWrapperE2E
+    D3D12XsCmdListRenderClearE2E
+    D3D12XsCmdListComputeDispatchE2E
+    ScarlettTitleBringUpE2E
+    ScarlettFullStack50SprintCapstoneE2E
+    D3D12Xs3DPerspectiveDepthRenderE2E
+    D3D12XsComVtableAbiConformanceE2E
+    D3D12XsPresentXSwapChainE2E
+    D3D12XsFramePacingTokensE2E
+    D3D12XsHeadlessPresentXModeE2E
+    D3D12XsAsyncComputeCrossQueueSyncE2E
+    DxbcDigestAndXboxChunkStripperE2E
+    D3D12XsEnhancedBarriersE2E
+    D3D12XsFeatureCapsQueryE2E
 )
-set_tests_properties(scarlett_shim_suite PROPERTIES
-    ENVIRONMENT "SCARLETT_HEADLESS=1"
-)
+
+set(_sc_registered_count 0)
+foreach(_line IN LISTS _sc_test_lines)
+    if(_line MATCHES "^[ \t]*\\{\"([A-Za-z0-9_]+)\",")
+        set(_tname "${CMAKE_MATCH_1}")
+        add_test(
+            NAME "${_tname}"
+            COMMAND $<TARGET_FILE:loader> $<TARGET_FILE:scarlett_tests> --exact --filter "${_tname}"
+        )
+        list(FIND _sc_gpu_tests "${_tname}" _gpu_idx)
+        if(_gpu_idx GREATER_EQUAL 0)
+            set(_tlabel "gpu")
+        else()
+            set(_tlabel "cpu")
+        endif()
+        set_tests_properties("${_tname}" PROPERTIES
+            ENVIRONMENT "SCARLETT_HEADLESS=1"
+            LABELS "${_tlabel}"
+        )
+        math(EXPR _sc_registered_count "${_sc_registered_count} + 1")
+    endif()
+endforeach()
+
+if(_sc_registered_count EQUAL 0)
+    message(FATAL_ERROR "Failed to discover any tests from ${_sc_tests_main}")
+endif()
+message(STATUS "Registered ${_sc_registered_count} individual Scarlett CTest target(s)")

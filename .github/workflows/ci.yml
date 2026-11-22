@@ -1,0 +1,30 @@
+name: Windows CI
+
+on:
+  push:
+    branches: [ main, "sprint-*" ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test-cpu:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSVC x64 Developer Environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Configure (CMake + Ninja)
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build (Zero-Warning /W4 Check)
+        run: cmake --build build
+
+      - name: Run CPU CTest Suite (GPU tests require hardware GPU / future WARP mode)
+        env:
+          SCARLETT_HEADLESS: "1"
+        run: ctest --test-dir build -L cpu --output-on-failure --verbose

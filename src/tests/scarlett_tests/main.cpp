@@ -3,6 +3,10 @@
 #include <cctype>
 #include <string_view>
 
+bool TestVfsPathEscapeAndLongPaths();
+bool TestXvdFlagsAndBoundsNegative();
+bool TestNonAsciiShimAndFreeLibraryHook();
+
 namespace {
 
 struct TestEntry {
@@ -75,7 +79,23 @@ constexpr TestEntry kTests[] = {
     {"DxbcDigestAndXboxChunkStripperE2E",  TestDxbcDigestAndXboxChunkStripperE2E},
     {"D3D12XsEnhancedBarriersE2E",         TestD3D12XsEnhancedBarriersE2E},
     {"D3D12XsFeatureCapsQueryE2E",         TestD3D12XsFeatureCapsQueryE2E},
+    {"VfsPathEscapeAndLongPaths",          TestVfsPathEscapeAndLongPaths},
+    {"XvdFlagsAndBoundsNegative",          TestXvdFlagsAndBoundsNegative},
+    {"NonAsciiShimAndFreeLibraryHook",     TestNonAsciiShimAndFreeLibraryHook},
 };
+
+bool EqualsCaseInsensitive(std::string_view a, std::string_view b) {
+    if (a.size() != b.size()) {
+        return false;
+    }
+    for (size_t i = 0; i < a.size(); ++i) {
+        if (std::tolower(static_cast<unsigned char>(a[i])) !=
+            std::tolower(static_cast<unsigned char>(b[i]))) {
+            return false;
+        }
+    }
+    return true;
+}
 
 bool ContainsCaseInsensitive(std::string_view haystack, std::string_view needle) {
     if (needle.empty()) {
@@ -95,12 +115,15 @@ bool ContainsCaseInsensitive(std::string_view haystack, std::string_view needle)
 
 int main(int argc, char** argv) {
     bool listOnly = false;
+    bool exactMatch = false;
     std::string_view filter;
 
     for (int i = 1; i < argc; ++i) {
         std::string_view arg(argv[i]);
         if (arg == "--list") {
             listOnly = true;
+        } else if (arg == "--exact") {
+            exactMatch = true;
         } else if (arg == "--filter" && i + 1 < argc) {
             filter = argv[++i];
         } else if (arg.rfind("--filter=", 0) == 0) {
@@ -108,9 +131,17 @@ int main(int argc, char** argv) {
         }
     }
 
+    auto matches = [&](const char* name) -> bool {
+        if (filter.empty()) {
+            return true;
+        }
+        return exactMatch ? EqualsCaseInsensitive(name, filter)
+                          : ContainsCaseInsensitive(name, filter);
+    };
+
     if (listOnly) {
         for (const auto& t : kTests) {
-            if (ContainsCaseInsensitive(t.name, filter)) {
+            if (matches(t.name)) {
                 std::printf("%s\n", t.name);
             }
         }
@@ -122,7 +153,7 @@ int main(int argc, char** argv) {
     int passed = 0;
     int failed = 0;
     for (const auto& t : kTests) {
-        if (!ContainsCaseInsensitive(t.name, filter)) {
+        if (!matches(t.name)) {
             continue;
         }
         std::printf("[TEST] %-34s ... ", t.name);
@@ -137,6 +168,12 @@ int main(int argc, char** argv) {
     }
 
     XGameRuntimeUninitialize();
+
+    if (exactMatch && !filter.empty() && (passed + failed) == 0) {
+        std::printf("ERROR: no test matched --exact --filter '%.*s'\n",
+                    static_cast<int>(filter.size()), filter.data());
+        return 1;
+    }
 
     std::printf("=== Results: %d passed, %d failed ===\n", passed, failed);
     return (failed == 0) ? 0 : 1;

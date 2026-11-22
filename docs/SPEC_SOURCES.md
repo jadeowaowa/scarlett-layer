@@ -1,0 +1,35 @@
+# Specification Sources & Assumed Contracts
+
+This document separates behaviors backed by public documentation or open-source references from project-assumed contracts (`ASSUMED`). Anything in the `ASSUMED` column must be treated as synthetic scaffolding until matched against public headers or unmodified external binaries.
+
+## 1. XVD / XVC Container Header (`src/common/xvd_container.hpp`)
+
+| Field / Rule | Offset / Value | Status | Source / Notes |
+| :--- | :--- | :--- | :--- |
+| Header magic (`"msft-xvd"`) | `0x200` (8 bytes) | Sourced | `emoose/xvdtool` (`LibXboxOne/XVD/XVDStructs.cs`); corroborated against local retail Series X\|S `.xvc` header |
+| `VolumeFlags` (`uint32_t`) | `0x208` | Sourced | `emoose/xvdtool` (`XVDEnums.cs`): `ReadOnly = 0x1`, `EncryptionDisabled = 0x2`, `DataIntegrityDisabled = 0x4`, `LegacySectorSize = 0x8`, `ResiliencyEnabled = 0x10`, `SraReadOnly = 0x20`, `RegionIdInXts = 0x40`, `EraSpecific = 0x80` |
+| Encryption check | `(volumeFlags & 0x2u) == 0u` | Sourced | `emoose/xvdtool` (`XVDFile.cs`): `IsEncrypted => (VolumeFlags & EncryptionDisabled) == 0`. Fixed in Sprint 66 (was previously inverted as `(volumeFlags & 0x1u) != 0`). Encrypted images are rejected unconditionally. |
+| `FormatVersion` (`uint32_t`) | `0x20C` | Sourced | `emoose/xvdtool` (`XVDStructs.cs`); observed `3` on retail Series X\|S `.xvc` |
+| `DriveSize` (`uint64_t`) | `0x218` | Sourced | `emoose/xvdtool` (`XVDStructs.cs`); bounds-checked against file size in `XvdContainer::Open` |
+| `ContentType` (`uint32_t`) | Currently read at `0x240` | **ASSUMED** | Real `emoose/xvdtool` offset is `0x284` (observed `1` on retail `.xvc`). Current `0x240` lies inside `TopHashBlockHash` in retail headers and is used only by `BuildSyntheticUnencryptedXvd` tests. |
+| `EmbeddedXVDLength` (`uint32_t`) | Currently read at `0x244` | **ASSUMED** | Real `emoose/xvdtool` offset is `0x288`. Current `0x244` is synthetic test layout only. |
+| `UserDataOffset` (`uint64_t`) | Currently read at `0x250` | **ASSUMED** | Real XVD computes user-data offset from header/hash-table/embedded-XVD geometry rather than storing a `uint64_t` at `0x250`. |
+| `UserDataLength` (`uint64_t`) | Currently read at `0x258` | **ASSUMED** | Real `emoose/xvdtool` stores `UserDataLength` as `uint32_t` at `0x28C`. Current `0x258` is synthetic test layout only. |
+
+## 2. Project-Defined & Modeled Formats
+
+| Subsystem | Artifact | Status | Notes |
+| :--- | :--- | :--- | :--- |
+| Shader container (`SCXS`) | `src/shims/d3d12_xs/shader_translator.hpp` | **ASSUMED** | Project-defined 32-byte wrapper (`FNV-1a` checksum) for testing the RDNA2 ISA lifter seam. Real titles ship DXBC/DXIL containers. |
+| Compression (`SCLZ`) | `src/common/codecs.hpp`, `src/shims/dstorage_xs/` | **ASSUMED** | Project-defined LZ77 block stream used to test `dstorage_xs` decompression plumbing. Real titles use Zlib / GDeflate / BCPack. |
+| Console COM interfaces | `ID3D12DeviceX`, `ID3D12CommandQueueX`, `ID3D12GraphicsCommandListX`, `IXGTextureAddressComputer`, `IDStorageFactoryX` | **ASSUMED** (partial) | Modeled COM interfaces and IIDs; vtable slot order and GUIDs have not been audited against retail GDK headers/binaries except `gameinput.dll` slots 3/4 and ordinal `@1`. |
+| RDNA2 ISA encodings | `src/shims/d3d12_xs/rdna2_isa.hpp` | Sourced (subset) | AMD RDNA2 (GFX10.3) ISA Reference Guide (`SOPP`, `VOP1`, `VOP2`, `VOP3`, `SMEM`, `VINTRP`, `MUBUF`, `MIMG`, `EXP` subset). |
+| DXBC modified MD5 digest | `src/shims/d3d12_xs/shader_stripper.hpp` | Sourced | Publicly documented DirectX Shader Compiler (`microsoft/DirectXShaderCompiler`) DXBC hash algorithm. |
+| Virtual drive prefixes | `src/common/vfs.hpp` | Sourced (convention) | `G:\` (game root), `T:\` (scratch), `S:\` (save temp) mapped to isolated host directories with traversal rejection. Unmapped drives (e.g., `C:\`) pass through unchanged (`*outWasVirtual = false`). |
+| `XMem` 16-byte floor & topology | `src/shims/xmem/`, `src/shims/kernelx/` | Sourced / **ASSUMED** | 16-byte minimum alignment floor, 13.5 GiB title budget, and 7-core / 14-thread Series X topology based on public Xbox Series X specifications. |
+
+## 3. Verification Boundaries
+
+- **TODO(jade):** Audit `src/loader/pe_patcher.cpp` and `src/loader/scarlett_hook.cpp` with an independent reviewer (suspended-process APC/IAT patching).
+- **TODO(jade):** Migrate `XvdContainer` header parsing from the `ASSUMED` `0x240..0x258` synthetic layout to the real `emoose/xvdtool` `0x284`/`0x288`/`0x28C` offsets when unencrypted retail XVD metadata support is scheduled.
+- **TODO(jade):** Retitle the existing GitHub `v1.0.0` release ("Golden Master") to a `v0.x` pre-release to match the experimental status.
