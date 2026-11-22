@@ -73,8 +73,7 @@ inline std::string ExtractXmlAttr(const std::string& xml, const std::string& tag
     size_t tpos = std::string::npos;
     while ((searchPos = xml.find(open, searchPos)) != std::string::npos) {
         const size_t after = searchPos + open.size();
-        if (after < xml.size() && (xml[after] == ' ' || xml[after] == '	' || xml[after] == '' || xml[after] == '
-' || xml[after] == '>')) {
+        if (after < xml.size() && (xml[after] == ' ' || xml[after] == '\t' || xml[after] == '\r' || xml[after] == '\n' || xml[after] == '>')) {
             tpos = searchPos;
             break;
         }
