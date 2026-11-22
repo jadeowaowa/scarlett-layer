@@ -57,7 +57,7 @@ Shared runtime flags live in `common/config.hpp`.
 
 What is demonstrated today:
 
-- All **72 individual CTest targets** (`40 cpu`, `32 gpu`) pass on both the author's NVIDIA RTX 5070 and Microsoft WARP (`SCARLETT_USE_WARP=1`), with a warning-free `/W4` build and zero D3D12 debug-layer errors. Unmodified Microsoft GDK `SimpleTriangleDesktop.exe` boots, renders, and exits cleanly (`code=0`) through `loader.exe --boot` and the Liquid Glass desktop launcher (`scarlett_studio.exe`, Direct2D 1.1 + DirectWrite + DirectComposition + Windows 11 Acrylic). Both `cpu` and `gpu` suites run on GitHub Actions Windows CI (via WARP). Current baseline: Sprint 69.
+- All **72 individual CTest targets** (`40 cpu`, `32 gpu`) pass on both the author's NVIDIA RTX 5070 and Microsoft WARP (`SCARLETT_USE_WARP=1`), with a warning-free `/W4` build and zero D3D12 debug-layer errors. Unmodified GDK `SimpleTriangleDesktop.exe` (Desktop sample target) boots, renders, and exits cleanly (`code=0`) through `loader.exe --boot` and `scarlett_studio.exe` (Direct2D 1.1 + DirectWrite + DirectComposition + Windows 11 Acrylic); console-targeted Xbox samples and broader external binaries remain an active validation milestone rather than a blanket guarantee. Both `cpu` and `gpu` suites run on GitHub Actions Windows CI (via WARP). Current baseline: Sprint 69.
 - The tests run real D3D12 work with GPU readback: a textured RDNA2 draw, a compute dispatch, 3D depth rendering, and cross-queue fence sync. They also cover import and ordinal rewriting, SCLZ streaming, and a boot-to-frame-to-save run (`ScarlettTitleBringUpE2E`).
 
 What is **not** demonstrated yet:
