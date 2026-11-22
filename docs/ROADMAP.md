@@ -1,8 +1,8 @@
-# Scarlett Layer — Roadmap (Sprint 66 Baseline)
+# Scarlett Layer — Roadmap (Sprint 69 Baseline)
 
-**Current Baseline:** `sprint-66-baseline` — **67/67 individual CTests passing** (`36 cpu`, `31 gpu`), zero `/W4 /permissive-` warnings, zero `d3d12_debug` errors under `SCARLETT_STRICT_D3D12=1`, portable `vswhere` build scripts, and GitHub Actions Windows CI (`cpu` suite).
+**Current Baseline:** `v0.69.0-pre` (Sprint 69) — **72/72 individual CTests passing** (`40 cpu`, `32 gpu`, all Tier 1 self-authored synthetic checks; see [`docs/STATUS.md`](STATUS.md)), zero `/W4 /permissive-` warnings, zero `d3d12_debug` errors under `SCARLETT_STRICT_D3D12=1`, portable `vswhere` build scripts, and GitHub Actions Windows CI running both `cpu` and `gpu` suites on Microsoft WARP.
 
-## Completed Recently (Sprints 63–66)
+## Completed Recently (Sprints 63–69)
 
 | Sprint | Completed Scope | Verification |
 | :---: | :--- | :--- |
@@ -21,7 +21,7 @@ Following an external architecture review, feature expansion (DXR, XMA2, additio
 | Sprint | Focus Area | Deliverables | Acceptance Test |
 | :---: | :--- | :--- | :--- |
 | **70** | **Differential RDNA2 Shader Lifter Corpus & Real XVD Offsets** | Expand `rdna2_isa.hpp` / `shader_translator.hpp` with a multi-case differential test corpus comparing lifted RDNA2 shaders against reference HLSL/DXBC outputs (ALU edge cases, CBVs, SRV/UAV loads/stores, FP16/packed ops, control flow); align `XvdContainer` header fields to real `emoose/xvdtool` offsets (`0x284`/`0x288`/`0x28C`); run local verification on a second GPU vendor when available. | Differential corpus runs >= 20 distinct shader cases with exact GPU readback match against reference shaders; real XVD offset parser passes negative/positive suite. |
-| **71** | **Independent Loader Audit & Release Cleanup** | **TODO(jade):** Arrange independent code review of `src/loader/pe_patcher.cpp` and `src/loader/scarlett_hook.cpp` (suspended-process APC/IAT patching); retitle the `v1.0.0` GitHub release to a `v0.x` pre-release; add `tools/generate_status.py` for factual coverage tables. | All review findings resolved or tracked; GitHub release accurately labeled `v0.x` pre-release; status table auto-generated from CTest + `.def` exports. |
+| **71** | **Independent Loader Audit, Xbox-Target Bring-Up & Release Cleanup** | **TODO(jade):** Arrange independent human Windows-internals review of `src/loader/pe_patcher.cpp` and `src/loader/scarlett_hook.cpp` (suspended-process APC/IAT patching); retitle the `v1.0.0` GitHub release to a `v0.x` pre-release; add fuzz harnesses for PE/XVD/VFS parsers; boot an unmodified **Xbox-platform-targeted** unencrypted GDK sample (beyond Desktop `SimpleTriangleDesktop`). *(Note: `tools/generate_status.py` + `docs/STATUS.md` + CI `--check` were pulled forward ahead of Sprint 71.)* | All human review findings resolved or tracked; GitHub release labeled `v0.x` pre-release; at least one Xbox-targeted unencrypted binary boots reproducibly and is tracked as Tier 2 in `docs/STATUS.md`. |
 
 ## Deferred Backlog (After External Binaries Run)
 

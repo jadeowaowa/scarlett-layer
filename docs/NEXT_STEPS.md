@@ -1,5 +1,7 @@
 # scarlett-layer: Next Steps for the Coding Agent
 
+> **Archived Handoff Plan (Sprint 65 → 68):** Kept for historical context. Current operational rules live in [`AGENTS.md`](../AGENTS.md), live counts live in [`docs/STATUS.md`](STATUS.md), and active milestones live in [`docs/ROADMAP.md`](ROADMAP.md).
+
 Read this file and `AGENTS.md` before doing anything. The repository is at the **Sprint 65 baseline**. This plan **pauses the feature roadmap** for three sprints (66-68) of fixes, hardening and honesty work. The remaining roadmap items (Velocity pipeline parity, DXR, GameInput v2, XMA2, RDNA2 FP16, EtwPlus/toolhelpx, MSIXVC2, status matrix) resume as Sprint 69+.
 
 ## Why the pause

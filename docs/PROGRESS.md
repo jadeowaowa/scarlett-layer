@@ -26,16 +26,62 @@
 | Sprint 20 | Binary RDNA2 Compute ISA lifter (`v_mul_lo_u32`, `v_add_nc_u32`, `buffer_store_dword`) on `COMPUTE` queue | Done |
 | Sprint 21 | Binary RDNA2 Vertex Shader lifter (`SMEM` CBVs, `VINTRP`, `EXP pos0`/`param0`) + full VS+PS GPU pipeline | Done |
 | Sprint 22 | `xg_xs.dll` RDNA2 `64KB_S` swizzling & BC1/BC3/BC7 multi-mip block compression + GPU BC1 sample | Done |
+| Sprint 23 | `dstorage_xs.dll` Direct-to-VRAM GPU buffer streaming (`COPY` queue + fence sync) | Done |
+| Sprint 24 | `dstorage_xs.dll` Direct-to-VRAM GPU texture region streaming | Done |
+| Sprint 25 | `d3d12_xs` <-> `dstorage_xs` bridge & multi-subresource mip-chain streaming | Done |
+| Sprint 26 | Retail bring-up shims (`AcpHal.dll`, `libHttpClient.GDK.dll`, `XCurl.dll`, `GameInputCreate@1`) | Done |
+| Sprint 27 | Loader PE64 import inspector (`--inspect`) & unencrypted XVD container reader (`--inspect-xvd`) | Done |
+| Sprint 28 | RDNA2 `MIMG IMAGE_SAMPLE` binary decode & HLSL texture sampling lifter | Done |
+| Sprint 29 | `PresentX` dimension validation, clamped copy fallback & descriptor-handle audit | Done |
+| Sprint 30 | COM vtable conformance checks (`gameinput.dll`) & synthetic manifest audit | Done |
+| Sprint 31 | `MicrosoftGame.Config` XML parser (`--inspect-package`, `--boot`) | Done |
+| Sprint 32 | End-to-end RDNA2 `IMAGE_SAMPLE` textured GPU draw with pixel readback | Done |
+| Sprint 33 | Live XInput + keyboard-to-gamepad fallback & deterministic test injection | Done |
+| Sprint 34 | Dynamic `GetModuleHandleA/W` & `GetModuleHandleExA/W` loader hook redirects | Done |
+| Sprint 35 | DirectStorage GPU buffer streaming & `ID3D12Fence` signal synchronization E2E | Done |
+| Sprint 36 | RDNA2 compute shader lifter (`MUBUF` load/store) & 64-thread GPU dispatch E2E | Done |
+| Sprint 37 | Disk-backed RDNA2-to-DXBC shader translation cache | Done |
+| Sprint 38 | `ID3D12GraphicsCommandListX` wrapper & GPU copy execution E2E | Done |
+| Sprint 39 | `ID3D12GraphicsCommandListX` render target, viewport, scissor & descriptor parity | Done |
+| Sprint 40 | `ID3D12GraphicsCommandListX` indexed draw/depth/root constants & `AGENTS.md` | Done |
+| Sprint 41 | Audio runtime E2E (`xaudio2_9.dll` + `AcpHal.dll`) | Done |
+| Sprint 42 | Networking shims E2E (`libHttpClient` + `XCurl` offline mock lifecycle) | Done |
+| Sprint 43 | `XUser` profile exports & offline `XGameSave` E2E | Done |
+| Sprint 44 | `GameInput` runtime polling E2E | Done |
+| Sprint 45 | Multi-shim synthetic boot-to-frame-to-save loop (`ScarlettTitleBringUpE2E`) | Done |
+| Sprint 46 | `kernelx.dll` memory/topology & `pixevt.dll` profiler markers E2E | Done |
+| Sprint 47 | `xmem.dll` 64 KiB physical pool + `xg_xs.dll` `64KB_S` BC7 swizzle E2E | Done |
+| Sprint 48 | `dstorage_xs.dll` dynamic streaming & `IDStorageStatusArrayX` E2E | Done |
+| Sprint 49 | Unencrypted XVD extraction & `MicrosoftGame.Config` boot resolution E2E | Done |
+| Sprint 50 | Full-stack 9-shim synthetic E2E (`v1.0.0` tag — pending retitle to `v0.x` pre-release) | Done |
+| Sprint 51 | PE64 delay-load & ordinal import auditing (`pe_inspector.hpp`) | Done |
+| Sprint 52 | Runtime delay-load IAT patching & `GetProcAddress` ordinal hook | Done |
+| Sprint 53 | 3D perspective indexed geometry & `D32_FLOAT` hardware Z-buffer E2E | Done |
+| Sprint 54 | Raw x64 MSVC COM vtable ABI conformance checks | Done |
+| Sprint 55 | Zero-readback GPU `PresentX` & DXGI swapchain presentation E2E | Done |
+| Sprint 57 | Headless `PresentX` mode (`SCARLETT_HEADLESS=1`) | Done |
+| Sprint 58 | Async compute & cross-queue fence sync + `ID3D12InfoQueue1` debug callback | Done |
+| Sprint 59 | `SCARLETT_STRICT_D3D12=1` abort enforcement & zero D3D12 validation warnings | Done |
+| Sprint 60 | Modularized `d3d12_xs` into focused translation units | Done |
+| Sprint 61 | Modularized `scarlett_tests` into 5 subsystem suites + `--list`/`--filter` CLI | Done |
+| Sprint 62 | Centralized `common/config.hpp` & `ComPtr` RAII cleanup across `d3d12_xs` | Done |
+| Sprint 63 | PE64 implicit `.tls` callbacks, isolated guest `atexit`, 16B `XMem` floor | Done |
+| Sprint 64 | W^X x64 `AutoStubEngine`, symbol-level `--inspect`, `XAudio2` `@1` parity | Done |
+| Sprint 65 | DXBC modified-MD5 digest, Xbox-chunk stripper, Enhanced Barriers & feature caps | Done |
+| Sprint 66 | VFS traversal/XVD overflow/encryption-bit fixes, `vswhere` build, 67 CTests, `SPEC_SOURCES.md`, CI | Done |
+| Sprint 67 | Microsoft WARP CI backend, `loader --audit-dir`, GDK `261000` sample alignment | Done |
+| Sprint 68 | GDK `261000` `xgameruntime` COM broker, `SimpleTriangleDesktop.exe` boot, `Scarlett Studio` GUI | Done |
+| Sprint 69 | Direct2D/DComp Liquid Glass UI on `scarlett_studio.exe` (`v0.69.0-pre`, 72/72 tests) | Done |
 
 ## Shim & Export Coverage
 
 ### `loader.exe` + `scarlett_hook.dll` + `common/`
-- [x] In-memory static & delay-load PE import redirection across all 9 shims
+- [x] In-memory static, delay-load & ordinal PE import redirection across all 12 shims (see [`docs/STATUS.md`](STATUS.md))
 - [x] Pre-entrypoint APC injection of `scarlett_hook.dll`
 - [x] Multi-module runtime IAT hooks (`LoadLibraryA/W`, `LoadLibraryExA/W`) across main `.exe` and loaded sub-DLLs
 - [x] Virtual console drive mapping (`G:\` game root, `T:\` scratch, `S:\` save temp)
 - [x] Zero-dependency `SCLZ` LZ77 block codec + standard IMA-ADPCM (`0x0011`) audio codec
-- [x] Automated headless CTest suite (`scarlett_tests.exe`, 21 checks)
+- [x] Automated headless CTest suite (`scarlett_tests.exe`, 72 individual CTests — live breakdown in [`docs/STATUS.md`](STATUS.md))
 
 ### `xgameruntime.dll`
 - [x] `XGameRuntimeInitialize`, `XGameRuntimeUninitialize`, `XSystemGetDeviceType`
@@ -80,9 +126,7 @@
 - [x] `GetConsoleProcessorInfo`, `SetThreadAffinityMaskX` (7-core/14-thread Series X topology + safe host mask clamping)
 
 ## Upcoming Subsystems
-- [ ] Async compute command queues (`D3D12_COMMAND_LIST_TYPE_COMPUTE`) & cross-queue GPU fence sync
-- [ ] RDNA2 `64KB_S` swizzling & BCn block-compressed texture support (`xg_xs.dll`)
-- [ ] Next scheduled revision of `docs/ARCHITECTURE_PAPER.md`: Sprint 21
+Active milestones and deferred backlog are tracked in [`docs/ROADMAP.md`](ROADMAP.md), and live shim/test counts are generated in [`docs/STATUS.md`](STATUS.md).
 
 ## Sprint 23: DirectStorage Direct-to-VRAM GPU Buffer Streaming
 - Added DSTORAGE_DESTINATION_BUFFER to DSTORAGE_DESTINATION union in dstorage_xs.hpp.

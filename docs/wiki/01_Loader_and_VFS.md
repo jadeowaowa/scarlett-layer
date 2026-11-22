@@ -17,6 +17,7 @@
 - `src/loader/scarlett_hook.cpp` (851 lines)
 - `tools/audit_imports.py` (242 lines)
 - `tools/build_wiki.py` (505 lines)
+- `tools/generate_status.py` (280 lines)
 - `tools/test_brief.py` (108 lines)
 
 ## `src/common/ansi_path.hpp`

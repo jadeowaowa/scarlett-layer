@@ -16,6 +16,8 @@ An experimental Windows / Direct3D 12 compatibility layer for running **unpacked
 
 Virtual drives `G:\`, `T:\` and `S:\` are mounted for the title.
 
+> **Antivirus / EDR note:** Launching a target process suspended, injecting a hook DLL via pre-entrypoint APC, and patching its IAT uses the same OS mechanisms flagged by many antivirus and EDR tools. False positives are expected; loader source (`src/loader/`) is kept readable and unobfuscated so it can be audited directly.
+
 ## What it does not do
 
 - It does **not** decrypt or run retail XVD/XVC packages. Encrypted images are rejected on purpose.
@@ -57,7 +59,7 @@ Shared runtime flags live in `common/config.hpp`.
 
 What is demonstrated today:
 
-- All **72 individual CTest targets** (`40 cpu`, `32 gpu`) pass on both the author's NVIDIA RTX 5070 and Microsoft WARP (`SCARLETT_USE_WARP=1`), with a warning-free `/W4` build and zero D3D12 debug-layer errors. Unmodified GDK `SimpleTriangleDesktop.exe` (Desktop sample target) boots, renders, and exits cleanly (`code=0`) through `loader.exe --boot` and `scarlett_studio.exe` (Direct2D 1.1 + DirectWrite + DirectComposition + Windows 11 Acrylic); console-targeted Xbox samples and broader external binaries remain an active validation milestone rather than a blanket guarantee. Both `cpu` and `gpu` suites run on GitHub Actions Windows CI (via WARP). Current baseline: Sprint 69.
+- All **72 individual CTest targets** (`40 cpu`, `32 gpu`) pass on both the author's NVIDIA RTX 5070 and Microsoft WARP (`SCARLETT_USE_WARP=1`), with a warning-free `/W4` build and zero D3D12 debug-layer errors. All 72 CI checks are **Tier 1 self-authored synthetic tests** (plus one opt-in local read-only corpus audit); **0 automated external Xbox-targeted binary tests** run in CI yet (see [`docs/STATUS.md`](docs/STATUS.md)). Locally, unmodified GDK `SimpleTriangleDesktop.exe` (Desktop sample target) boots, renders, and exits cleanly (`code=0`) through `loader.exe --boot` and `scarlett_studio.exe`; Xbox-platform-targeted samples and broader external binaries remain an active validation milestone. Both `cpu` and `gpu` suites run on GitHub Actions Windows CI (via WARP). Current baseline: Sprint 69 (`v0.69.0-pre`).
 - The tests run real D3D12 work with GPU readback: a textured RDNA2 draw, a compute dispatch, 3D depth rendering, and cross-queue fence sync. They also cover import and ordinal rewriting, SCLZ streaming, and a boot-to-frame-to-save run (`ScarlettTitleBringUpE2E`).
 
 What is **not** demonstrated yet:
@@ -109,7 +111,9 @@ ctest --test-dir build -L cpu --output-on-failure
 
 ## Documentation
 
+- [`docs/STATUS.md`](docs/STATUS.md): auto-generated shim export, test-tier, and spec-source matrix (`tools/generate_status.py`)
 - [`docs/ROADMAP.md`](docs/ROADMAP.md): planned work
+- [`THIRD_PARTY.md`](THIRD_PARTY.md): specification provenance and third-party attribution ledger
 - [`docs/PROGRESS.md`](docs/PROGRESS.md): sprint-by-sprint engineering log
 - [`docs/SPEC_SOURCES.md`](docs/SPEC_SOURCES.md): sourced vs. `ASSUMED` specs and format contracts
 - [`docs/ARCHITECTURE_PAPER.md`](docs/ARCHITECTURE_PAPER.md): architecture write-up (archived Sprint 21 snapshot)
