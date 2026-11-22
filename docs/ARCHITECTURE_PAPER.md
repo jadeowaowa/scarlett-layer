@@ -2,7 +2,7 @@
 
 **Project Version:** Sprint 21 Baseline (9 Shims, 20 Automated Verification Tests)  
 **Target Host Architecture:** Windows 11 x64 (MSVC C++23, Direct3D 12, DXGI 1.6, XAudio2 2.9)  
-**Status:** Archived Sprint 21 architecture snapshot. For current Sprint 69 (`v0.69.0-pre`) implementation status (`72/72` Tier 1 synthetic CTests across 12 shims; `0` Tier 2 Xbox-targeted CI tests), see [`README.md`](../README.md), [`docs/ROADMAP.md`](ROADMAP.md), [`docs/PROGRESS.md`](PROGRESS.md), and [`docs/SPEC_SOURCES.md`](SPEC_SOURCES.md).
+**Status:** Archived Sprint 21 architecture snapshot. For current Sprint 70 implementation status (`74/74` Tier 1 synthetic CTests across 12 shims; `0` Tier 2 Xbox-targeted CI tests), see [`README.md`](../README.md), [`docs/ROADMAP.md`](ROADMAP.md), [`docs/PROGRESS.md`](PROGRESS.md), and [`docs/SPEC_SOURCES.md`](SPEC_SOURCES.md).
 
 ---
 

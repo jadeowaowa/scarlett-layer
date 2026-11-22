@@ -1,7 +1,7 @@
 # Scarlett Layer — AI Context Snapshot
 
-**Commit:** `cac4aa2` (#142) | **Generated:** 2026-11-22 07:29 UTC  
-**Totals:** 80 files (26,386 LOC) | 12 shims | 72 CTest checks
+**Commit:** `45eafbf` (#144) | **Generated:** 2026-11-22 08:01 UTC  
+**Totals:** 81 files (27,069 LOC) | 12 shims | 74 CTest checks
 
 ---
 
@@ -38,6 +38,7 @@
 | Sprint 67 | `SCARLETT_USE_WARP=1` software D3D12 + full WARP CI, `loader --audit-dir`, Desktop GDK `261000` `SimpleTriangleDesktop` alignment (`libHttpClient.dll` 10/10), `PresentX(0)` & 5-arg `WaitFrameEventX` | Done (Tier 1) |
 | Sprint 68 | Real GDK `261000` `xgameruntime.dll` COM service broker (8 service vtables), `libHttpClient` async callbacks, local Desktop `SimpleTriangleDesktop.exe` boot (`code=0`, 0 auto-stubs), `scarlett_studio.exe` | Done (Tier 1 + Desktop sample) |
 | Sprint 69 | Direct2D 1.1 + DirectWrite + DirectComposition Liquid Glass UI on `scarlett_studio.exe`, Apache-2.0 `LICENSE`, wiki rebuild, `v0.69.0-pre` release archive | Done (72/72 Tier 1) |
+| Sprint 70 | Real 12 KiB `emoose/xvdtool` XVD offsets (`0x280`/`0x284`/`0x288`/`0x28C`/`0x470`) & hash-tree geometry, `game_config.hpp` path containment, `pe_inspector.hpp` bounds/overflow hardening, `tools/generate_status.py` CI drift check | Done (74/74 Tier 1) |
 
 ---
 
@@ -78,13 +79,13 @@
    73  src/common/config.hpp
    43  src/common/stub.hpp
   173  src/common/vfs.hpp
-  202  src/common/xvd_container.hpp
+  288  src/common/xvd_container.hpp
  1294  src/gui/scarlett_studio.cpp
   384  src/gui/studio_model.hpp
   267  src/loader/auto_stub.hpp
-  172  src/loader/game_config.hpp
+  277  src/loader/game_config.hpp
   274  src/loader/main.cpp
-  451  src/loader/pe_inspector.hpp
+  564  src/loader/pe_inspector.hpp
   438  src/loader/pe_patcher.cpp
    19  src/loader/pe_patcher.hpp
   851  src/loader/scarlett_hook.cpp
@@ -142,15 +143,16 @@
    59  src/tests/engine_plugin/engine_plugin.cpp
     3  src/tests/engine_plugin/engine_plugin.def
   328  src/tests/scarlett_3d_demo/main.cpp
-  190  src/tests/scarlett_tests/main.cpp
+  194  src/tests/scarlett_tests/main.cpp
   176  src/tests/scarlett_tests/test_harness.hpp
  1312  src/tests/scarlett_tests/tests_d3d12_core.cpp
  1949  src/tests/scarlett_tests/tests_d3d12_shaders_present.cpp
- 1793  src/tests/scarlett_tests/tests_loader_e2e.cpp
+ 2009  src/tests/scarlett_tests/tests_loader_e2e.cpp
   967  src/tests/scarlett_tests/tests_runtime_io.cpp
  1597  src/tests/scarlett_tests/tests_storage_swizzle.cpp
   242  tools/audit_imports.py
   505  tools/build_wiki.py
+  159  tools/generate_status.py
   108  tools/test_brief.py
 ```
 
@@ -413,7 +415,7 @@
 - `MimgOp`: kMimgImageSample = 0x20u
 - `InstFormat`: Sopp, Vop1, Vop2, Vop3, Exp, Mubuf, Smem, Vintrp, Mimg
 
-## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 72 total)
+## 5. Exact CTest Registration Anchors (`src/tests/scarlett_tests/main.cpp`, 74 total)
 ```cpp
     {"VfsPathTranslation",                 TestVfsPathTranslation},
     {"RuntimeAndXUser",                    TestRuntimeAndXUser},
@@ -487,9 +489,13 @@
     {"D3D12XsGdkSampleAlignmentE2E",       TestD3D12XsGdkSampleAlignmentE2E},
     {"XGameRuntimeComBrokerE2E",           TestXGameRuntimeComBrokerE2E},
     {"ScarlettStudioSelfTest",             TestScarlettStudioSelfTest},
+    {"XvdRealOffsetsAndGeometry",          TestXvdRealOffsetsAndGeometry},
+    {"MalformedPeAndConfigHardening",      TestMalformedPeAndConfigHardening},
 ```
 
 ## 6. Recent Git History
+- `45eafbf Merge docs/truth-reset-s69: truthful baseline docs and Sprint 70-73 roadmap`
+- `98f616b docs: reconcile all repo docs to Sprint 69 truth, add THIRD_PARTY.md, and set Sprints 70-73 Xbox timeline`
 - `cac4aa2 Remove duplicate roadmap row, clarify sample scope, and rebuild wiki`
 - `58e4fea Add Apache-2.0 LICENSE, sync roadmap/docs/wiki, and verify 72/72 tests`
 - `e7d0912 Merge sprint-69-studio-liquid-glass: Direct2D/DComp Liquid Glass UI & wiki`
@@ -498,5 +504,3 @@
 - `11d1057 Merge sprint-68-xgameruntime-broker: GDK broker ABI + Scarlett Studio GUI`
 - `03118c3 Sprint 68: GDK xgameruntime COM service broker, SimpleTriangleDesktop boot, and Scarlett Studio GUI`
 - `d10b665 Merge sprint-67-gdk-samples-and-warp: WARP CI, corpus auditor, GDK sample alignment`
-- `4c9333e Sprint 67: WARP CI backend, corpus auditor, and Microsoft GDK sample alignment`
-- `53d8336 Merge branch 'sprint-66-fix-and-clean' (Sprint 66 baseline, 67/67 CTests)`

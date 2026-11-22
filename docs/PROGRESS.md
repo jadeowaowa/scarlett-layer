@@ -34,6 +34,7 @@
 | Sprint 67 | `SCARLETT_USE_WARP=1` software D3D12 + full WARP CI, `loader --audit-dir`, Desktop GDK `261000` `SimpleTriangleDesktop` alignment (`libHttpClient.dll` 10/10), `PresentX(0)` & 5-arg `WaitFrameEventX` | Done (Tier 1) |
 | Sprint 68 | Real GDK `261000` `xgameruntime.dll` COM service broker (8 service vtables), `libHttpClient` async callbacks, local Desktop `SimpleTriangleDesktop.exe` boot (`code=0`, 0 auto-stubs), `scarlett_studio.exe` | Done (Tier 1 + Desktop sample) |
 | Sprint 69 | Direct2D 1.1 + DirectWrite + DirectComposition Liquid Glass UI on `scarlett_studio.exe`, Apache-2.0 `LICENSE`, wiki rebuild, `v0.69.0-pre` release archive | Done (72/72 Tier 1) |
+| Sprint 70 | Real 12 KiB `emoose/xvdtool` XVD offsets (`0x280`/`0x284`/`0x288`/`0x28C`/`0x470`) & hash-tree geometry, `game_config.hpp` path containment, `pe_inspector.hpp` bounds/overflow hardening, `tools/generate_status.py` CI drift check | Done (74/74 Tier 1) |
 
 ## Shim & Export Coverage
 
@@ -43,7 +44,7 @@
 - [x] Multi-module runtime IAT hooks (`LoadLibraryA/W`, `LoadLibraryExA/W`, `GetModuleHandle*`, `GetProcAddress`, `FreeLibrary`)
 - [x] Virtual console drive mapping (`G:\`, `T:\`, `S:\`) with traversal rejection and long-path support
 - [x] Synthetic `SCLZ` LZ77 codec (`ASSUMED`), standard IMA-ADPCM (`0x0011`), and read-only XVD/XVC inspection (encrypted images rejected)
-- [x] Automated CTest suite (`scarlett_tests.exe`): **72/72 Tier 1 self-authored synthetic checks** (`40 cpu`, `32 gpu`) on RTX 5070 + Microsoft WARP; **0 Tier 2 automated external Xbox-targeted binary tests**
+- [x] Automated CTest suite (`scarlett_tests.exe`): **74/74 Tier 1 self-authored synthetic checks** (`42 cpu`, `32 gpu`) on RTX 5070 + Microsoft WARP; **0 Tier 2 automated external Xbox-targeted binary tests**
 
 ### `xgameruntime.dll`
 - [x] GDK `261000` COM service broker (`DllCanUnloadNow`, `InitializeApiImpl`/`Ex`/`Ex2`, `QueryApiImpl`, `UninitializeApiImpl`, `XErrorReport` + 8 service vtables)
@@ -92,7 +93,7 @@
 
 ## Upcoming Milestones (Sprints 70-73)
 See [`docs/ROADMAP.md`](ROADMAP.md) for the active real-Xbox-Series execution timeline:
-- [ ] **Sprint 70:** Real 12 KiB `emoose/xvdtool` XVD offsets (`0x280`/`0x284`/`0x288`/`0x28C`/`0x470`), PE/`MicrosoftGame.Config` parser hardening, and `tools/generate_status.py` CI drift check
+- [x] **Sprint 70:** Real 12 KiB `emoose/xvdtool` XVD offsets (`0x280`/`0x284`/`0x288`/`0x28C`/`0x470`), PE/`MicrosoftGame.Config` parser hardening, and `tools/generate_status.py` CI drift check
 - [ ] **Sprint 71:** Independent-oracle differential RDNA2 shader suite (>= 25 cases) + corpus-scale GFX10.3 translate/compile sweep
 - [ ] **Sprint 72:** First unmodified **Xbox-platform-targeted (`Gaming.Xbox.Scarlett.x64`)** unencrypted binary boot & verified frame (Tier 2)
 - [ ] **Sprint 73:** Multi-title Tier 2 validation, parser fuzzing, second GPU vendor verification, and human loader audit (`TODO(jade)`)
@@ -317,3 +318,9 @@ See [`docs/ROADMAP.md`](ROADMAP.md) for the active real-Xbox-Series execution ti
 - **Direct2D 1.1 + DirectWrite + DirectComposition Liquid Glass Renderer (`src/gui/scarlett_studio.cpp`, `CMakeLists.txt`):** Replaced the Win32 GDI controls in `scarlett_studio.exe` with a Per-Monitor DPI v2 composition swapchain (`DXGI_ALPHA_MODE_PREMULTIPLIED` + `IDCompositionDevice`) layered over Windows 11 DWM Acrylic (`DWMSBT_TRANSIENTWINDOW`), dark mode, and rounded window corners.
 - **Glass Cards, Capsule Controls & Telemetry (`src/gui/scarlett_studio.cpp`):** Added frosted squircle cards with top specular sheen and prismatic refraction rims, ambient aurora gradients, pill action buttons (`Launch`, `Stop`, `Scan Folder`, `Add Target`, `Refresh`, `Inspect`, `Tests (GPU)`, `Tests (WARP)`, `Copy Log`, `Clear`), animated capsule switches (`WARP Software GPU`, `Headless Mode`, `Strict D3D12`, `Auto-Stub Engine`, `Stub Hotlist Log`), per-title coverage progress bars, an Inspector hero header, and a syntax-colored scrollable live console.
 - **Verification:** Passed all **72/72** CTest targets (`40 cpu`, `32 gpu`) with zero `/W4` warnings and regenerated `docs/wiki/` via `tools/build_wiki.py`.
+
+## Sprint 70: Real XVD Header Offsets, Parser Hardening & Automated Status Sync
+- **Real 12 KiB `emoose/xvdtool` XVD Layout (`src/common/xvd_container.hpp`, `docs/SPEC_SOURCES.md`):** Migrated `XvdContainer` off synthetic `0x240..0x258` offsets to real `0x3000` header geometry (`0x280` `Type`, `0x284` `ContentType`, `0x288` `EmbeddedXVDLength`, `0x28C` `uint32_t UserDataLength`, `0x470` `MutableDataPageCount`) with overflow-safe page rounding and hash-tree offset calculation (`0xAA` entries/page + resiliency doubling). Encrypted XVD/XVC containers remain rejected unconditionally.
+- **Loader Parser Hardening (`src/loader/game_config.hpp`, `src/loader/pe_inspector.hpp`):** Enforced 4 MiB manifest cap, regular-file check, and package-root lexical containment in `ParseGameConfig` (blocking `..`, rooted paths, drive specifiers/NTFS ADS `:`, and control chars). Centralized bounds-checked PE64 reading (`ReadFileBytesSafe`, `ParseValidatedPe64Headers`, `GetDataDir`), 64-bit overflow-safe `RvaToFileOffset` bounded by `SizeOfRawData`, and descriptor/thunk/export loop caps.
+- **Automated Status & CI Drift Check (`tools/generate_status.py`, `docs/STATUS.md`, `.github/workflows/ci.yml`):** Added zero-dependency status generator wired into GitHub Actions Windows CI (`--check`) to keep `docs/STATUS.md`, `README.md`, `docs/ROADMAP.md`, `CONTRIBUTING.md`, and `AGENTS.md` locked to live test/export counts.
+- **Verification (`src/tests/scarlett_tests/tests_loader_e2e.cpp`):** Added `XvdRealOffsetsAndGeometry` (#73) and `MalformedPeAndConfigHardening` (#74) -> **74 passed, 0 failed** (`42 cpu`, `32 gpu`) on both NVIDIA RTX 5070 and Microsoft WARP with zero `/W4` warnings.

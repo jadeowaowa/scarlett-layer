@@ -8,4 +8,5 @@
 - **Test Integrity:** Never weaken or silence test assertions to force green CI. Fix the implementation or report the failure honestly.
 - **Human-Only Gates:** Never close `TODO(jade)` items on the owner's behalf (independent human Windows-internals loader audit of `pe_patcher.cpp` / `scarlett_hook.cpp`, GitHub `v1.0.0` release retitling).
 - **Legal & Scope Boundaries:** Reject encrypted XVD/XVC containers unconditionally. Never commit Microsoft GDK headers, retail dumps, leaked binaries, console keys, or GPL-licensed third-party code.
-- **Current Baseline:** Sprint 69 (`v0.69.0-pre`, commit `cac4aa2`, Apache-2.0) — 72/72 Tier 1 synthetic CTests (`40 cpu`, `32 gpu`); 0 Tier 2 automated external Xbox-targeted binary tests. Next focus: Sprints 70-73 in `docs/ROADMAP.md`.
+- **Status & Drift Check:** Run `py tools\generate_status.py`, `py tools\generate_status.py --check`, and `py tools\build_wiki.py` before committing. Never hand-edit `docs/STATUS.md`.
+- **Current Baseline:** Sprint 70 (`74/74` Tier 1 synthetic CTests: `42 cpu`, `32 gpu`; `0` Tier 2 automated external Xbox-targeted binary tests; Apache-2.0). Next focus: Sprints 71-73 in `docs/ROADMAP.md`.
