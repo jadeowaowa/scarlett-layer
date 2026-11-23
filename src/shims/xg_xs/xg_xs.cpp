@@ -440,7 +440,8 @@ void BuildGdkLayout(
     const uint32_t mips = std::clamp(mipLevels == 0 ? ComputeFullMipCount(w0, h0, is3D ? d0 : 1u) : mipLevels, 1u, 15u);
     const uint32_t samples = std::max(sampleCount, 1u);
 
-    const uint64_t baseAlign = (tileMode == 0) ? 256ULL : 65536ULL;
+    const bool is1DThin = (tileMode == 8u);
+    const uint64_t baseAlign = (tileMode == 0 || is1DThin) ? 256ULL : 65536ULL;
     out.BaseAlignmentBytes = baseAlign;
     out.Planes = 1;
 
@@ -458,20 +459,44 @@ void BuildGdkLayout(
         const uint32_t md = is3D ? std::max(1u, d0 >> m) : d0;
         const uint32_t ew = (mw + fm.blockW - 1u) / fm.blockW;
         const uint32_t eh = (mh + fm.blockH - 1u) / fm.blockH;
-        const uint32_t pitchBytes = static_cast<uint32_t>(AlignUp(static_cast<uint64_t>(ew) * fm.bpe, 256ULL));
-        const uint64_t sliceBytes = AlignUp(static_cast<uint64_t>(pitchBytes) * eh, 256ULL);
-        const uint64_t mipBytes = AlignUp(sliceBytes * md * samples, 512ULL);
 
-        offset = AlignUp(offset, 512ULL);
+        uint32_t pw = 0;
+        uint32_t ph = 0;
+        uint32_t pitchBytes = 0;
+        uint64_t sliceBytes = 0;
+        uint64_t mipBytes = 0;
+        uint32_t mipAlign = 256u;
+
+        if (is1DThin) {
+            // AMD GCN 1D_THIN: 8x8 Morton micro-tiles, 256-byte pipe-interleave alignment
+            ph = (eh + 7u) & ~7u;
+            pw = (ew + 7u) & ~7u;
+            while ((static_cast<uint64_t>(pw) * ph * fm.bpe) % 256ULL != 0ULL) {
+                pw += 8u;
+            }
+            pitchBytes = pw * fm.bpe;
+            sliceBytes = static_cast<uint64_t>(pw) * ph * fm.bpe;
+            mipBytes = AlignUp(sliceBytes * md * samples, 256ULL);
+            mipAlign = 256u;
+        } else {
+            pitchBytes = static_cast<uint32_t>(AlignUp(static_cast<uint64_t>(ew) * fm.bpe, 256ULL));
+            pw = pitchBytes / fm.bpe;
+            ph = eh;
+            sliceBytes = AlignUp(static_cast<uint64_t>(pitchBytes) * eh, 256ULL);
+            mipBytes = AlignUp(sliceBytes * md * samples, 512ULL);
+            mipAlign = 512u;
+        }
+
+        offset = AlignUp(offset, mipAlign);
         GDK_XG_MIPLEVEL_LAYOUT& ml = pl.MipLayout[m];
         ml.SizeBytes = mipBytes;
         ml.OffsetBytes = offset;
         ml.Slice2DSizeBytes = sliceBytes;
-        ml.PitchPixels = (pitchBytes / fm.bpe) * fm.blockW;
+        ml.PitchPixels = pw * fm.blockW;
         ml.PitchBytes = pitchBytes;
-        ml.AlignmentBytes = 512u;
-        ml.PaddedWidthElements = pitchBytes / fm.bpe;
-        ml.PaddedHeightElements = eh;
+        ml.AlignmentBytes = mipAlign;
+        ml.PaddedWidthElements = pw;
+        ml.PaddedHeightElements = ph;
         ml.PaddedDepthOrArraySize = md;
         ml.WidthElements = ew;
         ml.HeightElements = eh;
@@ -693,7 +718,7 @@ HRESULT WINAPI XGCreateTextureComputer(const void* desc, void** ppComputer) {
 uint32_t WINAPI XGComputeOptimalTileMode(
     uint32_t /*dimension*/, uint32_t /*format*/, uint32_t /*width*/,
     uint32_t /*height*/, uint32_t /*depth*/, uint32_t /*sampleCount*/, uint32_t /*bindFlags*/) {
-    return 0; // XG_TILE_MODE_LINEAR
+    return 8u; // XG_TILE_MODE_1D_THIN
 }
 
 } // extern "C"

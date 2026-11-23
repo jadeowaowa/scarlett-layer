@@ -1278,6 +1278,184 @@ private:
 
 // Wraps non-buffer (texture) ID3D12Resource objects so GetGPUVirtualAddress() returns a valid
 // CPU-writable shadow address (matching Xbox unified memory expectations in Unity AsyncUploadManager).
+struct GcnFormatMetrics {
+    uint32_t blockW;
+    uint32_t blockH;
+    uint32_t bpe;
+};
+
+static GcnFormatMetrics GetGcnFormatMetrics(DXGI_FORMAT fmt) {
+    switch (fmt) {
+        case DXGI_FORMAT_BC1_TYPELESS:
+        case DXGI_FORMAT_BC1_UNORM:
+        case DXGI_FORMAT_BC1_UNORM_SRGB:
+        case DXGI_FORMAT_BC4_TYPELESS:
+        case DXGI_FORMAT_BC4_UNORM:
+        case DXGI_FORMAT_BC4_SNORM:
+            return { 4, 4, 8 };
+        case DXGI_FORMAT_BC2_TYPELESS:
+        case DXGI_FORMAT_BC2_UNORM:
+        case DXGI_FORMAT_BC2_UNORM_SRGB:
+        case DXGI_FORMAT_BC3_TYPELESS:
+        case DXGI_FORMAT_BC3_UNORM:
+        case DXGI_FORMAT_BC3_UNORM_SRGB:
+        case DXGI_FORMAT_BC5_TYPELESS:
+        case DXGI_FORMAT_BC5_UNORM:
+        case DXGI_FORMAT_BC5_SNORM:
+        case DXGI_FORMAT_BC6H_TYPELESS:
+        case DXGI_FORMAT_BC6H_UF16:
+        case DXGI_FORMAT_BC6H_SF16:
+        case DXGI_FORMAT_BC7_TYPELESS:
+        case DXGI_FORMAT_BC7_UNORM:
+        case DXGI_FORMAT_BC7_UNORM_SRGB:
+            return { 4, 4, 16 };
+        case DXGI_FORMAT_R8_TYPELESS:
+        case DXGI_FORMAT_R8_UNORM:
+        case DXGI_FORMAT_R8_UINT:
+        case DXGI_FORMAT_R8_SNORM:
+        case DXGI_FORMAT_R8_SINT:
+        case DXGI_FORMAT_A8_UNORM:
+            return { 1, 1, 1 };
+        case DXGI_FORMAT_R8G8_TYPELESS:
+        case DXGI_FORMAT_R8G8_UNORM:
+        case DXGI_FORMAT_R8G8_UINT:
+        case DXGI_FORMAT_R8G8_SNORM:
+        case DXGI_FORMAT_R8G8_SINT:
+        case DXGI_FORMAT_R16_TYPELESS:
+        case DXGI_FORMAT_R16_FLOAT:
+        case DXGI_FORMAT_D16_UNORM:
+        case DXGI_FORMAT_R16_UNORM:
+        case DXGI_FORMAT_R16_UINT:
+        case DXGI_FORMAT_R16_SNORM:
+        case DXGI_FORMAT_R16_SINT:
+        case DXGI_FORMAT_B5G6R5_UNORM:
+        case DXGI_FORMAT_B5G5R5A1_UNORM:
+        case DXGI_FORMAT_B4G4R4A4_UNORM:
+            return { 1, 1, 2 };
+        case DXGI_FORMAT_R16G16B16A16_TYPELESS:
+        case DXGI_FORMAT_R16G16B16A16_FLOAT:
+        case DXGI_FORMAT_R16G16B16A16_UNORM:
+        case DXGI_FORMAT_R16G16B16A16_UINT:
+        case DXGI_FORMAT_R16G16B16A16_SNORM:
+        case DXGI_FORMAT_R16G16B16A16_SINT:
+        case DXGI_FORMAT_R32G32_TYPELESS:
+        case DXGI_FORMAT_R32G32_FLOAT:
+        case DXGI_FORMAT_R32G32_UINT:
+        case DXGI_FORMAT_R32G32_SINT:
+            return { 1, 1, 8 };
+        case DXGI_FORMAT_R32G32B32A32_TYPELESS:
+        case DXGI_FORMAT_R32G32B32A32_FLOAT:
+        case DXGI_FORMAT_R32G32B32A32_UINT:
+        case DXGI_FORMAT_R32G32B32A32_SINT:
+            return { 1, 1, 16 };
+        default:
+            return { 1, 1, 4 };
+    }
+}
+
+struct Gcn1DThinMipInfo {
+    uint64_t offsetBytes = 0;
+    uint64_t sliceBytes = 0;
+    uint32_t ew = 1;
+    uint32_t eh = 1;
+    uint32_t pw = 8;
+    uint32_t ph = 8;
+    uint32_t bpe = 4;
+};
+
+static uint64_t ComputeGcn1DThinLayout(
+    const D3D12_RESOURCE_DESC& d,
+    std::vector<Gcn1DThinMipInfo>* outMips) {
+    const GcnFormatMetrics fm = GetGcnFormatMetrics(d.Format);
+    const uint32_t w0 = static_cast<uint32_t>(std::max<uint64_t>(d.Width, 1ULL));
+    const uint32_t h0 = (d.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE1D) ? 1u : std::max<uint32_t>(d.Height, 1u);
+    const bool is3D = (d.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE3D);
+    const uint32_t d0 = std::max<uint32_t>(d.DepthOrArraySize, 1u);
+    const uint32_t mips = std::max<uint32_t>(d.MipLevels, 1u);
+    if (outMips) {
+        outMips->clear();
+        outMips->reserve(mips);
+    }
+    uint64_t off = 0;
+    for (uint32_t m = 0; m < mips; ++m) {
+        const uint32_t mw = std::max<uint32_t>(1u, w0 >> m);
+        const uint32_t mh = std::max<uint32_t>(1u, h0 >> m);
+        const uint32_t md = is3D ? std::max<uint32_t>(1u, d0 >> m) : d0;
+        const uint32_t ew = (mw + fm.blockW - 1u) / fm.blockW;
+        const uint32_t eh = (mh + fm.blockH - 1u) / fm.blockH;
+        const uint32_t ph = (eh + 7u) & ~7u;
+        uint32_t pw = (ew + 7u) & ~7u;
+        while ((static_cast<uint64_t>(pw) * ph * fm.bpe) % 256ULL != 0ULL) {
+            pw += 8u;
+        }
+        off = (off + 255ULL) & ~255ULL;
+        const uint64_t sliceBytes = static_cast<uint64_t>(pw) * ph * fm.bpe;
+        const uint64_t mipBytes = (sliceBytes * md + 255ULL) & ~255ULL;
+        if (outMips) {
+            outMips->push_back(Gcn1DThinMipInfo{ off, sliceBytes, ew, eh, pw, ph, fm.bpe });
+        }
+        off += mipBytes;
+    }
+    return (off + 255ULL) & ~255ULL;
+}
+
+static void DetileGcn1DThinSlice(
+    const uint8_t* srcSlice,
+    uint64_t srcAvailBytes,
+    uint8_t* dstSlice,
+    uint64_t dstRowPitch,
+    uint64_t dstAvailBytes,
+    const Gcn1DThinMipInfo& mi,
+    uint64_t& nonZeroSample) {
+    static constexpr uint8_t kMorton8x8[8][8] = {
+        {  0,  1,  4,  5, 16, 17, 20, 21 },
+        {  2,  3,  6,  7, 18, 19, 22, 23 },
+        {  8,  9, 12, 13, 24, 25, 28, 29 },
+        { 10, 11, 14, 15, 26, 27, 30, 31 },
+        { 32, 33, 36, 37, 48, 49, 52, 53 },
+        { 34, 35, 38, 39, 50, 51, 54, 55 },
+        { 40, 41, 44, 45, 56, 57, 60, 61 },
+        { 42, 43, 46, 47, 58, 59, 62, 63 },
+    };
+    const uint32_t tilesX = mi.pw >> 3;
+    const uint32_t bpe = mi.bpe;
+    const uint64_t tileBytes = 64ULL * bpe;
+
+    for (uint32_t y = 0; y < mi.eh; ++y) {
+        const uint64_t dstRowOff = static_cast<uint64_t>(y) * dstRowPitch;
+        if (dstRowOff + static_cast<uint64_t>(mi.ew) * bpe > dstAvailBytes) break;
+        uint8_t* dstRow = dstSlice + dstRowOff;
+        const uint32_t ty = y >> 3;
+        const uint32_t ly = y & 7u;
+        const uint64_t tileRowBase = static_cast<uint64_t>(ty) * tilesX;
+        const uint8_t* mRow = kMorton8x8[ly];
+
+        for (uint32_t x = 0; x < mi.ew; ++x) {
+            const uint32_t tx = x >> 3;
+            const uint32_t lx = x & 7u;
+            const uint64_t sOff = (tileRowBase + tx) * tileBytes + static_cast<uint64_t>(mRow[lx]) * bpe;
+            if (sOff + bpe <= srcAvailBytes) {
+                const uint8_t* sp = srcSlice + sOff;
+                uint8_t* dp = dstRow + static_cast<uint64_t>(x) * bpe;
+                if (bpe == 1u) {
+                    *dp = *sp;
+                    if (nonZeroSample == 0 && *sp != 0) nonZeroSample = 1;
+                } else if (bpe == 4u) {
+                    std::memcpy(dp, sp, 4);
+                    if (nonZeroSample == 0 && (sp[0] | sp[1] | sp[2] | sp[3]) != 0) nonZeroSample = 1;
+                } else {
+                    std::memcpy(dp, sp, bpe);
+                    if (nonZeroSample == 0) {
+                        for (uint32_t k = 0; k < bpe; ++k) {
+                            if (sp[k] != 0) { nonZeroSample = 1; break; }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 class XboxD3D12Resource final : public ID3D12Resource {
 public:
     XboxD3D12Resource(
@@ -1514,6 +1692,10 @@ public:
                 if (copyBytes != UINT64_MAX && copyBytes > bytes) {
                     bytes = copyBytes;
                 }
+            }
+            const uint64_t gcnBytes = ComputeGcn1DThinLayout(d, nullptr);
+            if (gcnBytes > bytes) {
+                bytes = gcnBytes;
             }
             if (bytes < 65536ULL) {
                 bytes = std::max<uint64_t>(65536ULL, d.Width * std::max<uint64_t>(d.Height, 1ULL) * 16ULL);
@@ -1776,25 +1958,33 @@ void FlushDirtyXboxShadowTextures(
             uploadCl->ResourceBarrier(1, &pre);
         }
 
+        std::vector<Gcn1DThinMipInfo> gcnMips;
+        ComputeGcn1DThinLayout(item.desc, &gcnMips);
+        const UINT mipCount = std::max<UINT>(1u, item.desc.MipLevels);
+
         for (UINT s = 0; s < item.numSubs; ++s) {
             D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp = item.footprints[s];
-            const uint64_t srcSubOff = fp.Offset;
-            fp.Offset = curOff + srcSubOff;
+            const uint64_t dstSubOff = fp.Offset;
+            fp.Offset = curOff + dstSubOff;
             const UINT rows = item.numRows[s];
             const UINT64 rowPitch = fp.Footprint.RowPitch;
-            const UINT64 rowSize = std::min<UINT64>(rowPitch, item.rowSizes[s]);
             const UINT depth = std::max<UINT>(1u, fp.Footprint.Depth);
-            for (UINT z = 0; z < depth; ++z) {
-                for (UINT y = 0; y < rows; ++y) {
-                    const uint64_t rel = (static_cast<uint64_t>(z) * rows + y) * rowPitch;
-                    if (srcSubOff + rel + rowSize <= item.shadowBytes && fp.Offset + rel + rowSize <= stagingBufSize) {
-                        const uint8_t* sp = srcBase + srcSubOff + rel;
-                        std::memcpy(mapped + fp.Offset + rel, sp, static_cast<size_t>(rowSize));
-                        if (nonZeroSample == 0 && y < 4) {
-                            for (size_t k = 0; k < std::min<size_t>(static_cast<size_t>(rowSize), 64); ++k) {
-                                if (sp[k] != 0) { nonZeroSample = 1; break; }
-                            }
-                        }
+            const UINT mipIdx = s % mipCount;
+            const UINT arraySlice = s / mipCount;
+            if (mipIdx < gcnMips.size()) {
+                const Gcn1DThinMipInfo& mi = gcnMips[mipIdx];
+                for (UINT z = 0; z < depth; ++z) {
+                    const uint64_t srcSliceOff = mi.offsetBytes + static_cast<uint64_t>(arraySlice + z) * mi.sliceBytes;
+                    const uint64_t dstSliceOff = fp.Offset + static_cast<uint64_t>(z) * rows * rowPitch;
+                    if (srcSliceOff < item.shadowBytes && dstSliceOff < stagingBufSize) {
+                        DetileGcn1DThinSlice(
+                            srcBase + srcSliceOff,
+                            item.shadowBytes - srcSliceOff,
+                            mapped + dstSliceOff,
+                            rowPitch,
+                            stagingBufSize - dstSliceOff,
+                            mi,
+                            nonZeroSample);
                     }
                 }
             }
