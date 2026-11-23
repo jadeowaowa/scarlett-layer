@@ -1,7 +1,7 @@
 # Scarlett Layer — AI Context Snapshot
 
-**Commit:** `2de878f` (#146) | **Generated:** 2026-11-22 12:51 UTC  
-**Totals:** 86 files (29,329 LOC) | 12 shims | 78 CTest checks
+**Commit:** `f0a8e01` (#149) | **Generated:** 2026-11-23 07:22 UTC  
+**Totals:** 88 files (33,632 LOC) | 13 shims | 78 CTest checks
 
 ---
 
@@ -74,11 +74,11 @@
 
 ## 2. File Inventory
 ```text
-  288  CMakeLists.txt
+  297  CMakeLists.txt
    99  src/common/ansi_path.hpp
   343  src/common/codecs.hpp
    73  src/common/config.hpp
-   43  src/common/stub.hpp
+   63  src/common/stub.hpp
   173  src/common/vfs.hpp
   288  src/common/xvd_container.hpp
  1294  src/gui/scarlett_studio.cpp
@@ -87,20 +87,20 @@
   277  src/loader/game_config.hpp
   274  src/loader/main.cpp
   564  src/loader/pe_inspector.hpp
-  438  src/loader/pe_patcher.cpp
+  453  src/loader/pe_patcher.cpp
    19  src/loader/pe_patcher.hpp
-  851  src/loader/scarlett_hook.cpp
-  105  src/shims/acphal/acphal.cpp
-    7  src/shims/acphal/acphal.def
-   33  src/shims/acphal/acphal.hpp
+ 1208  src/loader/scarlett_hook.cpp
+  149  src/shims/acphal/acphal.cpp
+    9  src/shims/acphal/acphal.def
+   39  src/shims/acphal/acphal.hpp
   187  src/shims/d3d12_xs/command_list_x.cpp
-  457  src/shims/d3d12_xs/command_queue_x.cpp
-  119  src/shims/d3d12_xs/d3d12_xs.cpp
-    4  src/shims/d3d12_xs/d3d12_xs.def
+  480  src/shims/d3d12_xs/command_queue_x.cpp
+  139  src/shims/d3d12_xs/d3d12_xs.cpp
+    6  src/shims/d3d12_xs/d3d12_xs.def
   261  src/shims/d3d12_xs/d3d12_xs.hpp
-   79  src/shims/d3d12_xs/d3d12_xs_internal.hpp
+   84  src/shims/d3d12_xs/d3d12_xs_internal.hpp
    85  src/shims/d3d12_xs/d3d12_xs_utils.cpp
-  742  src/shims/d3d12_xs/device_x.cpp
+ 3399  src/shims/d3d12_xs/device_x.cpp
  1040  src/shims/d3d12_xs/rdna2_isa.hpp
  1052  src/shims/d3d12_xs/rdna2_lifter.hpp
   201  src/shims/d3d12_xs/shader_inspector.hpp
@@ -109,9 +109,9 @@
  1269  src/shims/dstorage_xs/dstorage_xs.cpp
     4  src/shims/dstorage_xs/dstorage_xs.def
   181  src/shims/dstorage_xs/dstorage_xs.hpp
-  321  src/shims/gameinput/gameinput.cpp
+  427  src/shims/gameinput/gameinput.cpp
     4  src/shims/gameinput/gameinput.def
-   83  src/shims/gameinput/gameinput.hpp
+  163  src/shims/gameinput/gameinput.hpp
   212  src/shims/kernelx/kernelx.cpp
     7  src/shims/kernelx/kernelx.def
    40  src/shims/kernelx/kernelx.hpp
@@ -123,23 +123,25 @@
    14  src/shims/pixevt/pixevt.hpp
   660  src/shims/xaudio2_9/xaudio2_9.cpp
     4  src/shims/xaudio2_9/xaudio2_9.def
-  206  src/shims/xcurl/xcurl.cpp
-   16  src/shims/xcurl/xcurl.def
+  242  src/shims/xcurl/xcurl.cpp
+   24  src/shims/xcurl/xcurl.def
    51  src/shims/xcurl/xcurl.hpp
+   41  src/shims/xfrontpaneldisplay/xfrontpaneldisplay.cpp
+    8  src/shims/xfrontpaneldisplay/xfrontpaneldisplay.def
   325  src/shims/xg_xs/xg_64kbs.hpp
-  304  src/shims/xg_xs/xg_xs.cpp
-    4  src/shims/xg_xs/xg_xs.def
+  724  src/shims/xg_xs/xg_xs.cpp
+    6  src/shims/xg_xs/xg_xs.def
    75  src/shims/xg_xs/xg_xs.hpp
-  405  src/shims/xgameruntime/api_broker.cpp
+  538  src/shims/xgameruntime/api_broker.cpp
   485  src/shims/xgameruntime/game_save.cpp
   119  src/shims/xgameruntime/gdk_types.hpp
-   87  src/shims/xgameruntime/runtime_internal.hpp
-  191  src/shims/xgameruntime/task_queue.cpp
-   13  src/shims/xgameruntime/task_queue.hpp
+  104  src/shims/xgameruntime/runtime_internal.hpp
+  361  src/shims/xgameruntime/task_queue.cpp
+   21  src/shims/xgameruntime/task_queue.hpp
   173  src/shims/xgameruntime/xgameruntime.cpp
    36  src/shims/xgameruntime/xgameruntime.def
-  279  src/shims/xmem/xmem.cpp
-    8  src/shims/xmem/xmem.def
+  311  src/shims/xmem/xmem.cpp
+   13  src/shims/xmem/xmem.def
    62  src/shims/xmem/xmem.hpp
  1651  src/tests/dummy_title/main.cpp
    59  src/tests/engine_plugin/engine_plugin.cpp
@@ -157,7 +159,7 @@
   113  src/tools/rdna2_sweep/main.cpp
   242  tools/audit_imports.py
   505  tools/build_wiki.py
-  159  tools/generate_status.py
+  236  tools/generate_status.py
   265  tools/rdna2_corpus_sweep.py
   108  tools/test_brief.py
 ```
@@ -165,9 +167,9 @@
 ## 3. Shim Exports & COM VTable Layouts
 
 ## `acphal.dll`
-**Files:** `src/shims/acphal/acphal.cpp` (105 L), `src/shims/acphal/acphal.def` (7 L), `src/shims/acphal/acphal.hpp` (33 L)
+**Files:** `src/shims/acphal/acphal.cpp` (149 L), `src/shims/acphal/acphal.def` (9 L), `src/shims/acphal/acphal.hpp` (39 L)
 
-**DLL Exports (`.def`):** `AcpHalCreate`, `AcpHalAllocateShapeContexts`, `AcpHalReleaseShapeContexts`, `ApuAlloc`, `ApuFree`
+**DLL Exports (`.def`):** `AcpHalCreate`, `AcpHalAllocateShapeContexts`, `AcpHalReleaseShapeContexts`, `ApuAlloc`, `ApuFree`, `ApuMapVirtualAddress`, `ApuIsVirtualAddressValid`
 
 **C Entrypoints:**
 - `HRESULT WINAPI AcpHalCreate(void** acpHal)`
@@ -177,9 +179,9 @@
 - `HRESULT WINAPI ApuFree(void* virtualAddress)`
 
 ## `d3d12_xs.dll`
-**Files:** `src/shims/d3d12_xs/command_list_x.cpp` (187 L), `src/shims/d3d12_xs/command_queue_x.cpp` (457 L), `src/shims/d3d12_xs/d3d12_xs.cpp` (119 L), `src/shims/d3d12_xs/d3d12_xs.def` (4 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (261 L), `src/shims/d3d12_xs/d3d12_xs_internal.hpp` (79 L), `src/shims/d3d12_xs/d3d12_xs_utils.cpp` (85 L), `src/shims/d3d12_xs/device_x.cpp` (742 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1040 L), `src/shims/d3d12_xs/rdna2_lifter.hpp` (1052 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_stripper.hpp` (272 L), `src/shims/d3d12_xs/shader_translator.hpp` (405 L)
+**Files:** `src/shims/d3d12_xs/command_list_x.cpp` (187 L), `src/shims/d3d12_xs/command_queue_x.cpp` (480 L), `src/shims/d3d12_xs/d3d12_xs.cpp` (139 L), `src/shims/d3d12_xs/d3d12_xs.def` (6 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (261 L), `src/shims/d3d12_xs/d3d12_xs_internal.hpp` (84 L), `src/shims/d3d12_xs/d3d12_xs_utils.cpp` (85 L), `src/shims/d3d12_xs/device_x.cpp` (3399 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1040 L), `src/shims/d3d12_xs/rdna2_lifter.hpp` (1052 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_stripper.hpp` (272 L), `src/shims/d3d12_xs/shader_translator.hpp` (405 L)
 
-**DLL Exports (`.def`):** `D3D12XboxCreateDevice`, `D3D12SerializeRootSignature = ScarlettSerializeRootSignature`
+**DLL Exports (`.def`):** `D3D12XboxCreateDevice`, `D3D12SerializeRootSignature = ScarlettSerializeRootSignature`, `D3D12XboxSetProcessDebugFlags`, `D3DMapEsramMemory`
 
 **C Entrypoints:**
 - `HRESULT WINAPI D3D12XboxCreateDevice( void* pAdapter, const D3D12XBOX_CREATE_DEVICE_PARAMETERS* pParameters, REFIID riid, void** ppDevice)`
@@ -283,7 +285,7 @@
 - `[07]` `HRESULT SetStagingBufferSize(uint32_t size)`
 
 ## `gameinput.dll`
-**Files:** `src/shims/gameinput/gameinput.cpp` (321 L), `src/shims/gameinput/gameinput.def` (4 L), `src/shims/gameinput/gameinput.hpp` (83 L)
+**Files:** `src/shims/gameinput/gameinput.cpp` (427 L), `src/shims/gameinput/gameinput.def` (4 L), `src/shims/gameinput/gameinput.hpp` (163 L)
 
 **DLL Exports (`.def`):** `GameInputCreate @1`, `ScarlettGameInputSetSyntheticGamepad @2`
 
@@ -301,6 +303,23 @@
 **COM Interface `IGameInput : IUnknown`:**
 - `[03]` `uint64_t GetCurrentTimestamp()`
 - `[04]` `HRESULT GetCurrentReading( GameInputKind inputKind, void* device, IGameInputReading** reading)`
+- `[05]` `HRESULT GetNextReading( IGameInputReading* referenceReading, GameInputKind inputKind, void* device, IGameInputReading** reading)`
+- `[06]` `HRESULT GetPreviousReading( IGameInputReading* referenceReading, GameInputKind inputKind, void* device, IGameInputReading** reading)`
+- `[07]` `HRESULT GetTemporalReading( uint64_t timestamp, void* device, IGameInputReading** reading)`
+- `[08]` `HRESULT RegisterReadingCallback( void* device, GameInputKind inputKind, float analogThreshold, void* context, void* callbackFunc, uint64_t* callbackToken)`
+- `[09]` `HRESULT RegisterDeviceCallback( void* device, GameInputKind inputKind, uint32_t statusFilter, uint32_t enumerationKind, void* context, void* callbackFunc, uint64_t* callbackToken)`
+- `[10]` `HRESULT RegisterSystemButtonCallback( void* device, uint32_t buttonFilter, void* context, void* callbackFunc, uint64_t* callbackToken)`
+- `[11]` `HRESULT RegisterKeyboardLayoutCallback( void* device, void* context, void* callbackFunc, uint64_t* callbackToken)`
+- `[12]` `void StopCallback(uint64_t callbackToken)`
+- `[13]` `bool UnregisterCallback( uint64_t callbackToken, uint64_t timeoutInMicroseconds)`
+- `[14]` `HRESULT CreateDispatcher(void** dispatcher)`
+- `[15]` `HRESULT CreateAggregateDevice( GameInputKind inputKind, void** device)`
+- `[16]` `HRESULT FindDeviceFromId( const void* value, void** device)`
+- `[17]` `HRESULT FindDeviceFromObject( IUnknown* value, void** device)`
+- `[18]` `HRESULT FindDeviceFromPlatformHandle( HANDLE value, void** device)`
+- `[19]` `HRESULT FindDeviceFromPlatformString( LPCWSTR value, void** device)`
+- `[20]` `HRESULT EnableOemDeviceSupport( uint16_t vendorId, uint16_t productId, uint8_t interfaceNumber, uint8_t collectionNumber)`
+- `[21]` `void SetFocusPolicy(uint32_t policy)`
 
 ## `kernelx.dll`
 **Files:** `src/shims/kernelx/kernelx.cpp` (212 L), `src/shims/kernelx/kernelx.def` (7 L), `src/shims/kernelx/kernelx.hpp` (40 L)
@@ -357,9 +376,9 @@
 **DLL Exports (`.def`):** `XAudio2Create = ScarlettXAudio2Create @1`, `XAudio2CreateWithVersionInfo = ScarlettXAudio2CreateWithVersionInfo`
 
 ## `xcurl.dll`
-**Files:** `src/shims/xcurl/xcurl.cpp` (206 L), `src/shims/xcurl/xcurl.def` (16 L), `src/shims/xcurl/xcurl.hpp` (51 L)
+**Files:** `src/shims/xcurl/xcurl.cpp` (242 L), `src/shims/xcurl/xcurl.def` (24 L), `src/shims/xcurl/xcurl.hpp` (51 L)
 
-**DLL Exports (`.def`):** `curl_global_init`, `curl_global_cleanup`, `curl_easy_init`, `curl_easy_cleanup`, `curl_easy_reset`, `curl_easy_setopt`, `curl_easy_perform`, `curl_easy_getinfo`, `curl_easy_strerror`, `curl_slist_append`, `curl_slist_free_all`, `curl_version`, `xcurl_register_mock_response`, `xcurl_clear_mocks`
+**DLL Exports (`.def`):** `curl_global_init`, `curl_global_cleanup`, `curl_easy_init`, `curl_easy_cleanup`, `curl_easy_reset`, `curl_easy_setopt`, `curl_easy_perform`, `curl_easy_getinfo`, `curl_easy_strerror`, `curl_slist_append`, `curl_slist_free_all`, `curl_version`, `xcurl_register_mock_response`, `xcurl_clear_mocks`, `curl_multi_init`, `curl_multi_cleanup`, `curl_multi_add_handle`, `curl_multi_remove_handle`, `curl_multi_perform`, `curl_multi_wait`, `curl_multi_poll`, `curl_multi_info_read`
 
 **C Entrypoints:**
 - `CURLcode curl_global_init(int64_t flags)`
@@ -377,10 +396,15 @@
 - `CURLcode xcurl_register_mock_response(const char* urlPrefix, long statusCode, const char* body)`
 - `void xcurl_clear_mocks(void)`
 
-## `xg_xs.dll`
-**Files:** `src/shims/xg_xs/xg_64kbs.hpp` (325 L), `src/shims/xg_xs/xg_xs.cpp` (304 L), `src/shims/xg_xs/xg_xs.def` (4 L), `src/shims/xg_xs/xg_xs.hpp` (75 L)
+## `xfrontpaneldisplay.dll`
+**Files:** `src/shims/xfrontpaneldisplay/xfrontpaneldisplay.cpp` (41 L), `src/shims/xfrontpaneldisplay/xfrontpaneldisplay.def` (8 L)
 
-**DLL Exports (`.def`):** `XGCreateTexture2DComputer`, `XGComputeTexture2DLayout`
+**DLL Exports (`.def`):** `XFrontPanelIsSupported`, `XFrontPanelGetScreenDimensions`, `XFrontPanelPresentBuffer`, `XFrontPanelGetLightStates`, `XFrontPanelSetLightStates`, `XFrontPanelGetButtonStates`
+
+## `xg_xs.dll`
+**Files:** `src/shims/xg_xs/xg_64kbs.hpp` (325 L), `src/shims/xg_xs/xg_xs.cpp` (724 L), `src/shims/xg_xs/xg_xs.def` (6 L), `src/shims/xg_xs/xg_xs.hpp` (75 L)
+
+**DLL Exports (`.def`):** `XGCreateTexture2DComputer`, `XGComputeTexture2DLayout`, `XGCreateTextureComputer`, `XGComputeOptimalTileMode`
 
 **C Entrypoints:**
 - `HRESULT WINAPI XGCreateTexture2DComputer( const XG_TEXTURE2D_DESC* pDesc, IXGTextureAddressComputer** ppComputer)`
@@ -392,14 +416,14 @@
 - `[05]` `HRESULT CopyFromSubresource( void* pDestinationData, uint32_t Subresource, const void* pResourceBaseAddress, uint32_t DestRowPitch, uint32_t DestSlicePitch)`
 
 ## `xgameruntime.dll`
-**Files:** `src/shims/xgameruntime/api_broker.cpp` (405 L), `src/shims/xgameruntime/game_save.cpp` (485 L), `src/shims/xgameruntime/gdk_types.hpp` (119 L), `src/shims/xgameruntime/runtime_internal.hpp` (87 L), `src/shims/xgameruntime/task_queue.cpp` (191 L), `src/shims/xgameruntime/task_queue.hpp` (13 L), `src/shims/xgameruntime/xgameruntime.cpp` (173 L), `src/shims/xgameruntime/xgameruntime.def` (36 L)
+**Files:** `src/shims/xgameruntime/api_broker.cpp` (538 L), `src/shims/xgameruntime/game_save.cpp` (485 L), `src/shims/xgameruntime/gdk_types.hpp` (119 L), `src/shims/xgameruntime/runtime_internal.hpp` (104 L), `src/shims/xgameruntime/task_queue.cpp` (361 L), `src/shims/xgameruntime/task_queue.hpp` (21 L), `src/shims/xgameruntime/xgameruntime.cpp` (173 L), `src/shims/xgameruntime/xgameruntime.def` (36 L)
 
 **DLL Exports (`.def`):** `XGameRuntimeInitialize`, `XGameRuntimeUninitialize`, `XSystemGetDeviceType`, `XTaskQueueCreate`, `XTaskQueueDispatch`, `XTaskQueueCloseHandle`, `XAsyncGetStatus`, `XUserAddAsync`, `XUserAddResult`, `XUserGetGamertag`, `XUserGetId`, `XUserGetState`, `XUserGetLocalId`, `XUserCloseHandle`, `XGameSaveInitializeProviderAsync`, `XGameSaveInitializeProviderResult`, `XGameSaveCloseProvider`, `XGameSaveCreateContainer`, `XGameSaveCloseContainer`, `XGameSaveCreateUpdate`, `XGameSaveCloseUpdate`, `XGameSaveSubmitBlobWrite`, `XGameSaveSubmitBlobDelete`, `XGameSaveSubmitUpdateAsync`, `XGameSaveSubmitUpdateResult`, `XGameSaveReadBlobDataAsync`, `XGameSaveReadBlobDataResult`, `DllCanUnloadNow`, `InitializeApiImpl`, `InitializeApiImplEx`, `InitializeApiImplEx2`, `QueryApiImpl`, `UninitializeApiImpl`, `XErrorReport`
 
 ## `xmem.dll`
-**Files:** `src/shims/xmem/xmem.cpp` (279 L), `src/shims/xmem/xmem.def` (8 L), `src/shims/xmem/xmem.hpp` (62 L)
+**Files:** `src/shims/xmem/xmem.cpp` (311 L), `src/shims/xmem/xmem.def` (13 L), `src/shims/xmem/xmem.hpp` (62 L)
 
-**DLL Exports (`.def`):** `XMemAlloc`, `XMemFree`, `XMemSize`, `XMemAllocDefault`, `XMemFreeDefault`, `XMemSizeDefault`
+**DLL Exports (`.def`):** `XMemAlloc`, `XMemFree`, `XMemSize`, `XMemAllocDefault`, `XMemFreeDefault`, `XMemSizeDefault`, `XMemAllocatePhysicalPages`, `XMemMapPhysicalPages`, `XMemFreePhysicalPages`, `XMemVirtualAlloc`, `XMemGetWorkingSetStatistics`
 
 **C Entrypoints:**
 - `void* WINAPI XMemAlloc(size_t dwSize, uint32_t dwAllocAttributes)`
@@ -509,6 +533,9 @@
 ```
 
 ## 6. Recent Git History
+- `f0a8e01 feat(xg_xs,d3d12_xs): GCN 1D_THIN layout and shadow texture detiler`
+- `9e0c298 wip(terraria): PresentX menu rendering, CBV bounce ring, GDK xg_xs, shadow texture upload`
+- `f4f0d7e Sprint 71: RDNA2 independent-oracle suite (28 cases) & 255-ELF gfx1030 corpus sweep`
 - `2de878f Merge sprint-70-xvd-and-parser-hardening: real XVD geometry, parser hardening, and status CI (74/74)`
 - `385b503 feat(xvd,loader,ci): migrate real 12 KiB XVD geometry, harden PE/GameConfig parsers, add status drift check`
 - `45eafbf Merge docs/truth-reset-s69: truthful baseline docs and Sprint 70-73 roadmap`
@@ -516,6 +543,3 @@
 - `cac4aa2 Remove duplicate roadmap row, clarify sample scope, and rebuild wiki`
 - `58e4fea Add Apache-2.0 LICENSE, sync roadmap/docs/wiki, and verify 72/72 tests`
 - `e7d0912 Merge sprint-69-studio-liquid-glass: Direct2D/DComp Liquid Glass UI & wiki`
-- `d2dac59 Sprint 69: Liquid Glass UI for Scarlett Studio, wiki update, and v0.69.0-pre prep`
-- `bd18bca Fix escaped whitespace literals in studio_model.hpp ExtractXmlAttr`
-- `11d1057 Merge sprint-68-xgameruntime-broker: GDK broker ABI + Scarlett Studio GUI`

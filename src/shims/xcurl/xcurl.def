@@ -14,3 +14,11 @@ EXPORTS
     curl_version
     xcurl_register_mock_response
     xcurl_clear_mocks
+    curl_multi_init
+    curl_multi_cleanup
+    curl_multi_add_handle
+    curl_multi_remove_handle
+    curl_multi_perform
+    curl_multi_wait
+    curl_multi_poll
+    curl_multi_info_read

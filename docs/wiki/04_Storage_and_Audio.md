@@ -44,9 +44,9 @@
 **DLL Exports (`.def`):** `XAudio2Create = ScarlettXAudio2Create @1`, `XAudio2CreateWithVersionInfo = ScarlettXAudio2CreateWithVersionInfo`
 
 ## `acphal.dll`
-**Files:** `src/shims/acphal/acphal.cpp` (105 L), `src/shims/acphal/acphal.def` (7 L), `src/shims/acphal/acphal.hpp` (33 L)
+**Files:** `src/shims/acphal/acphal.cpp` (149 L), `src/shims/acphal/acphal.def` (9 L), `src/shims/acphal/acphal.hpp` (39 L)
 
-**DLL Exports (`.def`):** `AcpHalCreate`, `AcpHalAllocateShapeContexts`, `AcpHalReleaseShapeContexts`, `ApuAlloc`, `ApuFree`
+**DLL Exports (`.def`):** `AcpHalCreate`, `AcpHalAllocateShapeContexts`, `AcpHalReleaseShapeContexts`, `ApuAlloc`, `ApuFree`, `ApuMapVirtualAddress`, `ApuIsVirtualAddressValid`
 
 **C Entrypoints:**
 - `HRESULT WINAPI AcpHalCreate(void** acpHal)`
@@ -83,9 +83,9 @@
 - `void WINAPI HCHttpCallClearMocks(void)`
 
 ## `xcurl.dll`
-**Files:** `src/shims/xcurl/xcurl.cpp` (206 L), `src/shims/xcurl/xcurl.def` (16 L), `src/shims/xcurl/xcurl.hpp` (51 L)
+**Files:** `src/shims/xcurl/xcurl.cpp` (242 L), `src/shims/xcurl/xcurl.def` (24 L), `src/shims/xcurl/xcurl.hpp` (51 L)
 
-**DLL Exports (`.def`):** `curl_global_init`, `curl_global_cleanup`, `curl_easy_init`, `curl_easy_cleanup`, `curl_easy_reset`, `curl_easy_setopt`, `curl_easy_perform`, `curl_easy_getinfo`, `curl_easy_strerror`, `curl_slist_append`, `curl_slist_free_all`, `curl_version`, `xcurl_register_mock_response`, `xcurl_clear_mocks`
+**DLL Exports (`.def`):** `curl_global_init`, `curl_global_cleanup`, `curl_easy_init`, `curl_easy_cleanup`, `curl_easy_reset`, `curl_easy_setopt`, `curl_easy_perform`, `curl_easy_getinfo`, `curl_easy_strerror`, `curl_slist_append`, `curl_slist_free_all`, `curl_version`, `xcurl_register_mock_response`, `xcurl_clear_mocks`, `curl_multi_init`, `curl_multi_cleanup`, `curl_multi_add_handle`, `curl_multi_remove_handle`, `curl_multi_perform`, `curl_multi_wait`, `curl_multi_poll`, `curl_multi_info_read`
 
 **C Entrypoints:**
 - `CURLcode curl_global_init(int64_t flags)`

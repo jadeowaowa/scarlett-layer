@@ -4,12 +4,18 @@
 #include <windows.h>
 
 struct ACP_SHAPE_CONTEXT_COUNTS {
-    uint32_t numSrcContexts;
-    uint32_t numEqContexts;
-    uint32_t numFiltContexts;
-    uint32_t numDmaContexts;
-    uint32_t numPcmContexts;
-    uint32_t numXmaContexts;
+    uint32_t numSrcContexts;    // +0x00 (32 B/entry)
+    uint32_t numEqContexts;     // +0x04
+    uint32_t numFiltContexts;   // +0x08
+    uint32_t numDmaContexts;    // +0x0C (16 B/entry)
+    uint32_t numXmaContexts;    // +0x10 (64 B/entry)
+    uint32_t numPcmContexts;    // +0x14
+    void*    srcContextBuffer;  // +0x18
+    void*    eqContextBuffer;   // +0x20
+    void*    filtContextBuffer; // +0x28
+    void*    dmaContextBuffer;  // +0x30
+    void*    xmaContextBuffer;  // +0x38
+    void*    pcmContextBuffer;  // +0x40
 };
 
 struct IAcpHalVtbl {

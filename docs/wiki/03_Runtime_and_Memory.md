@@ -1,7 +1,7 @@
 # 03 — Runtime (`xgameruntime`), Kernel (`kernelx`), Memory (`xmem`), Input & PIX
 
 ## `xgameruntime.dll`
-**Files:** `src/shims/xgameruntime/api_broker.cpp` (405 L), `src/shims/xgameruntime/game_save.cpp` (485 L), `src/shims/xgameruntime/gdk_types.hpp` (119 L), `src/shims/xgameruntime/runtime_internal.hpp` (87 L), `src/shims/xgameruntime/task_queue.cpp` (191 L), `src/shims/xgameruntime/task_queue.hpp` (13 L), `src/shims/xgameruntime/xgameruntime.cpp` (173 L), `src/shims/xgameruntime/xgameruntime.def` (36 L)
+**Files:** `src/shims/xgameruntime/api_broker.cpp` (538 L), `src/shims/xgameruntime/game_save.cpp` (485 L), `src/shims/xgameruntime/gdk_types.hpp` (119 L), `src/shims/xgameruntime/runtime_internal.hpp` (104 L), `src/shims/xgameruntime/task_queue.cpp` (361 L), `src/shims/xgameruntime/task_queue.hpp` (21 L), `src/shims/xgameruntime/xgameruntime.cpp` (173 L), `src/shims/xgameruntime/xgameruntime.def` (36 L)
 
 **DLL Exports (`.def`):** `XGameRuntimeInitialize`, `XGameRuntimeUninitialize`, `XSystemGetDeviceType`, `XTaskQueueCreate`, `XTaskQueueDispatch`, `XTaskQueueCloseHandle`, `XAsyncGetStatus`, `XUserAddAsync`, `XUserAddResult`, `XUserGetGamertag`, `XUserGetId`, `XUserGetState`, `XUserGetLocalId`, `XUserCloseHandle`, `XGameSaveInitializeProviderAsync`, `XGameSaveInitializeProviderResult`, `XGameSaveCloseProvider`, `XGameSaveCreateContainer`, `XGameSaveCloseContainer`, `XGameSaveCreateUpdate`, `XGameSaveCloseUpdate`, `XGameSaveSubmitBlobWrite`, `XGameSaveSubmitBlobDelete`, `XGameSaveSubmitUpdateAsync`, `XGameSaveSubmitUpdateResult`, `XGameSaveReadBlobDataAsync`, `XGameSaveReadBlobDataResult`, `DllCanUnloadNow`, `InitializeApiImpl`, `InitializeApiImplEx`, `InitializeApiImplEx2`, `QueryApiImpl`, `UninitializeApiImpl`, `XErrorReport`
 
@@ -26,9 +26,9 @@
 - `DWORD_PTR WINAPI SetThreadAffinityMaskX(HANDLE hThread, DWORD_PTR dwThreadAffinityMask)`
 
 ## `xmem.dll`
-**Files:** `src/shims/xmem/xmem.cpp` (279 L), `src/shims/xmem/xmem.def` (8 L), `src/shims/xmem/xmem.hpp` (62 L)
+**Files:** `src/shims/xmem/xmem.cpp` (311 L), `src/shims/xmem/xmem.def` (13 L), `src/shims/xmem/xmem.hpp` (62 L)
 
-**DLL Exports (`.def`):** `XMemAlloc`, `XMemFree`, `XMemSize`, `XMemAllocDefault`, `XMemFreeDefault`, `XMemSizeDefault`
+**DLL Exports (`.def`):** `XMemAlloc`, `XMemFree`, `XMemSize`, `XMemAllocDefault`, `XMemFreeDefault`, `XMemSizeDefault`, `XMemAllocatePhysicalPages`, `XMemMapPhysicalPages`, `XMemFreePhysicalPages`, `XMemVirtualAlloc`, `XMemGetWorkingSetStatistics`
 
 **C Entrypoints:**
 - `void* WINAPI XMemAlloc(size_t dwSize, uint32_t dwAllocAttributes)`
@@ -44,7 +44,7 @@
 - `XMemAllocatorId`: XALLOC_ID_DEFAULT = 0, XALLOC_ID_TEXTURE_TILED = 10, XALLOC_ID_TEXTURE_UPLOAD = 11, XALLOC_ID_AUDIO_PCM = 20
 
 ## `gameinput.dll`
-**Files:** `src/shims/gameinput/gameinput.cpp` (321 L), `src/shims/gameinput/gameinput.def` (4 L), `src/shims/gameinput/gameinput.hpp` (83 L)
+**Files:** `src/shims/gameinput/gameinput.cpp` (427 L), `src/shims/gameinput/gameinput.def` (4 L), `src/shims/gameinput/gameinput.hpp` (163 L)
 
 **DLL Exports (`.def`):** `GameInputCreate @1`, `ScarlettGameInputSetSyntheticGamepad @2`
 
@@ -62,6 +62,23 @@
 **COM Interface `IGameInput : IUnknown`:**
 - `[03]` `uint64_t GetCurrentTimestamp()`
 - `[04]` `HRESULT GetCurrentReading( GameInputKind inputKind, void* device, IGameInputReading** reading)`
+- `[05]` `HRESULT GetNextReading( IGameInputReading* referenceReading, GameInputKind inputKind, void* device, IGameInputReading** reading)`
+- `[06]` `HRESULT GetPreviousReading( IGameInputReading* referenceReading, GameInputKind inputKind, void* device, IGameInputReading** reading)`
+- `[07]` `HRESULT GetTemporalReading( uint64_t timestamp, void* device, IGameInputReading** reading)`
+- `[08]` `HRESULT RegisterReadingCallback( void* device, GameInputKind inputKind, float analogThreshold, void* context, void* callbackFunc, uint64_t* callbackToken)`
+- `[09]` `HRESULT RegisterDeviceCallback( void* device, GameInputKind inputKind, uint32_t statusFilter, uint32_t enumerationKind, void* context, void* callbackFunc, uint64_t* callbackToken)`
+- `[10]` `HRESULT RegisterSystemButtonCallback( void* device, uint32_t buttonFilter, void* context, void* callbackFunc, uint64_t* callbackToken)`
+- `[11]` `HRESULT RegisterKeyboardLayoutCallback( void* device, void* context, void* callbackFunc, uint64_t* callbackToken)`
+- `[12]` `void StopCallback(uint64_t callbackToken)`
+- `[13]` `bool UnregisterCallback( uint64_t callbackToken, uint64_t timeoutInMicroseconds)`
+- `[14]` `HRESULT CreateDispatcher(void** dispatcher)`
+- `[15]` `HRESULT CreateAggregateDevice( GameInputKind inputKind, void** device)`
+- `[16]` `HRESULT FindDeviceFromId( const void* value, void** device)`
+- `[17]` `HRESULT FindDeviceFromObject( IUnknown* value, void** device)`
+- `[18]` `HRESULT FindDeviceFromPlatformHandle( HANDLE value, void** device)`
+- `[19]` `HRESULT FindDeviceFromPlatformString( LPCWSTR value, void** device)`
+- `[20]` `HRESULT EnableOemDeviceSupport( uint16_t vendorId, uint16_t productId, uint8_t interfaceNumber, uint8_t collectionNumber)`
+- `[21]` `void SetFocusPolicy(uint32_t policy)`
 
 **Key Enums:**
 - `GameInputKind`: GameInputKindUnknown = 0x00000000, GameInputKindKeyboard = 0x00000010, GameInputKindGamepad = 0x00020000

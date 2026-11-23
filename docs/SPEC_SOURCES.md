@@ -31,6 +31,9 @@ This document separates behaviors backed by public documentation or open-source 
 | Virtual drive prefixes | `src/common/vfs.hpp` | Sourced (convention) | `G:\` (game root), `T:\` (scratch), `S:\` (save temp) mapped to isolated host directories with traversal rejection. Unmapped drives (e.g., `C:\`) pass through unchanged (`*outWasVirtual = false`). |
 | `XMem` 16-byte floor & topology | `src/shims/xmem/`, `src/shims/kernelx/` | Sourced / **ASSUMED** | 16-byte minimum alignment floor, 13.5 GiB title budget, and 7-core / 14-thread Series X topology based on public Xbox Series X specifications. |
 
+| GCN `1D_THIN` texture tiling (`tileMode=8`) | `src/shims/xg_xs/xg_xs.cpp`, `src/shims/d3d12_xs/device_x.cpp` | Sourced | AMD GCN/SI `ADDR_TM_1D_TILED_THIN1` (8x8 Morton Z-order micro-tiles, 256-byte pipe-interleave); empirically verified against 2,193 cooked Unity Xbox textures (`Alpha8`, `RGBA32`, `BC1`). |
+| `AcpHal` shape context buffers | `src/shims/acphal/acphal.hpp`, `src/shims/acphal/acphal.cpp` | Sourced (observed) | 72-byte `ACP_SHAPE_CONTEXT_COUNTS` layout (`+0x18..+0x40` context buffer pointers) verified against retail Unity/XAudio2 bring-up. |
+
 ## 3. Verification Boundaries
 
 - **TODO(jade):** Audit `src/loader/pe_patcher.cpp` and `src/loader/scarlett_hook.cpp` with an independent reviewer (suspended-process APC/IAT patching).

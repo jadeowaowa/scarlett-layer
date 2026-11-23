@@ -5,3 +5,5 @@ EXPORTS
     AcpHalReleaseShapeContexts
     ApuAlloc
     ApuFree
+    ApuMapVirtualAddress
+    ApuIsVirtualAddressValid

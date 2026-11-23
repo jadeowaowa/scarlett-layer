@@ -3,6 +3,7 @@
 #include "common/stub.hpp"
 
 #include <cstdlib>
+#include <cstring>
 #include <string>
 
 using Microsoft::WRL::ComPtr;
@@ -91,6 +92,10 @@ HRESULT WINAPI D3D12XboxCreateDevice(
         infoQueue1->RegisterMessageCallback(
             [](D3D12_MESSAGE_CATEGORY, D3D12_MESSAGE_SEVERITY sev, D3D12_MESSAGE_ID, LPCSTR desc, void*) {
                 if (sev <= D3D12_MESSAGE_SEVERITY_WARNING && desc) {
+                    if (sev == D3D12_MESSAGE_SEVERITY_WARNING && std::strstr(desc, "is not a comparison filter")) {
+                        static int s_samplerWarnCount = 0;
+                        if (++s_samplerWarnCount > 1) return;
+                    }
                     sc::log::Write(
                         sev == D3D12_MESSAGE_SEVERITY_WARNING ? sc::log::Level::Warn : sc::log::Level::Error,
                         "d3d12_debug", "Validation", desc);
@@ -103,6 +108,12 @@ HRESULT WINAPI D3D12XboxCreateDevice(
     }
 #endif
 
+    if (IsEqualGUID(riid, __uuidof(ID3D12Device))) {
+        auto xboxDev = sc::d3d12xs::CreateXboxD3D12Device(
+            std::move(factory), std::move(adapter), std::move(nativeDevice));
+        return xboxDev->QueryInterface(riid, ppDevice);
+    }
+
     auto wrapper = sc::d3d12xs::CreateScarlettDeviceX(
         std::move(factory), std::move(nativeDevice), desc.VendorId, desc.DeviceId);
     return wrapper->QueryInterface(riid, ppDevice);
@@ -114,6 +125,15 @@ HRESULT WINAPI ScarlettSerializeRootSignature(
     ID3DBlob** ppBlob,
     ID3DBlob** ppErrorBlob) {
     return ::D3D12SerializeRootSignature(pRootSignature, Version, ppBlob, ppErrorBlob);
+}
+
+
+void WINAPI D3D12XboxSetProcessDebugFlags(uint32_t /*flags*/) {
+}
+
+HRESULT WINAPI D3DMapEsramMemory(
+    uint32_t /*flags*/, void* /*virtualAddress*/, uint32_t /*numPages*/, const uint32_t* /*pageList*/) {
+    return S_OK;
 }
 
 } // extern "C"

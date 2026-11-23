@@ -1,6 +1,6 @@
-# Scarlett Layer — Roadmap (Sprint 71 Baseline)
+# Scarlett Layer - Roadmap (Sprint 72 Active)
 
-**Current Baseline:** Sprint 71 (on top of `v0.69.0-pre`, Apache-2.0) — **78/78 Tier 1 self-authored synthetic CTests passing** (`42 cpu`, `36 gpu`), **0 Tier 2 automated external Xbox-targeted binary tests**, zero `/W4 /permissive-` warnings, zero `d3d12_debug` errors under `SCARLETT_STRICT_D3D12=1`, and GitHub Actions Windows CI running both `cpu` and `gpu` suites on Microsoft WARP.
+**Current Baseline:** Sprint 72 (in progress) (on top of `v0.69.0-pre`, Apache-2.0) — **78/78 Tier 1 self-authored synthetic CTests passing** (`42 cpu`, `36 gpu`), **0 Tier 2 automated external Xbox-targeted binary tests**, zero `/W4 /permissive-` warnings, zero `d3d12_debug` errors under `SCARLETT_STRICT_D3D12=1`, and GitHub Actions Windows CI running both `cpu` and `gpu` suites on Microsoft WARP.
 
 ## Completed Recently (Sprints 63-71)
 
@@ -22,7 +22,7 @@
 
 | Sprint | Focus Area | Concrete Deliverables | Acceptance Gate |
 | :---: | :--- | :--- | :--- |
-| **72** | **Real Xbox-Platform-Targeted Binary Bring-Up (`Gaming.Xbox.Scarlett.x64`)** | Move beyond PC Desktop `SimpleTriangleDesktop.exe` to an unmodified, legal, unencrypted **Xbox-platform-targeted** GDK sample or homebrew executable. Drive real `d3d12_xs` COM vtable/GUID fixes, `IDXGIDevice1` QI bridge, `PresentX` / real command submission, and runtime/memory parity directly from real execution traces. | Unmodified Xbox-platform-targeted binary boots through `loader.exe --boot`, renders a verified frame, and is tracked as the first **Tier 2** test. |
+| **72** | **Real Xbox Binary Bring-Up (`Terraria` Menus -> Gameplay)** | Move beyond PC Desktop `SimpleTriangleDesktop.exe` to an unmodified, legal, unencrypted **Xbox-platform-targeted** GDK sample or homebrew executable. Drive real `d3d12_xs` COM vtable/GUID fixes, `IDXGIDevice1` QI bridge, `PresentX` / real command submission, and runtime/memory parity directly from real execution traces. | Unmodified Xbox-platform-targeted binary boots through `loader.exe --boot`, renders a verified frame, and is tracked as the first **Tier 2** test. |
 | **73** | **Multi-Title Validation, Fuzzing, Second GPU & Human Audit** | Scale Tier 2 validation to multiple unencrypted Xbox-targeted titles (graphics + input + audio + saves); add fuzz harnesses for PE, XVD, `MicrosoftGame.Config`, and VFS parsers; run verification on a second GPU vendor (AMD or Intel) alongside RTX 5070 + WARP; **TODO(jade):** complete independent human Windows-internals review of `src/loader/pe_patcher.cpp` and `src/loader/scarlett_hook.cpp` and retitle the legacy `v1.0.0` GitHub release to `v0.x`. | Reproducible multi-sample Tier 2 runs; fuzzers clean; multi-vendor GPU results documented; human loader audit resolved/tracked. |
 
 ## Deferred Backlog (Frozen Until Sprints 70-72 Succeed)

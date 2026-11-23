@@ -6,3 +6,8 @@ EXPORTS
     XMemAllocDefault
     XMemFreeDefault
     XMemSizeDefault
+    XMemAllocatePhysicalPages
+    XMemMapPhysicalPages
+    XMemFreePhysicalPages
+    XMemVirtualAlloc
+    XMemGetWorkingSetStatistics

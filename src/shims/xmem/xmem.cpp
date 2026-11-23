@@ -276,4 +276,36 @@ size_t WINAPI XMemSize(void* pAddress, uint32_t dwAllocAttributes) {
     return XMemSizeDefault(pAddress, dwAllocAttributes);
 }
 
+
+void* WINAPI XMemVirtualAlloc(void* lpAddress, size_t dwSize, DWORD flAllocationType, DWORD flProtect) {
+    DWORD winType = flAllocationType & (MEM_COMMIT | MEM_RESERVE | MEM_TOP_DOWN | MEM_RESET | MEM_RESET_UNDO);
+    if (winType == 0) winType = MEM_COMMIT | MEM_RESERVE;
+    DWORD winProt = (flProtect & 0xFFu);
+    if (winProt == 0) winProt = PAGE_READWRITE;
+    void* p = VirtualAlloc(lpAddress, dwSize, winType, winProt);
+    if (!p && lpAddress != nullptr) {
+        p = VirtualAlloc(nullptr, dwSize, winType, winProt);
+    }
+    return p;
+}
+
+BOOL WINAPI XMemAllocatePhysicalPages(size_t /*pageSize*/, size_t /*numPages*/, uint32_t /*flags*/, uint64_t* /*pageNumbers*/) {
+    SetLastError(ERROR_NOT_SUPPORTED);
+    return FALSE;
+}
+
+BOOL WINAPI XMemMapPhysicalPages(void* /*virtualAddress*/, size_t /*numPages*/, uint32_t /*flags*/, const uint64_t* /*pageNumbers*/) {
+    SetLastError(ERROR_NOT_SUPPORTED);
+    return FALSE;
+}
+
+BOOL WINAPI XMemFreePhysicalPages(size_t /*numPages*/, const uint64_t* /*pageNumbers*/) {
+    return TRUE;
+}
+
+BOOL WINAPI XMemGetWorkingSetStatistics(void* /*stats*/) {
+    SetLastError(ERROR_NOT_SUPPORTED);
+    return FALSE;
+}
+
 } // extern "C"

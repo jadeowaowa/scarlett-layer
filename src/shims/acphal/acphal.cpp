@@ -4,6 +4,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <malloc.h>
+#include <mutex>
+#include <vector>
 
 namespace {
 
@@ -71,11 +73,44 @@ HRESULT WINAPI AcpHalCreate(void** acpHal) {
     return S_OK;
 }
 
+} // extern "C"
+
+namespace {
+std::mutex g_shapeMtx;
+std::vector<void*> g_shapeBuffers;
+
+void* AllocShapeBuf(uint32_t count, size_t stride) {
+    if (count == 0) return nullptr;
+    const size_t bytes = static_cast<size_t>(count) * stride;
+    void* p = _aligned_malloc(bytes, 64);
+    if (p) {
+        std::memset(p, 0, bytes);
+        g_shapeBuffers.push_back(p);
+    }
+    return p;
+}
+} // namespace
+
+extern "C" {
+
 HRESULT WINAPI AcpHalAllocateShapeContexts(ACP_SHAPE_CONTEXT_COUNTS* ctx) {
-    return ctx ? S_OK : E_INVALIDARG;
+    if (!ctx) return E_INVALIDARG;
+    std::lock_guard<std::mutex> lock(g_shapeMtx);
+    ctx->srcContextBuffer  = AllocShapeBuf(ctx->numSrcContexts,  64);
+    ctx->eqContextBuffer   = AllocShapeBuf(ctx->numEqContexts,   64);
+    ctx->filtContextBuffer = AllocShapeBuf(ctx->numFiltContexts, 64);
+    ctx->dmaContextBuffer  = AllocShapeBuf(ctx->numDmaContexts,  64);
+    ctx->xmaContextBuffer  = AllocShapeBuf(ctx->numXmaContexts,  64);
+    ctx->pcmContextBuffer  = AllocShapeBuf(ctx->numPcmContexts,  64);
+    return S_OK;
 }
 
 HRESULT WINAPI AcpHalReleaseShapeContexts(void) {
+    std::lock_guard<std::mutex> lock(g_shapeMtx);
+    for (void* p : g_shapeBuffers) {
+        _aligned_free(p);
+    }
+    g_shapeBuffers.clear();
     return S_OK;
 }
 
@@ -100,6 +135,15 @@ HRESULT WINAPI ApuFree(void* virtualAddress) {
     if (!virtualAddress) return E_INVALIDARG;
     _aligned_free(virtualAddress);
     return S_OK;
+}
+
+
+HRESULT WINAPI ApuMapVirtualAddress(void* /*virtualAddress*/, uint32_t /*sizeInBytes*/) {
+    return S_OK;
+}
+
+BOOL WINAPI ApuIsVirtualAddressValid(const void* virtualAddress) {
+    return virtualAddress != nullptr ? TRUE : FALSE;
 }
 
 } // extern "C"

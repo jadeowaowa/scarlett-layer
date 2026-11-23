@@ -3,6 +3,8 @@
 #include "gdk_types.hpp"
 #include "task_queue.hpp"
 
+extern "C" void WINAPI XTaskQueueCloseHandle(XTaskQueueHandle queue);
+
 #include <atomic>
 #include <condition_variable>
 #include <cstring>
@@ -54,6 +56,9 @@ inline HRESULT LaunchAsync(
     auto* state = new AsyncState();
     StoreAsyncState(async, state);
     XTaskQueueHandle queue = async->queue;
+    if (queue) {
+        AddRefTaskQueue(queue);
+    }
 
     HRESULT submitHr = SubmitTask(queue, XTaskQueuePort::Work,
         [async, state, queue, fn = std::move(workFn)]() {
@@ -67,15 +72,27 @@ inline HRESULT LaunchAsync(
             }
             state->cv.notify_all();
 
-            SubmitTask(queue, XTaskQueuePort::Completion, [async, state]() {
+            HRESULT compHr = SubmitTask(queue, XTaskQueuePort::Completion, [async, state, queue]() {
                 if (async->callback) {
                     async->callback(async);
                 }
                 ReleaseAsyncState(state);
+                if (queue) {
+                    XTaskQueueCloseHandle(queue);
+                }
             });
+            if (FAILED(compHr)) {
+                ReleaseAsyncState(state);
+                if (queue) {
+                    XTaskQueueCloseHandle(queue);
+                }
+            }
         });
 
     if (FAILED(submitHr)) {
+        if (queue) {
+            XTaskQueueCloseHandle(queue);
+        }
         std::memset(async->internal, 0, sizeof(async->internal));
         delete state;
     }

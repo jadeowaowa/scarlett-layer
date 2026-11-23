@@ -76,4 +76,9 @@ Microsoft::WRL::ComPtr<ID3D12DeviceX> CreateScarlettDeviceX(
     UINT vendorId,
     UINT deviceId);
 
+Microsoft::WRL::ComPtr<ID3D12Device> CreateXboxD3D12Device(
+    Microsoft::WRL::ComPtr<IDXGIFactory6> factory,
+    Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter,
+    Microsoft::WRL::ComPtr<ID3D12Device> device);
+
 } // namespace sc::d3d12xs

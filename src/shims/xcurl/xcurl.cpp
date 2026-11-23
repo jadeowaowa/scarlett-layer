@@ -203,4 +203,40 @@ void xcurl_clear_mocks(void) {
     g_curlMocks.clear();
 }
 
+
+void* curl_multi_init(void) {
+    return reinterpret_cast<void*>(static_cast<uintptr_t>(0x1001));
+}
+
+int curl_multi_cleanup(void* /*multi_handle*/) {
+    return 0;
+}
+
+int curl_multi_add_handle(void* /*multi_handle*/, void* /*easy_handle*/) {
+    return 0;
+}
+
+int curl_multi_remove_handle(void* /*multi_handle*/, void* /*easy_handle*/) {
+    return 0;
+}
+
+int curl_multi_perform(void* /*multi_handle*/, int* running_handles) {
+    if (running_handles) *running_handles = 0;
+    return 0;
+}
+
+int curl_multi_wait(void* /*multi_handle*/, void* /*extra_fds*/, unsigned int /*extra_nfds*/, int /*timeout_ms*/, int* numfds) {
+    if (numfds) *numfds = 0;
+    return 0;
+}
+
+int curl_multi_poll(void* multi_handle, void* extra_fds, unsigned int extra_nfds, int timeout_ms, int* numfds) {
+    return curl_multi_wait(multi_handle, extra_fds, extra_nfds, timeout_ms, numfds);
+}
+
+void* curl_multi_info_read(void* /*multi_handle*/, int* msgs_in_queue) {
+    if (msgs_in_queue) *msgs_in_queue = 0;
+    return nullptr;
+}
+
 } // extern "C"
