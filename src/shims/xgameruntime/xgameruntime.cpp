@@ -21,6 +21,19 @@ uint64_t GetUserXuid(XUserHandle user) {
     return user ? user->xuid : 0x0009000000000001ULL;
 }
 
+XUserHandle AcquireDefaultUser() {
+    return new XUser();
+}
+
+HRESULT DuplicateUserHandle(XUserHandle user, XUserHandle* outUser) {
+    if (!outUser) return E_POINTER;
+    *outUser = nullptr;
+    if (!user) return E_HANDLE;
+    user->refs.fetch_add(1, std::memory_order_relaxed);
+    *outUser = user;
+    return S_OK;
+}
+
 } // namespace sc::runtime
 
 namespace {

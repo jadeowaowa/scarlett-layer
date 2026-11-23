@@ -56,6 +56,9 @@ inline bool GuidEquals(const GUID& a, const GUID& b) {
 inline constexpr GUID kClsidXAsync         = MakeGuid(0x073b7dcb, 0x1fcf, 0x4030, 0x94, 0xbe, 0xe3, 0xc9, 0xeb, 0x62, 0x34, 0x28);
 inline constexpr GUID kClsidXUser          = MakeGuid(0x01acd177, 0x91f9, 0x4763, 0xa3, 0x8e, 0xcc, 0xbb, 0x55, 0xce, 0x32, 0xe0);
 inline constexpr GUID kIidXUserGamertag    = MakeGuid(0xcef4fac0, 0x7676, 0x4a94, 0xa1, 0x19, 0x4c, 0x43, 0xf9, 0xeb, 0x5b, 0x74);
+inline constexpr GUID kIidXUser2022        = MakeGuid(0x1bf2f8c5, 0xd507, 0x4e52, 0xbb, 0x05, 0xf7, 0x26, 0xd0, 0xe7, 0x11, 0x61);
+inline constexpr GUID kClsidXUserDevAssoc  = MakeGuid(0x7d824997, 0x10dc, 0x45ab, 0x86, 0xb7, 0x27, 0x37, 0x76, 0x7c, 0x0b, 0xf1);
+inline constexpr GUID kIidXUserDevAssoc    = MakeGuid(0x0cc6a956, 0xe7e1, 0x4fdf, 0x93, 0x41, 0x9d, 0x5d, 0xa6, 0x49, 0xeb, 0xc8);
 inline constexpr GUID kClsidXGameSave      = MakeGuid(0x704c3f58, 0xe629, 0x4cc2, 0xb1, 0x97, 0x30, 0x51, 0x1b, 0x99, 0x6f, 0xe2);
 inline constexpr GUID kIidXGameSave        = MakeGuid(0x1bfff3af, 0xf14a, 0x40a3, 0x8e, 0x35, 0x9a, 0xda, 0x90, 0x65, 0x93, 0xf9);
 inline constexpr GUID kClsidXFeature       = MakeGuid(0x8836fe87, 0xedb9, 0x4fe3, 0x8d, 0xad, 0x05, 0xf0, 0xd2, 0xcd, 0x5b, 0x40);
@@ -364,22 +367,151 @@ struct XUserGamertagServiceImpl final : public StaticComService {
 };
 
 struct XUserServiceImpl final : public StaticComService {
+    std::atomic<uint64_t> nextToken{1};
+
+    static HRESULT CompleteTrivialAsync(XAsyncBlock* ab) {
+        return sc::runtime::LaunchAsync(ab, [](std::shared_ptr<void>&) -> HRESULT { return S_OK; });
+    }
+    static HRESULT FinishTrivialAsync(XAsyncBlock* ab) {
+        if (!ab) return E_INVALIDARG;
+        auto* st = sc::runtime::LoadAsyncState(ab);
+        if (!st) return S_OK;
+        HRESULT hr = E_PENDING;
+        {
+            std::lock_guard<std::mutex> lk(st->mtx);
+            if (!st->completed) return E_PENDING;
+            hr = st->status;
+        }
+        sc::runtime::DetachAsyncState(ab, st);
+        return hr;
+    }
+
     virtual HRESULT STDMETHODCALLTYPE DuplicateHandle(XUserHandle u, XUserHandle* outU) { // +0x18 (3)
-        if (!outU) return E_POINTER;
-        *outU = u;
-        return S_OK;
+        return sc::runtime::DuplicateUserHandle(u, outU);
     }
     virtual void    STDMETHODCALLTYPE CloseHandle(XUserHandle u) { XUserCloseHandle(u); } // +0x20 (4)
-    virtual int32_t STDMETHODCALLTYPE Compare(XUserHandle a, XUserHandle b) { return a == b ? 0 : (a < b ? -1 : 1); } // +0x28 (5)
+    virtual int32_t STDMETHODCALLTYPE Compare(XUserHandle a, XUserHandle b) { // +0x28 (5)
+        const uint64_t xa = a ? sc::runtime::GetUserXuid(a) : 0;
+        const uint64_t xb = b ? sc::runtime::GetUserXuid(b) : 0;
+        return xa == xb ? 0 : (xa < xb ? -1 : 1);
+    }
     virtual HRESULT STDMETHODCALLTYPE GetMaxUsers(uint32_t* maxU) { if (maxU) *maxU = 4; return S_OK; } // +0x30 (6)
     virtual HRESULT STDMETHODCALLTYPE AddAsync(XUserAddOptions opt, XAsyncBlock* ab) { return XUserAddAsync(opt, ab); } // +0x38 (7)
     virtual HRESULT STDMETHODCALLTYPE AddResult(XAsyncBlock* ab, XUserHandle* u) { return XUserAddResult(ab, u); } // +0x40 (8)
     virtual HRESULT STDMETHODCALLTYPE GetLocalId(XUserHandle u, XUserLocalId* id) { return XUserGetLocalId(u, id); } // +0x48 (9)
-    virtual HRESULT STDMETHODCALLTYPE FindUserByLocalId(XUserLocalId, XUserHandle* u) { if (u) *u = nullptr; return E_NOTIMPL; } // +0x50 (10)
+    virtual HRESULT STDMETHODCALLTYPE FindUserByLocalId(XUserLocalId id, XUserHandle* u) { // +0x50 (10)
+        if (!u) return E_POINTER;
+        *u = (id.value == 0x0009000000000001ULL) ? sc::runtime::AcquireDefaultUser() : nullptr;
+        return *u ? S_OK : HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
+    }
     virtual HRESULT STDMETHODCALLTYPE GetId(XUserHandle u, uint64_t* id) { return XUserGetId(u, id); } // +0x58 (11)
-    virtual HRESULT STDMETHODCALLTYPE FindUserById(uint64_t, XUserHandle* u) { if (u) *u = nullptr; return E_NOTIMPL; } // +0x60 (12)
+    virtual HRESULT STDMETHODCALLTYPE FindUserById(uint64_t id, XUserHandle* u) { // +0x60 (12)
+        if (!u) return E_POINTER;
+        *u = (id == 0x0009000000000001ULL) ? sc::runtime::AcquireDefaultUser() : nullptr;
+        return *u ? S_OK : HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
+    }
     virtual HRESULT STDMETHODCALLTYPE GetIsGuest(XUserHandle, bool* isGuest) { if (isGuest) *isGuest = false; return S_OK; } // +0x68 (13)
     virtual HRESULT STDMETHODCALLTYPE GetState(XUserHandle u, XUserState* st) { return XUserGetState(u, st); } // +0x70 (14)
+    virtual HRESULT STDMETHODCALLTYPE GetGamertag(XUserHandle u, XUserGamertagComponent c, size_t sz, char* out, size_t* used) { // +0x78 (15)
+        return XUserGetGamertag(u, c, sz, out, used);
+    }
+    virtual HRESULT STDMETHODCALLTYPE GetGamerPictureAsync(XUserHandle, uint32_t, XAsyncBlock*) { return E_NOTIMPL; } // +0x80 (16)
+    virtual HRESULT STDMETHODCALLTYPE GetGamerPictureResultSize(XAsyncBlock*, size_t* sz) { if (sz) *sz = 0; return E_NOTIMPL; } // +0x88 (17)
+    virtual HRESULT STDMETHODCALLTYPE GetGamerPictureResult(XAsyncBlock*, size_t, void*, size_t* used) { if (used) *used = 0; return E_NOTIMPL; } // +0x90 (18)
+    virtual HRESULT STDMETHODCALLTYPE GetAgeGroup(XUserHandle, uint32_t* ageGroup) { // +0x98 (19)
+        if (!ageGroup) return E_POINTER;
+        *ageGroup = 3u; // XUserAgeGroup::Adult
+        return S_OK;
+    }
+    virtual HRESULT STDMETHODCALLTYPE CheckPrivilege(XUserHandle, uint32_t, uint32_t, bool* hasPriv, uint32_t* reason) { // +0xA0 (20)
+        if (hasPriv) *hasPriv = true;
+        if (reason) *reason = 0u; // XUserPrivilegeDenyReason::None
+        return S_OK;
+    }
+    virtual HRESULT STDMETHODCALLTYPE ResolvePrivilegeWithUiAsync(XUserHandle, uint32_t, uint32_t, XAsyncBlock* ab) { // +0xA8 (21)
+        return CompleteTrivialAsync(ab);
+    }
+    virtual HRESULT STDMETHODCALLTYPE ResolvePrivilegeWithUiResult(XAsyncBlock* ab) { // +0xB0 (22)
+        return FinishTrivialAsync(ab);
+    }
+    virtual HRESULT STDMETHODCALLTYPE GetTokenAndSignatureAsync(XUserHandle, uint32_t, const char*, const char*, size_t, const void*, size_t, const void*, XAsyncBlock*) { return E_NOTIMPL; } // +0xB8 (23)
+    virtual HRESULT STDMETHODCALLTYPE GetTokenAndSignatureResultSize(XAsyncBlock*, size_t* sz) { if (sz) *sz = 0; return E_NOTIMPL; } // +0xC0 (24)
+    virtual HRESULT STDMETHODCALLTYPE GetTokenAndSignatureResult(XAsyncBlock*, size_t, void*, void**, size_t* used) { if (used) *used = 0; return E_NOTIMPL; } // +0xC8 (25)
+    virtual HRESULT STDMETHODCALLTYPE GetTokenAndSignatureUtf16Async(XUserHandle, uint32_t, const wchar_t*, const wchar_t*, size_t, const void*, size_t, const void*, XAsyncBlock*) { return E_NOTIMPL; } // +0xD0 (26)
+    virtual HRESULT STDMETHODCALLTYPE GetTokenAndSignatureUtf16ResultSize(XAsyncBlock*, size_t* sz) { if (sz) *sz = 0; return E_NOTIMPL; } // +0xD8 (27)
+    virtual HRESULT STDMETHODCALLTYPE GetTokenAndSignatureUtf16Result(XAsyncBlock*, size_t, void*, void**, size_t* used) { if (used) *used = 0; return E_NOTIMPL; } // +0xE0 (28)
+    virtual HRESULT STDMETHODCALLTYPE ResolveIssueWithUiAsync(XUserHandle, const char*, XAsyncBlock* ab) { return CompleteTrivialAsync(ab); } // +0xE8 (29)
+    virtual HRESULT STDMETHODCALLTYPE ResolveIssueWithUiResult(XAsyncBlock* ab) { return FinishTrivialAsync(ab); } // +0xF0 (30)
+    virtual HRESULT STDMETHODCALLTYPE ResolveIssueWithUiUtf16Async(XUserHandle, const wchar_t*, XAsyncBlock* ab) { return CompleteTrivialAsync(ab); } // +0xF8 (31)
+    virtual HRESULT STDMETHODCALLTYPE ResolveIssueWithUiUtf16Result(XAsyncBlock* ab) { return FinishTrivialAsync(ab); } // +0x100 (32)
+    virtual HRESULT STDMETHODCALLTYPE RegisterForChangeEvent(XTaskQueueHandle, void*, void*, uint64_t* token) { // +0x108 (33)
+        if (!token) return E_POINTER;
+        *token = nextToken.fetch_add(1, std::memory_order_relaxed);
+        return S_OK;
+    }
+    virtual bool STDMETHODCALLTYPE UnregisterForChangeEvent(uint64_t, bool) { return true; } // +0x110 (34)
+    virtual HRESULT STDMETHODCALLTYPE GetSignOutDeferral(void** deferral) { // +0x118 (35)
+        if (!deferral) return E_POINTER;
+        *deferral = reinterpret_cast<void*>(static_cast<uintptr_t>(1));
+        return S_OK;
+    }
+    virtual void STDMETHODCALLTYPE CloseSignOutDeferralHandle(void*) {} // +0x120 (36)
+    virtual HRESULT STDMETHODCALLTYPE AddByIdWithUiAsync(uint64_t, XAsyncBlock* ab) { // +0x128 (37)
+        return XUserAddAsync(XUserAddOptions::AddDefaultUserSilently, ab);
+    }
+    virtual HRESULT STDMETHODCALLTYPE AddByIdWithUiResult(XAsyncBlock* ab, XUserHandle* u) { // +0x130 (38)
+        return XUserAddResult(ab, u);
+    }
+};
+
+// --- Service 7b: XUserDeviceAssociation (CLSID 7d824997-..., IID 0cc6a956-...) ---
+struct XUserDevAssocServiceImpl final : public StaticComService {
+    std::atomic<uint64_t> nextToken{1};
+
+    virtual HRESULT STDMETHODCALLTYPE FindForDevice(const void* deviceId, XUserHandle* outUser) { // +0x18 (3)
+        if (!deviceId || !outUser) return E_POINTER;
+        *outUser = sc::runtime::AcquireDefaultUser();
+        sc::log::Write(sc::log::Level::Info, "xgameruntime", "XUserFindForDevice",
+                       "-> bound device to default offline XUser");
+        return S_OK;
+    }
+    virtual HRESULT STDMETHODCALLTYPE RegisterForDeviceAssociationChanged(XTaskQueueHandle, void*, void*, uint64_t* token) { // +0x20 (4)
+        if (!token) return E_POINTER;
+        *token = nextToken.fetch_add(1, std::memory_order_relaxed);
+        return S_OK;
+    }
+    virtual bool STDMETHODCALLTYPE UnregisterForDeviceAssociationChanged(uint64_t, bool) { return true; } // +0x28 (5)
+    virtual HRESULT STDMETHODCALLTYPE GetDefaultAudioEndpointUtf16(XUserHandle, uint32_t, size_t, wchar_t*, size_t* used) { // +0x30 (6)
+        if (used) *used = 0;
+        return HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
+    }
+    virtual HRESULT STDMETHODCALLTYPE RegisterForDefaultAudioEndpointUtf16Changed(XTaskQueueHandle, void*, void*, uint64_t* token) { // +0x38 (7)
+        if (!token) return E_POINTER;
+        *token = nextToken.fetch_add(1, std::memory_order_relaxed);
+        return S_OK;
+    }
+    virtual bool STDMETHODCALLTYPE UnregisterForDefaultAudioEndpointUtf16Changed(uint64_t, bool) { return true; } // +0x40 (8)
+    virtual HRESULT STDMETHODCALLTYPE FindControllerForUserWithUiAsync(XUserHandle, XAsyncBlock* ab) { // +0x48 (9)
+        return sc::runtime::LaunchAsync(ab, [](std::shared_ptr<void>&) -> HRESULT { return S_OK; });
+    }
+    virtual HRESULT STDMETHODCALLTYPE FindControllerForUserWithUiResult(XAsyncBlock* ab, void* outDeviceId32) { // +0x50 (10)
+        if (!ab || !outDeviceId32) return E_INVALIDARG;
+        auto* st = sc::runtime::LoadAsyncState(ab);
+        if (!st) return E_INVALIDARG;
+        HRESULT hr = E_PENDING;
+        {
+            std::lock_guard<std::mutex> lk(st->mtx);
+            if (!st->completed) return E_PENDING;
+            hr = st->status;
+        }
+        sc::runtime::DetachAsyncState(ab, st);
+        if (SUCCEEDED(hr)) {
+            static constexpr char kGpId[] = "SCARLETT-XBOXONE-GAMEPAD-000000";
+            std::memset(outDeviceId32, 0, 32);
+            std::memcpy(outDeviceId32, kGpId, sizeof(kGpId) - 1);
+        }
+        return hr;
+    }
 };
 
 // --- Service 8: XGameSave (CLSID 704c3f58-..., IID 1bfff3af-...) ---
@@ -421,6 +553,7 @@ XErrorServiceImpl         g_errorSvc;
 XFeatureServiceImpl       g_featureSvc;
 XUserServiceImpl          g_userSvc;
 XUserGamertagServiceImpl  g_userGamertagSvc;
+XUserDevAssocServiceImpl  g_userDevAssocSvc;
 XGameSaveServiceImpl      g_gameSaveSvc;
 
 } // namespace
@@ -502,10 +635,14 @@ HRESULT WINAPI QueryApiImpl(const GUID* clsid, const GUID* iid, void** ppv) {
             *ppv = &g_userGamertagSvc;
             return S_OK;
         }
-        if (GuidEquals(*iid, kClsidXUser)) {
+        if (GuidEquals(*iid, kClsidXUser) || GuidEquals(*iid, kIidXUser2022)) {
             *ppv = &g_userSvc;
             return S_OK;
         }
+    }
+    if (GuidEquals(*clsid, kClsidXUserDevAssoc) && GuidEquals(*iid, kIidXUserDevAssoc)) {
+        *ppv = &g_userDevAssocSvc;
+        return S_OK;
     }
     if (GuidEquals(*clsid, kClsidXGameSave) && GuidEquals(*iid, kIidXGameSave)) {
         *ppv = &g_gameSaveSvc;

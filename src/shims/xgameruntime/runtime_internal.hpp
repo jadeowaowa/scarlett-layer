@@ -100,5 +100,7 @@ inline HRESULT LaunchAsync(
 }
 
 uint64_t GetUserXuid(XUserHandle user);
+XUserHandle AcquireDefaultUser();
+HRESULT DuplicateUserHandle(XUserHandle user, XUserHandle* outUser);
 
 } // namespace sc::runtime
