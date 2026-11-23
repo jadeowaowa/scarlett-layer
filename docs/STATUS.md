@@ -11,26 +11,29 @@
 | **Tier 2 (Automated CI Xbox-Targeted Binaries)** | **0** | No redistributable `Gaming.Xbox.Scarlett.x64` binary runs in CI yet. |
 | **Local Retail Bring-Up** | `Terraria` (unpacked Xbox GDK) | Boots, renders menus/backgrounds cleanly (GCN `1D_THIN` detiler), plays audio, exits cleanly; input & gameplay in progress. |
 | **Local Desktop GDK Sample** | `SimpleTriangleDesktop.exe` (PC Desktop target) | Boots, renders, and exits cleanly (`code=0`, 0 auto-stubs) locally; not an Xbox console target. |
-| **Shim DLL Targets & Exported Symbols** | **13 `.def` shims** (`122` exports) | Plus `libHttpClient.dll` alias staged beside `libHttpClient.GDK.dll`. |
+| **Shim DLL Targets & Exported Symbols** | **16 `.def` shims** (`166` exports) | Plus `libHttpClient.dll` alias staged beside `libHttpClient.GDK.dll`. |
 | **Specification Ledger (`docs/SPEC_SOURCES.md`)** | `17` Sourced / `5` `ASSUMED` | Project-defined formats (`SCLZ`, `SCXS`) and unverified COM vtables remain marked `ASSUMED`. |
 
 ## Shim Export Inventory
 
 | Shim DLL | `.def` Source | Exported Symbols |
 | :--- | :--- | :---: |
-| `AcpHal.dll` | `src/shims/acphal/acphal.def` | 7 |
-| `d3d12_xs.dll` | `src/shims/d3d12_xs/d3d12_xs.def` | 4 |
+| `AcpHal.dll` | `src/shims/acphal/acphal.def` | 9 |
+| `chad.dll` | `src/shims/chad/chad.def` | 5 |
+| `d3d12_xs.dll` | `src/shims/d3d12_xs/d3d12_xs.def` | 7 |
 | `dstorage_xs.dll` | `src/shims/dstorage_xs/dstorage_xs.def` | 2 |
 | `gameinput.dll` | `src/shims/gameinput/gameinput.def` | 2 |
 | `kernelx.dll` | `src/shims/kernelx/kernelx.def` | 5 |
-| `libHttpClient.GDK.dll` | `src/shims/libhttpclient/libhttpclient.def` | 20 |
+| `libHttpClient.GDK.dll` | `src/shims/libhttpclient/libhttpclient.def` | 43 |
 | `pixevt.dll` | `src/shims/pixevt/pixevt.def` | 3 |
+| `xapu.dll` | `src/shims/xapu/xapu.def` | 5 |
 | `xaudio2_9.dll` | `src/shims/xaudio2_9/xaudio2_9.def` | 2 |
+| `XCRDAPI.dll` | `src/shims/xcrdapi/xcrdapi.def` | 1 |
 | `XCurl.dll` | `src/shims/xcurl/xcurl.def` | 22 |
 | `XFrontPanelDisplay.dll` | `src/shims/xfrontpaneldisplay/xfrontpaneldisplay.def` | 6 |
-| `xg_xs.dll` | `src/shims/xg_xs/xg_xs.def` | 4 |
+| `xg_xs.dll` | `src/shims/xg_xs/xg_xs.def` | 5 |
 | `xgameruntime.dll` | `src/shims/xgameruntime/xgameruntime.def` | 34 |
-| `xmem.dll` | `src/shims/xmem/xmem.def` | 11 |
+| `xmem.dll` | `src/shims/xmem/xmem.def` | 15 |
 
 ## Registered Tier 1 CTests
 

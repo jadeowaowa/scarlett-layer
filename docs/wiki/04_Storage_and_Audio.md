@@ -1,7 +1,7 @@
 # 04 — Velocity Storage (`dstorage_xs`) & Audio Proxy (`xaudio2_9`)
 
 ## `dstorage_xs.dll`
-**Files:** `src/shims/dstorage_xs/dstorage_xs.cpp` (1269 L), `src/shims/dstorage_xs/dstorage_xs.def` (4 L), `src/shims/dstorage_xs/dstorage_xs.hpp` (181 L)
+**Files:** `src/shims/dstorage_xs/dstorage_xs.cpp` (1982 L), `src/shims/dstorage_xs/dstorage_xs.def` (4 L), `src/shims/dstorage_xs/dstorage_xs.hpp` (181 L)
 
 **DLL Exports (`.def`):** `DStorageGetFactory`, `DStorageSetConfiguration`
 
@@ -44,9 +44,9 @@
 **DLL Exports (`.def`):** `XAudio2Create = ScarlettXAudio2Create @1`, `XAudio2CreateWithVersionInfo = ScarlettXAudio2CreateWithVersionInfo`
 
 ## `acphal.dll`
-**Files:** `src/shims/acphal/acphal.cpp` (149 L), `src/shims/acphal/acphal.def` (9 L), `src/shims/acphal/acphal.hpp` (39 L)
+**Files:** `src/shims/acphal/acphal.cpp` (157 L), `src/shims/acphal/acphal.def` (11 L), `src/shims/acphal/acphal.hpp` (39 L)
 
-**DLL Exports (`.def`):** `AcpHalCreate`, `AcpHalAllocateShapeContexts`, `AcpHalReleaseShapeContexts`, `ApuAlloc`, `ApuFree`, `ApuMapVirtualAddress`, `ApuIsVirtualAddressValid`
+**DLL Exports (`.def`):** `AcpHalCreate`, `AcpHalAllocateShapeContexts`, `AcpHalReleaseShapeContexts`, `ApuAlloc`, `ApuFree`, `ApuMapVirtualAddress`, `ApuIsVirtualAddressValid`, `ApuCreateHeap`, `ApuMapApuAddress`
 
 **C Entrypoints:**
 - `HRESULT WINAPI AcpHalCreate(void** acpHal)`
@@ -56,9 +56,9 @@
 - `HRESULT WINAPI ApuFree(void* virtualAddress)`
 
 ## `libhttpclient.dll`
-**Files:** `src/shims/libhttpclient/libhttpclient.cpp` (246 L), `src/shims/libhttpclient/libhttpclient.def` (22 L), `src/shims/libhttpclient/libhttpclient.hpp` (34 L)
+**Files:** `src/shims/libhttpclient/libhttpclient.cpp` (443 L), `src/shims/libhttpclient/libhttpclient.def` (45 L), `src/shims/libhttpclient/libhttpclient.hpp` (34 L)
 
-**DLL Exports (`.def`):** `HCInitialize`, `HCCleanup`, `HCIsInitialized`, `HCGetLibVersion`, `HCHttpCallCreate`, `HCHttpCallCloseHandle`, `HCHttpCallRequestSetUrl`, `HCHttpCallRequestSetHeader`, `HCHttpCallRequestSetRequestBodyBytes`, `HCHttpCallRequestSetRequestBodyString`, `HCHttpCallRequestSetTimeout`, `HCHttpCallPerformAsync`, `HCHttpCallResponseGetStatusCode`, `HCHttpCallResponseGetNetworkErrorCode`, `HCHttpCallResponseGetResponseString`, `HCHttpCallResponseGetResponseBodyBytesSize`, `HCHttpCallResponseGetResponseBodyBytes`, `HCHttpCallResponseGetHeader`, `HCHttpCallRegisterMock`, `HCHttpCallClearMocks`
+**DLL Exports (`.def`):** `HCInitialize`, `HCCleanup`, `HCIsInitialized`, `HCGetLibVersion`, `HCHttpCallCreate`, `HCHttpCallCloseHandle`, `HCHttpCallRequestSetUrl`, `HCHttpCallRequestSetHeader`, `HCHttpCallRequestSetRequestBodyBytes`, `HCHttpCallRequestSetRequestBodyString`, `HCHttpCallRequestSetTimeout`, `HCHttpCallPerformAsync`, `HCHttpCallResponseGetStatusCode`, `HCHttpCallResponseGetNetworkErrorCode`, `HCHttpCallResponseGetResponseString`, `HCHttpCallResponseGetResponseBodyBytesSize`, `HCHttpCallResponseGetResponseBodyBytes`, `HCHttpCallResponseGetHeader`, `HCHttpCallRegisterMock`, `HCHttpCallClearMocks`, `HCCleanupAsync`, `HCHttpCallDuplicateHandle`, `HCHttpCallGetRequestUrl`, `HCHttpCallRequestGetHeaderAtIndex`, `HCHttpCallRequestGetNumHeaders`, `HCHttpCallRequestGetRequestBodyBytes`, `HCHttpCallRequestGetRetryAllowed`, `HCHttpCallRequestGetRetryCacheId`, `HCHttpCallRequestGetRetryDelay`, `HCHttpCallRequestGetTimeout`, `HCHttpCallRequestGetTimeoutWindow`, `HCHttpCallRequestGetUrl`, `HCHttpCallRequestSetRetryAllowed`, `HCHttpCallRequestSetRetryCacheId`, `HCHttpCallRequestSetRetryDelay`, `HCHttpCallRequestSetTimeoutWindow`, `HCHttpCallResponseGetHeaderAtIndex`, `HCHttpCallResponseGetNumHeaders`, `HCHttpCallResponseGetPlatformNetworkErrorMessage`, `HCHttpCallSetTracing`, `HCSettingsGetTraceLevel`, `HCTraceImplMessage`, `HCTraceSetEtwEnabled`
 
 **C Entrypoints:**
 - `HRESULT WINAPI HCInitialize(void* args)`

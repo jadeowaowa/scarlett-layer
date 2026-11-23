@@ -8,15 +8,21 @@
 #include <vector>
 
 struct HC_CALL {
+    uint32_t refCount{1};
     std::string method{"GET"};
     std::string url;
     std::unordered_map<std::string, std::string> reqHeaders;
     std::vector<uint8_t> reqBody;
     uint32_t timeoutSec{30};
+    uint32_t timeoutWindowSec{20};
+    bool     retryAllowed{false};
+    uint32_t retryCacheId{0};
+    uint32_t retryDelaySec{2};
 
     uint32_t statusCode{0};
     HRESULT  networkError{S_OK};
     std::string responseBody;
+    std::string platformErrMsg;
     std::unordered_map<std::string, std::string> respHeaders;
 };
 
@@ -75,7 +81,21 @@ HRESULT WINAPI HCHttpCallCreate(HCCallHandle* call) {
 HRESULT WINAPI HCHttpCallCloseHandle(HCCallHandle call) {
     if (!call) return E_INVALIDARG;
     std::lock_guard<std::mutex> lock(g_hcMtx);
-    return g_calls.erase(call) > 0 ? S_OK : E_INVALIDARG;
+    auto it = g_calls.find(call);
+    if (it == g_calls.end()) return E_INVALIDARG;
+    if (--it->second->refCount == 0) {
+        g_calls.erase(it);
+    }
+    return S_OK;
+}
+
+HCCallHandle WINAPI HCHttpCallDuplicateHandle(HCCallHandle call) {
+    if (!call) return nullptr;
+    std::lock_guard<std::mutex> lock(g_hcMtx);
+    auto it = g_calls.find(call);
+    if (it == g_calls.end()) return nullptr;
+    ++it->second->refCount;
+    return call;
 }
 
 HRESULT WINAPI HCHttpCallRequestSetUrl(HCCallHandle call, const char* method, const char* url) {
@@ -242,5 +262,182 @@ void WINAPI HCHttpCallClearMocks(void) {
     std::lock_guard<std::mutex> lock(g_hcMtx);
     g_mocks.clear();
 }
+
+HRESULT WINAPI HCCleanupAsync(void* asyncBlock) {
+    HCCleanup();
+    if (asyncBlock) {
+        auto* ab = static_cast<HcAsyncBlockView*>(asyncBlock);
+        std::memset(ab->internal, 0, sizeof(ab->internal));
+        if (ab->callback) {
+            ab->callback(asyncBlock);
+        }
+    }
+    return S_OK;
+}
+
+HRESULT WINAPI HCHttpCallGetRequestUrl(HCCallHandle call, const char** url) {
+    if (!call || !url) return E_INVALIDARG;
+    std::lock_guard<std::mutex> lock(g_hcMtx);
+    if (!g_calls.contains(call)) return E_INVALIDARG;
+    *url = call->url.c_str();
+    return S_OK;
+}
+
+HRESULT WINAPI HCHttpCallRequestGetUrl(HCCallHandle call, const char** method, const char** url) {
+    if (!call || !method || !url) return E_INVALIDARG;
+    std::lock_guard<std::mutex> lock(g_hcMtx);
+    if (!g_calls.contains(call)) return E_INVALIDARG;
+    *method = call->method.c_str();
+    *url = call->url.c_str();
+    return S_OK;
+}
+
+HRESULT WINAPI HCHttpCallRequestGetNumHeaders(HCCallHandle call, uint32_t* numHeaders) {
+    if (!call || !numHeaders) return E_INVALIDARG;
+    std::lock_guard<std::mutex> lock(g_hcMtx);
+    if (!g_calls.contains(call)) return E_INVALIDARG;
+    *numHeaders = static_cast<uint32_t>(call->reqHeaders.size());
+    return S_OK;
+}
+
+HRESULT WINAPI HCHttpCallRequestGetHeaderAtIndex(
+    HCCallHandle call, uint32_t headerIndex, const char** headerName, const char** headerValue) {
+    if (!call || !headerName || !headerValue) return E_INVALIDARG;
+    std::lock_guard<std::mutex> lock(g_hcMtx);
+    if (!g_calls.contains(call)) return E_INVALIDARG;
+    if (headerIndex >= call->reqHeaders.size()) return E_INVALIDARG;
+    auto it = call->reqHeaders.begin();
+    std::advance(it, headerIndex);
+    *headerName = it->first.c_str();
+    *headerValue = it->second.c_str();
+    return S_OK;
+}
+
+HRESULT WINAPI HCHttpCallRequestGetRequestBodyBytes(
+    HCCallHandle call, const uint8_t** requestBodyBytes, uint32_t* requestBodySize) {
+    if (!call || !requestBodyBytes || !requestBodySize) return E_INVALIDARG;
+    std::lock_guard<std::mutex> lock(g_hcMtx);
+    if (!g_calls.contains(call)) return E_INVALIDARG;
+    *requestBodyBytes = call->reqBody.empty() ? nullptr : call->reqBody.data();
+    *requestBodySize = static_cast<uint32_t>(call->reqBody.size());
+    return S_OK;
+}
+
+HRESULT WINAPI HCHttpCallRequestSetRetryAllowed(HCCallHandle call, bool retryAllowed) {
+    if (!call) return E_INVALIDARG;
+    std::lock_guard<std::mutex> lock(g_hcMtx);
+    if (!g_calls.contains(call)) return E_INVALIDARG;
+    call->retryAllowed = retryAllowed;
+    return S_OK;
+}
+
+HRESULT WINAPI HCHttpCallRequestGetRetryAllowed(HCCallHandle call, bool* retryAllowed) {
+    if (!call || !retryAllowed) return E_INVALIDARG;
+    std::lock_guard<std::mutex> lock(g_hcMtx);
+    if (!g_calls.contains(call)) return E_INVALIDARG;
+    *retryAllowed = call->retryAllowed;
+    return S_OK;
+}
+
+HRESULT WINAPI HCHttpCallRequestSetRetryCacheId(HCCallHandle call, uint32_t retryCacheId) {
+    if (!call) return E_INVALIDARG;
+    std::lock_guard<std::mutex> lock(g_hcMtx);
+    if (!g_calls.contains(call)) return E_INVALIDARG;
+    call->retryCacheId = retryCacheId;
+    return S_OK;
+}
+
+HRESULT WINAPI HCHttpCallRequestGetRetryCacheId(HCCallHandle call, uint32_t* retryCacheId) {
+    if (!call || !retryCacheId) return E_INVALIDARG;
+    std::lock_guard<std::mutex> lock(g_hcMtx);
+    if (!g_calls.contains(call)) return E_INVALIDARG;
+    *retryCacheId = call->retryCacheId;
+    return S_OK;
+}
+
+HRESULT WINAPI HCHttpCallRequestSetRetryDelay(HCCallHandle call, uint32_t retryDelayInSeconds) {
+    if (!call) return E_INVALIDARG;
+    std::lock_guard<std::mutex> lock(g_hcMtx);
+    if (!g_calls.contains(call)) return E_INVALIDARG;
+    call->retryDelaySec = retryDelayInSeconds;
+    return S_OK;
+}
+
+HRESULT WINAPI HCHttpCallRequestGetRetryDelay(HCCallHandle call, uint32_t* retryDelayInSeconds) {
+    if (!call || !retryDelayInSeconds) return E_INVALIDARG;
+    std::lock_guard<std::mutex> lock(g_hcMtx);
+    if (!g_calls.contains(call)) return E_INVALIDARG;
+    *retryDelayInSeconds = call->retryDelaySec;
+    return S_OK;
+}
+
+HRESULT WINAPI HCHttpCallRequestGetTimeout(HCCallHandle call, uint32_t* timeoutInSeconds) {
+    if (!call || !timeoutInSeconds) return E_INVALIDARG;
+    std::lock_guard<std::mutex> lock(g_hcMtx);
+    if (!g_calls.contains(call)) return E_INVALIDARG;
+    *timeoutInSeconds = call->timeoutSec;
+    return S_OK;
+}
+
+HRESULT WINAPI HCHttpCallRequestSetTimeoutWindow(HCCallHandle call, uint32_t timeoutWindowInSeconds) {
+    if (!call) return E_INVALIDARG;
+    std::lock_guard<std::mutex> lock(g_hcMtx);
+    if (!g_calls.contains(call)) return E_INVALIDARG;
+    call->timeoutWindowSec = timeoutWindowInSeconds;
+    return S_OK;
+}
+
+HRESULT WINAPI HCHttpCallRequestGetTimeoutWindow(HCCallHandle call, uint32_t* timeoutWindowInSeconds) {
+    if (!call || !timeoutWindowInSeconds) return E_INVALIDARG;
+    std::lock_guard<std::mutex> lock(g_hcMtx);
+    if (!g_calls.contains(call)) return E_INVALIDARG;
+    *timeoutWindowInSeconds = call->timeoutWindowSec;
+    return S_OK;
+}
+
+HRESULT WINAPI HCHttpCallResponseGetNumHeaders(HCCallHandle call, uint32_t* numHeaders) {
+    if (!call || !numHeaders) return E_INVALIDARG;
+    std::lock_guard<std::mutex> lock(g_hcMtx);
+    if (!g_calls.contains(call)) return E_INVALIDARG;
+    *numHeaders = static_cast<uint32_t>(call->respHeaders.size());
+    return S_OK;
+}
+
+HRESULT WINAPI HCHttpCallResponseGetHeaderAtIndex(
+    HCCallHandle call, uint32_t headerIndex, const char** headerName, const char** headerValue) {
+    if (!call || !headerName || !headerValue) return E_INVALIDARG;
+    std::lock_guard<std::mutex> lock(g_hcMtx);
+    if (!g_calls.contains(call)) return E_INVALIDARG;
+    if (headerIndex >= call->respHeaders.size()) return E_INVALIDARG;
+    auto it = call->respHeaders.begin();
+    std::advance(it, headerIndex);
+    *headerName = it->first.c_str();
+    *headerValue = it->second.c_str();
+    return S_OK;
+}
+
+HRESULT WINAPI HCHttpCallResponseGetPlatformNetworkErrorMessage(HCCallHandle call, const char** platformNetworkErrorMessage) {
+    if (!call || !platformNetworkErrorMessage) return E_INVALIDARG;
+    std::lock_guard<std::mutex> lock(g_hcMtx);
+    if (!g_calls.contains(call)) return E_INVALIDARG;
+    *platformNetworkErrorMessage = call->platformErrMsg.c_str();
+    return S_OK;
+}
+
+HRESULT WINAPI HCHttpCallSetTracing(HCCallHandle call, bool /*traceCall*/) {
+    if (!call) return E_INVALIDARG;
+    std::lock_guard<std::mutex> lock(g_hcMtx);
+    return g_calls.contains(call) ? S_OK : E_INVALIDARG;
+}
+
+HRESULT WINAPI HCSettingsGetTraceLevel(uint32_t* traceLevel) {
+    if (!traceLevel) return E_INVALIDARG;
+    *traceLevel = 0u;
+    return S_OK;
+}
+
+void __cdecl HCTraceImplMessage(const char* /*areaName*/, uint32_t /*level*/, const char* /*format*/, ...) {}
+
+void WINAPI HCTraceSetEtwEnabled(bool /*enabled*/) {}
 
 } // extern "C"

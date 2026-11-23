@@ -591,7 +591,136 @@ public:
                                    pDestinationData, destRowPitch, false);
     }
 
+    // slot 10 (+0x50): GetResourceTiling
+    virtual HRESULT STDMETHODCALLTYPE GetResourceTiling(
+        uint32_t* pNumTilesForEntireResource,
+        void* pPackedMipDesc,
+        void* pStandardTileShapeForNonPackedMips,
+        uint32_t* pNumSubresourceTilings,
+        uint32_t firstSubresourceTilingToGet,
+        void* pSubresourceTilingsForNonPackedMips) {
+        const auto& pl = m_layout.Plane[0];
+        const uint32_t mips = std::max(pl.MipLevels, 1u);
+
+        // Compute standard vs packed mips per D3D12/GDK 64 KB tile rules
+        uint32_t numStandardMips = 0;
+        uint32_t stdTilesPerSlice = 0;
+        uint32_t mipW[15]{};
+        uint32_t mipH[15]{};
+        uint32_t mipStartTile[15]{};
+
+        for (uint32_t m = 0; m < std::min(mips, 15u); ++m) {
+            const auto& ml = pl.MipLayout[m];
+            const uint64_t sliceBytes = (ml.Slice2DSizeBytes > 0)
+                ? ml.Slice2DSizeBytes
+                : (static_cast<uint64_t>(ml.PitchBytes) * std::max(ml.HeightElements, 1u));
+            if (m == 0 || sliceBytes >= 65536ULL) {
+                const uint32_t tilesForMip = static_cast<uint32_t>(
+                    std::max<uint64_t>(1ULL, (sliceBytes + 65535ULL) / 65536ULL));
+                uint32_t wTiles = std::max(1u, static_cast<uint32_t>((ml.WidthElements + 63u) / 64u));
+                uint32_t hTiles = std::max(1u, (tilesForMip + wTiles - 1u) / wTiles);
+                if (wTiles * hTiles < tilesForMip) hTiles = tilesForMip;
+                mipW[m] = wTiles;
+                mipH[m] = hTiles;
+                mipStartTile[m] = stdTilesPerSlice;
+                stdTilesPerSlice += wTiles * hTiles;
+                ++numStandardMips;
+            } else {
+                break;
+            }
+        }
+
+        const uint32_t numPackedMips = (mips > numStandardMips) ? (mips - numStandardMips) : 0u;
+        const uint32_t numTilesForPackedMips = (numPackedMips > 0) ? 1u : 0u;
+        const uint32_t tilesPerSlice = stdTilesPerSlice + numTilesForPackedMips;
+        const uint32_t layoutTiles = static_cast<uint32_t>(
+            std::max<uint64_t>(1ULL, (m_layout.SizeBytes + 65535ULL) / 65536ULL));
+        const uint32_t totalTiles = std::max(layoutTiles, tilesPerSlice);
+
+        if (pNumTilesForEntireResource) *pNumTilesForEntireResource = totalTiles;
+        if (pPackedMipDesc) {
+            struct PackedMipInfo {
+                uint8_t  NumStandardMips;
+                uint8_t  NumPackedMips;
+                uint32_t NumTilesForPackedMips;
+                uint32_t StartTileIndexInOverallResource;
+            };
+            auto* pm = static_cast<PackedMipInfo*>(pPackedMipDesc);
+            pm->NumStandardMips = static_cast<uint8_t>(numStandardMips);
+            pm->NumPackedMips = static_cast<uint8_t>(numPackedMips);
+            pm->NumTilesForPackedMips = numTilesForPackedMips;
+            pm->StartTileIndexInOverallResource = (numPackedMips > 0) ? stdTilesPerSlice : 0u;
+        }
+        if (pStandardTileShapeForNonPackedMips) {
+            struct TileShape {
+                uint32_t WidthInTexels;
+                uint32_t HeightInTexels;
+                uint32_t DepthInTexels;
+            };
+            auto* ts = static_cast<TileShape*>(pStandardTileShapeForNonPackedMips);
+            ts->WidthInTexels = (pl.BytesPerElement >= 16u) ? 256u : 128u;
+            ts->HeightInTexels = (pl.BytesPerElement >= 16u) ? 256u : 128u;
+            ts->DepthInTexels = 1u;
+        }
+        if (pNumSubresourceTilings) {
+            const uint32_t avail = (firstSubresourceTilingToGet < mips) ? (mips - firstSubresourceTilingToGet) : 0u;
+            const uint32_t count = std::min(*pNumSubresourceTilings, avail);
+            *pNumSubresourceTilings = count;
+            if (pSubresourceTilingsForNonPackedMips && count > 0) {
+                struct SubresourceTiling {
+                    uint32_t WidthInTiles;
+                    uint16_t HeightInTiles;
+                    uint16_t DepthInTiles;
+                    uint32_t StartTileIndexInOverallResource;
+                };
+                auto* st = static_cast<SubresourceTiling*>(pSubresourceTilingsForNonPackedMips);
+                for (uint32_t i = 0; i < count; ++i) {
+                    const uint32_t mip = firstSubresourceTilingToGet + i;
+                    if (mip < numStandardMips && mip < 15u) {
+                        st[i].WidthInTiles = mipW[mip];
+                        st[i].HeightInTiles = static_cast<uint16_t>(std::min(mipH[mip], 0xFFFFu));
+                        st[i].DepthInTiles = 1;
+                        st[i].StartTileIndexInOverallResource = mipStartTile[mip];
+                    } else {
+                        st[i].WidthInTiles = 0;
+                        st[i].HeightInTiles = 0;
+                        st[i].DepthInTiles = 0;
+                        st[i].StartTileIndexInOverallResource = 0xFFFFFFFFu; // D3D12_PACKED_TILE
+                    }
+                }
+            }
+        }
+        if (mips > 1 || m_layout.SizeBytes >= 2000000ULL) {
+            char msg[224];
+            std::snprintf(msg, sizeof(msg),
+                          "-> [GDK] GetResourceTiling tiles=%u stdMips=%u packMips=%u packTiles=%u first=%u cnt=%u size=%llu B",
+                          totalTiles, numStandardMips, numPackedMips, numTilesForPackedMips,
+                          firstSubresourceTilingToGet,
+                          pNumSubresourceTilings ? *pNumSubresourceTilings : 0u,
+                          static_cast<unsigned long long>(m_layout.SizeBytes));
+            sc::log::Write(sc::log::Level::Info, "xg_xs", "GdkXGTextureAddressComputer", msg);
+        }
+        return S_OK;
+    }
+    // Trailing safety slots 11..15 to prevent null vtable calls on extended GDK interfaces
+    virtual HRESULT STDMETHODCALLTYPE ExtSlot11(uintptr_t a1, uintptr_t a2, uintptr_t a3) { return LogUnimpl(11, a1, a2, a3); }
+    virtual HRESULT STDMETHODCALLTYPE ExtSlot12(uintptr_t a1, uintptr_t a2, uintptr_t a3) { return LogUnimpl(12, a1, a2, a3); }
+    virtual HRESULT STDMETHODCALLTYPE ExtSlot13(uintptr_t a1, uintptr_t a2, uintptr_t a3) { return LogUnimpl(13, a1, a2, a3); }
+    virtual HRESULT STDMETHODCALLTYPE ExtSlot14(uintptr_t a1, uintptr_t a2, uintptr_t a3) { return LogUnimpl(14, a1, a2, a3); }
+    virtual HRESULT STDMETHODCALLTYPE ExtSlot15(uintptr_t a1, uintptr_t a2, uintptr_t a3) { return LogUnimpl(15, a1, a2, a3); }
+
 private:
+    static HRESULT LogUnimpl(int slot, uintptr_t a1, uintptr_t a2, uintptr_t a3) {
+        static std::atomic<uint32_t> s_u{0};
+        if (s_u.fetch_add(1, std::memory_order_relaxed) < 8) {
+            char msg[160];
+            std::snprintf(msg, sizeof(msg), "-> UNIMPLEMENTED slot=%d a1=0x%llX a2=0x%llX a3=0x%llX",
+                          slot, static_cast<unsigned long long>(a1),
+                          static_cast<unsigned long long>(a2), static_cast<unsigned long long>(a3));
+            sc::log::Write(sc::log::Level::Warn, "xg_xs", "GdkXGTextureAddressComputer", msg);
+        }
+        return S_OK;
+    }
     HRESULT TransferSubresource(
         void* resBase, uint32_t plane, uint32_t subresource,
         void* linearData, uint32_t linearRowPitch, bool copyInto) {
@@ -719,6 +848,16 @@ uint32_t WINAPI XGComputeOptimalTileMode(
     uint32_t /*dimension*/, uint32_t /*format*/, uint32_t /*width*/,
     uint32_t /*height*/, uint32_t /*depth*/, uint32_t /*sampleCount*/, uint32_t /*bindFlags*/) {
     return 8u; // XG_TILE_MODE_1D_THIN
+}
+
+uint32_t WINAPI XGSuggestSwizzleMode(
+    uint32_t /*dimension*/, uint32_t /*format*/, uint64_t /*width*/,
+    uint32_t /*height*/, uint16_t /*depthOrArraySize*/, uint32_t /*sampleCount*/, uint32_t /*flags*/) {
+    static std::atomic<bool> s_logged{false};
+    if (!s_logged.exchange(true, std::memory_order_relaxed)) {
+        sc::log::Write(sc::log::Level::Info, "xg_xs", __FUNCTION__, "-> XG_SWIZZLE_MODE_LINEAR (0)");
+    }
+    return 0u;
 }
 
 } // extern "C"

@@ -20,3 +20,26 @@ EXPORTS
     HCHttpCallResponseGetHeader
     HCHttpCallRegisterMock
     HCHttpCallClearMocks
+    HCCleanupAsync
+    HCHttpCallDuplicateHandle
+    HCHttpCallGetRequestUrl
+    HCHttpCallRequestGetHeaderAtIndex
+    HCHttpCallRequestGetNumHeaders
+    HCHttpCallRequestGetRequestBodyBytes
+    HCHttpCallRequestGetRetryAllowed
+    HCHttpCallRequestGetRetryCacheId
+    HCHttpCallRequestGetRetryDelay
+    HCHttpCallRequestGetTimeout
+    HCHttpCallRequestGetTimeoutWindow
+    HCHttpCallRequestGetUrl
+    HCHttpCallRequestSetRetryAllowed
+    HCHttpCallRequestSetRetryCacheId
+    HCHttpCallRequestSetRetryDelay
+    HCHttpCallRequestSetTimeoutWindow
+    HCHttpCallResponseGetHeaderAtIndex
+    HCHttpCallResponseGetNumHeaders
+    HCHttpCallResponseGetPlatformNetworkErrorMessage
+    HCHttpCallSetTracing
+    HCSettingsGetTraceLevel
+    HCTraceImplMessage
+    HCTraceSetEtwEnabled

@@ -1,7 +1,7 @@
 # Scarlett Layer — AI Context Snapshot
 
-**Commit:** `f0a8e01` (#149) | **Generated:** 2026-11-23 07:22 UTC  
-**Totals:** 88 files (33,632 LOC) | 13 shims | 78 CTest checks
+**Commit:** `91ebc75` (#154) | **Generated:** 2026-11-23 22:55 UTC  
+**Totals:** 94 files (38,527 LOC) | 16 shims | 78 CTest checks
 
 ---
 
@@ -40,6 +40,7 @@
 | Sprint 69 | Direct2D 1.1 + DirectWrite + DirectComposition Liquid Glass UI on `scarlett_studio.exe`, Apache-2.0 `LICENSE`, wiki rebuild, `v0.69.0-pre` release archive | Done (72/72 Tier 1) |
 | Sprint 70 | Real 12 KiB `emoose/xvdtool` XVD offsets (`0x280`/`0x284`/`0x288`/`0x28C`/`0x470`) & hash-tree geometry, `game_config.hpp` path containment, `pe_inspector.hpp` bounds/overflow hardening, `tools/generate_status.py` CI drift check | Done (74/74 Tier 1) |
 | Sprint 71 | 28-case independent-oracle RDNA2 differential GPU suite (4 CTests), lifter/CFG/FP16/LDS fixes, `rdna2_sweep.exe` + 255-ELF real `gfx1030` corpus sweep (`docs/RDNA2_CORPUS_REPORT.md`) | Done (78/78 Tier 1) |
+| Sprint 72 | Retail Scarlett bring-up milestones: `dstorage_xs` `SCLZ` zlib block inflation, `xg_xs` `GetResourceTiling` packed-mip splitting, `d3d12_xs` GPU descriptor-table validation + depth-stencil flag sanitization + `CreateCommandListX`/`ResetX` shims, new `chad`/`xapu`/`xcrdapi` shims; reaches `PresentX` `frame=120` (next blocker: `DXGI_ERROR_DEVICE_REMOVED`) | In Progress |
 
 ---
 
@@ -74,9 +75,9 @@
 
 ## 2. File Inventory
 ```text
-  297  CMakeLists.txt
+  322  CMakeLists.txt
    99  src/common/ansi_path.hpp
-  343  src/common/codecs.hpp
+  577  src/common/codecs.hpp
    73  src/common/config.hpp
    63  src/common/stub.hpp
   173  src/common/vfs.hpp
@@ -89,59 +90,65 @@
   564  src/loader/pe_inspector.hpp
   453  src/loader/pe_patcher.cpp
    19  src/loader/pe_patcher.hpp
- 1208  src/loader/scarlett_hook.cpp
-  149  src/shims/acphal/acphal.cpp
-    9  src/shims/acphal/acphal.def
+ 1530  src/loader/scarlett_hook.cpp
+  157  src/shims/acphal/acphal.cpp
+   11  src/shims/acphal/acphal.def
    39  src/shims/acphal/acphal.hpp
+   53  src/shims/chad/chad.cpp
+    7  src/shims/chad/chad.def
   187  src/shims/d3d12_xs/command_list_x.cpp
   480  src/shims/d3d12_xs/command_queue_x.cpp
-  139  src/shims/d3d12_xs/d3d12_xs.cpp
-    6  src/shims/d3d12_xs/d3d12_xs.def
+  380  src/shims/d3d12_xs/d3d12_xs.cpp
+    9  src/shims/d3d12_xs/d3d12_xs.def
   261  src/shims/d3d12_xs/d3d12_xs.hpp
    84  src/shims/d3d12_xs/d3d12_xs_internal.hpp
    85  src/shims/d3d12_xs/d3d12_xs_utils.cpp
- 3399  src/shims/d3d12_xs/device_x.cpp
+ 5303  src/shims/d3d12_xs/device_x.cpp
  1040  src/shims/d3d12_xs/rdna2_isa.hpp
  1052  src/shims/d3d12_xs/rdna2_lifter.hpp
   201  src/shims/d3d12_xs/shader_inspector.hpp
   272  src/shims/d3d12_xs/shader_stripper.hpp
   405  src/shims/d3d12_xs/shader_translator.hpp
- 1269  src/shims/dstorage_xs/dstorage_xs.cpp
+ 1982  src/shims/dstorage_xs/dstorage_xs.cpp
     4  src/shims/dstorage_xs/dstorage_xs.def
   181  src/shims/dstorage_xs/dstorage_xs.hpp
-  427  src/shims/gameinput/gameinput.cpp
+  534  src/shims/gameinput/gameinput.cpp
     4  src/shims/gameinput/gameinput.def
-  163  src/shims/gameinput/gameinput.hpp
+  191  src/shims/gameinput/gameinput.hpp
   212  src/shims/kernelx/kernelx.cpp
     7  src/shims/kernelx/kernelx.def
    40  src/shims/kernelx/kernelx.hpp
-  246  src/shims/libhttpclient/libhttpclient.cpp
-   22  src/shims/libhttpclient/libhttpclient.def
+  443  src/shims/libhttpclient/libhttpclient.cpp
+   45  src/shims/libhttpclient/libhttpclient.def
    34  src/shims/libhttpclient/libhttpclient.hpp
    58  src/shims/pixevt/pixevt.cpp
     5  src/shims/pixevt/pixevt.def
    14  src/shims/pixevt/pixevt.hpp
+   53  src/shims/xapu/xapu.cpp
+    7  src/shims/xapu/xapu.def
   660  src/shims/xaudio2_9/xaudio2_9.cpp
     4  src/shims/xaudio2_9/xaudio2_9.def
+   55  src/shims/xcrdapi/xcrdapi.cpp
+    3  src/shims/xcrdapi/xcrdapi.def
   242  src/shims/xcurl/xcurl.cpp
    24  src/shims/xcurl/xcurl.def
    51  src/shims/xcurl/xcurl.hpp
    41  src/shims/xfrontpaneldisplay/xfrontpaneldisplay.cpp
     8  src/shims/xfrontpaneldisplay/xfrontpaneldisplay.def
   325  src/shims/xg_xs/xg_64kbs.hpp
-  724  src/shims/xg_xs/xg_xs.cpp
-    6  src/shims/xg_xs/xg_xs.def
+  863  src/shims/xg_xs/xg_xs.cpp
+    7  src/shims/xg_xs/xg_xs.def
    75  src/shims/xg_xs/xg_xs.hpp
-  538  src/shims/xgameruntime/api_broker.cpp
+  676  src/shims/xgameruntime/api_broker.cpp
   485  src/shims/xgameruntime/game_save.cpp
   119  src/shims/xgameruntime/gdk_types.hpp
-  104  src/shims/xgameruntime/runtime_internal.hpp
+  106  src/shims/xgameruntime/runtime_internal.hpp
   361  src/shims/xgameruntime/task_queue.cpp
    21  src/shims/xgameruntime/task_queue.hpp
-  173  src/shims/xgameruntime/xgameruntime.cpp
+  186  src/shims/xgameruntime/xgameruntime.cpp
    36  src/shims/xgameruntime/xgameruntime.def
-  311  src/shims/xmem/xmem.cpp
-   13  src/shims/xmem/xmem.def
+  953  src/shims/xmem/xmem.cpp
+   17  src/shims/xmem/xmem.def
    62  src/shims/xmem/xmem.hpp
  1651  src/tests/dummy_title/main.cpp
    59  src/tests/engine_plugin/engine_plugin.cpp
@@ -154,7 +161,7 @@
  1949  src/tests/scarlett_tests/tests_d3d12_shaders_present.cpp
  2009  src/tests/scarlett_tests/tests_loader_e2e.cpp
   801  src/tests/scarlett_tests/tests_rdna2_oracle.cpp
-  967  src/tests/scarlett_tests/tests_runtime_io.cpp
+  938  src/tests/scarlett_tests/tests_runtime_io.cpp
  1597  src/tests/scarlett_tests/tests_storage_swizzle.cpp
   113  src/tools/rdna2_sweep/main.cpp
   242  tools/audit_imports.py
@@ -167,9 +174,9 @@
 ## 3. Shim Exports & COM VTable Layouts
 
 ## `acphal.dll`
-**Files:** `src/shims/acphal/acphal.cpp` (149 L), `src/shims/acphal/acphal.def` (9 L), `src/shims/acphal/acphal.hpp` (39 L)
+**Files:** `src/shims/acphal/acphal.cpp` (157 L), `src/shims/acphal/acphal.def` (11 L), `src/shims/acphal/acphal.hpp` (39 L)
 
-**DLL Exports (`.def`):** `AcpHalCreate`, `AcpHalAllocateShapeContexts`, `AcpHalReleaseShapeContexts`, `ApuAlloc`, `ApuFree`, `ApuMapVirtualAddress`, `ApuIsVirtualAddressValid`
+**DLL Exports (`.def`):** `AcpHalCreate`, `AcpHalAllocateShapeContexts`, `AcpHalReleaseShapeContexts`, `ApuAlloc`, `ApuFree`, `ApuMapVirtualAddress`, `ApuIsVirtualAddressValid`, `ApuCreateHeap`, `ApuMapApuAddress`
 
 **C Entrypoints:**
 - `HRESULT WINAPI AcpHalCreate(void** acpHal)`
@@ -178,10 +185,15 @@
 - `HRESULT WINAPI ApuAlloc(void** virtualAddress, void* physicalAddress, uint32_t sizeInBytes, uint32_t alignmentInBytes)`
 - `HRESULT WINAPI ApuFree(void* virtualAddress)`
 
-## `d3d12_xs.dll`
-**Files:** `src/shims/d3d12_xs/command_list_x.cpp` (187 L), `src/shims/d3d12_xs/command_queue_x.cpp` (480 L), `src/shims/d3d12_xs/d3d12_xs.cpp` (139 L), `src/shims/d3d12_xs/d3d12_xs.def` (6 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (261 L), `src/shims/d3d12_xs/d3d12_xs_internal.hpp` (84 L), `src/shims/d3d12_xs/d3d12_xs_utils.cpp` (85 L), `src/shims/d3d12_xs/device_x.cpp` (3399 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1040 L), `src/shims/d3d12_xs/rdna2_lifter.hpp` (1052 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_stripper.hpp` (272 L), `src/shims/d3d12_xs/shader_translator.hpp` (405 L)
+## `chad.dll`
+**Files:** `src/shims/chad/chad.cpp` (53 L), `src/shims/chad/chad.def` (7 L)
 
-**DLL Exports (`.def`):** `D3D12XboxCreateDevice`, `D3D12SerializeRootSignature = ScarlettSerializeRootSignature`, `D3D12XboxSetProcessDebugFlags`, `D3DMapEsramMemory`
+**DLL Exports (`.def`):** `XDspActivate`, `XDspConnectWithMaximumStreamLimit`, `XDspDeactivate`, `XDspDisconnect`, `XDspSubmitCommand`
+
+## `d3d12_xs.dll`
+**Files:** `src/shims/d3d12_xs/command_list_x.cpp` (187 L), `src/shims/d3d12_xs/command_queue_x.cpp` (480 L), `src/shims/d3d12_xs/d3d12_xs.cpp` (380 L), `src/shims/d3d12_xs/d3d12_xs.cpp.bak` (374 L), `src/shims/d3d12_xs/d3d12_xs.def` (9 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (261 L), `src/shims/d3d12_xs/d3d12_xs_internal.hpp` (84 L), `src/shims/d3d12_xs/d3d12_xs_utils.cpp` (85 L), `src/shims/d3d12_xs/device_x.cpp` (5303 L), `src/shims/d3d12_xs/device_x.cpp.bak` (4488 L), `src/shims/d3d12_xs/device_x.cpp.bak2` (4714 L), `src/shims/d3d12_xs/device_x.cpp.bak3` (4785 L), `src/shims/d3d12_xs/device_x.cpp.bak4` (5049 L), `src/shims/d3d12_xs/device_x.cpp.bak5` (5077 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1040 L), `src/shims/d3d12_xs/rdna2_lifter.hpp` (1052 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_stripper.hpp` (272 L), `src/shims/d3d12_xs/shader_translator.hpp` (405 L)
+
+**DLL Exports (`.def`):** `D3D12XboxCreateDevice`, `D3D12SerializeRootSignature = ScarlettSerializeRootSignature`, `D3D12XboxSetProcessDebugFlags`, `D3DMapEsramMemory`, `D3D12ConfigureVirtualMemoryX`, `D3D12SerializeVersionedRootSignature = ScarlettSerializeVersionedRootSignature`, `D3D12CreateRootSignatureDeserializer = ScarlettCreateRootSignatureDeserializer`
 
 **C Entrypoints:**
 - `HRESULT WINAPI D3D12XboxCreateDevice( void* pAdapter, const D3D12XBOX_CREATE_DEVICE_PARAMETERS* pParameters, REFIID riid, void** ppDevice)`
@@ -253,7 +265,7 @@
 - `[22]` `HRESULT CheckFeatureSupport( D3D12_FEATURE Feature, void* pFeatureSupportData, UINT FeatureSupportDataSize)`
 
 ## `dstorage_xs.dll`
-**Files:** `src/shims/dstorage_xs/dstorage_xs.cpp` (1269 L), `src/shims/dstorage_xs/dstorage_xs.def` (4 L), `src/shims/dstorage_xs/dstorage_xs.hpp` (181 L)
+**Files:** `src/shims/dstorage_xs/dstorage_xs.cpp` (1982 L), `src/shims/dstorage_xs/dstorage_xs.def` (4 L), `src/shims/dstorage_xs/dstorage_xs.hpp` (181 L)
 
 **DLL Exports (`.def`):** `DStorageGetFactory`, `DStorageSetConfiguration`
 
@@ -285,7 +297,7 @@
 - `[07]` `HRESULT SetStagingBufferSize(uint32_t size)`
 
 ## `gameinput.dll`
-**Files:** `src/shims/gameinput/gameinput.cpp` (427 L), `src/shims/gameinput/gameinput.def` (4 L), `src/shims/gameinput/gameinput.hpp` (163 L)
+**Files:** `src/shims/gameinput/gameinput.cpp` (534 L), `src/shims/gameinput/gameinput.def` (4 L), `src/shims/gameinput/gameinput.hpp` (191 L)
 
 **DLL Exports (`.def`):** `GameInputCreate @1`, `ScarlettGameInputSetSyntheticGamepad @2`
 
@@ -293,33 +305,71 @@
 - `HRESULT WINAPI GameInputCreate(IGameInput** gameInput)`
 - `void WINAPI ScarlettGameInputSetSyntheticGamepad(bool enabled, const GameInputGamepadState* state)`
 
+**COM Interface `IGameInputDevice : IUnknown`:**
+- `[03]` `const GameInputDeviceInfo* GetDeviceInfo()`
+- `[04]` `GameInputDeviceStatus GetDeviceStatus()`
+- `[05]` `void GetBatteryState(GameInputBatteryState* state)`
+- `[06]` `HRESULT CreateForceFeedbackEffect(uint32_t, const void*, void**)`
+- `[07]` `bool IsForceFeedbackMotorPoweredOn(uint32_t)`
+- `[08]` `void SetForceFeedbackMotorGain(uint32_t, float)`
+- `[09]` `HRESULT SetHapticMotorState(uint32_t, const void*)`
+- `[10]` `void SetRumbleState(const GameInputRumbleParams* params)`
+- `[11]` `void SetInputSynchronizationState(bool)`
+- `[12]` `void SendInputSynchronizationHint()`
+- `[13]` `void PowerOff()`
+- `[14]` `HRESULT CreateRawDeviceReport(uint32_t, uint32_t, void**)`
+- `[15]` `HRESULT GetRawDeviceFeature(uint32_t, void**)`
+- `[16]` `HRESULT SetRawDeviceFeature(void*)`
+- `[17]` `HRESULT SendRawDeviceOutput(void*)`
+- `[18]` `HRESULT SendRawDeviceOutputWithResponse(void*, void**)`
+- `[19]` `HRESULT ExecuteRawDeviceIoControl(uint32_t, size_t, const void*, size_t, void*, size_t*)`
+- `[20]` `bool AcquireExclusiveRawDeviceAccess(uint64_t)`
+- `[21]` `void ReleaseExclusiveRawDeviceAccess()`
+
 **COM Interface `IGameInputReading : IUnknown`:**
 - `[03]` `GameInputKind GetInputKind()`
-- `[04]` `uint64_t GetTimestamp()`
-- `[05]` `bool GetGamepadState(GameInputGamepadState* state)`
-- `[06]` `uint32_t GetKeyCount()`
-- `[07]` `uint32_t GetKeyState( uint32_t stateArrayCount, GameInputKeyState* stateArray)`
+- `[04]` `uint64_t GetSequenceNumber(GameInputKind)`
+- `[05]` `uint64_t GetTimestamp()`
+- `[06]` `void GetDevice(IGameInputDevice** device)`
+- `[07]` `bool GetRawReport(void** report)`
+- `[08]` `uint32_t GetControllerAxisCount()`
+- `[09]` `uint32_t GetControllerAxisState(uint32_t, float*)`
+- `[10]` `uint32_t GetControllerButtonCount()`
+- `[11]` `uint32_t GetControllerButtonState(uint32_t, bool*)`
+- `[12]` `uint32_t GetControllerSwitchCount()`
+- `[13]` `uint32_t GetControllerSwitchState(uint32_t, uint32_t*)`
+- `[14]` `uint32_t GetKeyCount()`
+- `[15]` `uint32_t GetKeyState(uint32_t stateArrayCount, GameInputKeyState* stateArray)`
+- `[16]` `bool GetMouseState(GameInputMouseState* state)`
+- `[17]` `uint32_t GetTouchCount()`
+- `[18]` `uint32_t GetTouchState(uint32_t, void*)`
+- `[19]` `bool GetMotionState(void*)`
+- `[20]` `bool GetArcadeStickState(void*)`
+- `[21]` `bool GetFlightStickState(void*)`
+- `[22]` `bool GetGamepadState(GameInputGamepadState* state)`
+- `[23]` `bool GetRacingWheelState(void*)`
+- `[24]` `bool GetUiNavigationState(void*)`
 
 **COM Interface `IGameInput : IUnknown`:**
 - `[03]` `uint64_t GetCurrentTimestamp()`
-- `[04]` `HRESULT GetCurrentReading( GameInputKind inputKind, void* device, IGameInputReading** reading)`
-- `[05]` `HRESULT GetNextReading( IGameInputReading* referenceReading, GameInputKind inputKind, void* device, IGameInputReading** reading)`
-- `[06]` `HRESULT GetPreviousReading( IGameInputReading* referenceReading, GameInputKind inputKind, void* device, IGameInputReading** reading)`
-- `[07]` `HRESULT GetTemporalReading( uint64_t timestamp, void* device, IGameInputReading** reading)`
-- `[08]` `HRESULT RegisterReadingCallback( void* device, GameInputKind inputKind, float analogThreshold, void* context, void* callbackFunc, uint64_t* callbackToken)`
-- `[09]` `HRESULT RegisterDeviceCallback( void* device, GameInputKind inputKind, uint32_t statusFilter, uint32_t enumerationKind, void* context, void* callbackFunc, uint64_t* callbackToken)`
-- `[10]` `HRESULT RegisterSystemButtonCallback( void* device, uint32_t buttonFilter, void* context, void* callbackFunc, uint64_t* callbackToken)`
-- `[11]` `HRESULT RegisterKeyboardLayoutCallback( void* device, void* context, void* callbackFunc, uint64_t* callbackToken)`
-- `[12]` `void StopCallback(uint64_t callbackToken)`
-- `[13]` `bool UnregisterCallback( uint64_t callbackToken, uint64_t timeoutInMicroseconds)`
-- `[14]` `HRESULT CreateDispatcher(void** dispatcher)`
-- `[15]` `HRESULT CreateAggregateDevice( GameInputKind inputKind, void** device)`
-- `[16]` `HRESULT FindDeviceFromId( const void* value, void** device)`
-- `[17]` `HRESULT FindDeviceFromObject( IUnknown* value, void** device)`
-- `[18]` `HRESULT FindDeviceFromPlatformHandle( HANDLE value, void** device)`
-- `[19]` `HRESULT FindDeviceFromPlatformString( LPCWSTR value, void** device)`
-- `[20]` `HRESULT EnableOemDeviceSupport( uint16_t vendorId, uint16_t productId, uint8_t interfaceNumber, uint8_t collectionNumber)`
-- `[21]` `void SetFocusPolicy(uint32_t policy)`
+- `[04]` `HRESULT GetCurrentReading(GameInputKind, IGameInputDevice*, IGameInputReading**)`
+- `[05]` `HRESULT GetNextReading(IGameInputReading*, GameInputKind, IGameInputDevice*, IGameInputReading**)`
+- `[06]` `HRESULT GetPreviousReading(IGameInputReading*, GameInputKind, IGameInputDevice*, IGameInputReading**)`
+- `[07]` `HRESULT GetTemporalReading(uint64_t, IGameInputDevice*, IGameInputReading**)`
+- `[08]` `HRESULT RegisterReadingCallback(IGameInputDevice*, GameInputKind, float, void*, void*, uint64_t*)`
+- `[09]` `HRESULT RegisterDeviceCallback(IGameInputDevice*, GameInputKind, uint32_t, uint32_t, void*, void*, uint64_t*)`
+- `[10]` `HRESULT RegisterSystemButtonCallback(IGameInputDevice*, uint32_t, void*, void*, uint64_t*)`
+- `[11]` `HRESULT RegisterKeyboardLayoutCallback(IGameInputDevice*, void*, void*, uint64_t*)`
+- `[12]` `void StopCallback(uint64_t)`
+- `[13]` `bool UnregisterCallback(uint64_t, uint64_t)`
+- `[14]` `HRESULT CreateDispatcher(void**)`
+- `[15]` `HRESULT CreateAggregateDevice(GameInputKind, IGameInputDevice**)`
+- `[16]` `HRESULT FindDeviceFromId(const void*, IGameInputDevice**)`
+- `[17]` `HRESULT FindDeviceFromObject(IUnknown*, IGameInputDevice**)`
+- `[18]` `HRESULT FindDeviceFromPlatformHandle(HANDLE, IGameInputDevice**)`
+- `[19]` `HRESULT FindDeviceFromPlatformString(LPCWSTR, IGameInputDevice**)`
+- `[20]` `HRESULT EnableOemDeviceSupport(uint16_t, uint16_t, uint8_t, uint8_t)`
+- `[21]` `void SetFocusPolicy(uint32_t)`
 
 ## `kernelx.dll`
 **Files:** `src/shims/kernelx/kernelx.cpp` (212 L), `src/shims/kernelx/kernelx.def` (7 L), `src/shims/kernelx/kernelx.hpp` (40 L)
@@ -334,9 +384,9 @@
 - `DWORD_PTR WINAPI SetThreadAffinityMaskX(HANDLE hThread, DWORD_PTR dwThreadAffinityMask)`
 
 ## `libhttpclient.dll`
-**Files:** `src/shims/libhttpclient/libhttpclient.cpp` (246 L), `src/shims/libhttpclient/libhttpclient.def` (22 L), `src/shims/libhttpclient/libhttpclient.hpp` (34 L)
+**Files:** `src/shims/libhttpclient/libhttpclient.cpp` (443 L), `src/shims/libhttpclient/libhttpclient.def` (45 L), `src/shims/libhttpclient/libhttpclient.hpp` (34 L)
 
-**DLL Exports (`.def`):** `HCInitialize`, `HCCleanup`, `HCIsInitialized`, `HCGetLibVersion`, `HCHttpCallCreate`, `HCHttpCallCloseHandle`, `HCHttpCallRequestSetUrl`, `HCHttpCallRequestSetHeader`, `HCHttpCallRequestSetRequestBodyBytes`, `HCHttpCallRequestSetRequestBodyString`, `HCHttpCallRequestSetTimeout`, `HCHttpCallPerformAsync`, `HCHttpCallResponseGetStatusCode`, `HCHttpCallResponseGetNetworkErrorCode`, `HCHttpCallResponseGetResponseString`, `HCHttpCallResponseGetResponseBodyBytesSize`, `HCHttpCallResponseGetResponseBodyBytes`, `HCHttpCallResponseGetHeader`, `HCHttpCallRegisterMock`, `HCHttpCallClearMocks`
+**DLL Exports (`.def`):** `HCInitialize`, `HCCleanup`, `HCIsInitialized`, `HCGetLibVersion`, `HCHttpCallCreate`, `HCHttpCallCloseHandle`, `HCHttpCallRequestSetUrl`, `HCHttpCallRequestSetHeader`, `HCHttpCallRequestSetRequestBodyBytes`, `HCHttpCallRequestSetRequestBodyString`, `HCHttpCallRequestSetTimeout`, `HCHttpCallPerformAsync`, `HCHttpCallResponseGetStatusCode`, `HCHttpCallResponseGetNetworkErrorCode`, `HCHttpCallResponseGetResponseString`, `HCHttpCallResponseGetResponseBodyBytesSize`, `HCHttpCallResponseGetResponseBodyBytes`, `HCHttpCallResponseGetHeader`, `HCHttpCallRegisterMock`, `HCHttpCallClearMocks`, `HCCleanupAsync`, `HCHttpCallDuplicateHandle`, `HCHttpCallGetRequestUrl`, `HCHttpCallRequestGetHeaderAtIndex`, `HCHttpCallRequestGetNumHeaders`, `HCHttpCallRequestGetRequestBodyBytes`, `HCHttpCallRequestGetRetryAllowed`, `HCHttpCallRequestGetRetryCacheId`, `HCHttpCallRequestGetRetryDelay`, `HCHttpCallRequestGetTimeout`, `HCHttpCallRequestGetTimeoutWindow`, `HCHttpCallRequestGetUrl`, `HCHttpCallRequestSetRetryAllowed`, `HCHttpCallRequestSetRetryCacheId`, `HCHttpCallRequestSetRetryDelay`, `HCHttpCallRequestSetTimeoutWindow`, `HCHttpCallResponseGetHeaderAtIndex`, `HCHttpCallResponseGetNumHeaders`, `HCHttpCallResponseGetPlatformNetworkErrorMessage`, `HCHttpCallSetTracing`, `HCSettingsGetTraceLevel`, `HCTraceImplMessage`, `HCTraceSetEtwEnabled`
 
 **C Entrypoints:**
 - `HRESULT WINAPI HCInitialize(void* args)`
@@ -370,10 +420,20 @@
 - `void WINAPI PIXEndEvent()`
 - `void WINAPI PIXSetMarker(uint64_t color, const char* name)`
 
+## `xapu.dll`
+**Files:** `src/shims/xapu/xapu.cpp` (53 L), `src/shims/xapu/xapu.def` (7 L)
+
+**DLL Exports (`.def`):** `XApuConnect`, `XApuDequeueResult`, `XApuDisconnect`, `XApuEnqueueCommand`, `XApuGetResultCount`
+
 ## `xaudio2_9.dll`
 **Files:** `src/shims/xaudio2_9/xaudio2_9.cpp` (660 L), `src/shims/xaudio2_9/xaudio2_9.def` (4 L)
 
 **DLL Exports (`.def`):** `XAudio2Create = ScarlettXAudio2Create @1`, `XAudio2CreateWithVersionInfo = ScarlettXAudio2CreateWithVersionInfo`
+
+## `xcrdapi.dll`
+**Files:** `src/shims/xcrdapi/xcrdapi.cpp` (55 L), `src/shims/xcrdapi/xcrdapi.def` (3 L)
+
+**DLL Exports (`.def`):** `DStorageGetFactory`
 
 ## `xcurl.dll`
 **Files:** `src/shims/xcurl/xcurl.cpp` (242 L), `src/shims/xcurl/xcurl.def` (24 L), `src/shims/xcurl/xcurl.hpp` (51 L)
@@ -402,9 +462,9 @@
 **DLL Exports (`.def`):** `XFrontPanelIsSupported`, `XFrontPanelGetScreenDimensions`, `XFrontPanelPresentBuffer`, `XFrontPanelGetLightStates`, `XFrontPanelSetLightStates`, `XFrontPanelGetButtonStates`
 
 ## `xg_xs.dll`
-**Files:** `src/shims/xg_xs/xg_64kbs.hpp` (325 L), `src/shims/xg_xs/xg_xs.cpp` (724 L), `src/shims/xg_xs/xg_xs.def` (6 L), `src/shims/xg_xs/xg_xs.hpp` (75 L)
+**Files:** `src/shims/xg_xs/xg_64kbs.hpp` (325 L), `src/shims/xg_xs/xg_xs.cpp` (863 L), `src/shims/xg_xs/xg_xs.def` (7 L), `src/shims/xg_xs/xg_xs.hpp` (75 L)
 
-**DLL Exports (`.def`):** `XGCreateTexture2DComputer`, `XGComputeTexture2DLayout`, `XGCreateTextureComputer`, `XGComputeOptimalTileMode`
+**DLL Exports (`.def`):** `XGCreateTexture2DComputer`, `XGComputeTexture2DLayout`, `XGCreateTextureComputer`, `XGComputeOptimalTileMode`, `XGSuggestSwizzleMode`
 
 **C Entrypoints:**
 - `HRESULT WINAPI XGCreateTexture2DComputer( const XG_TEXTURE2D_DESC* pDesc, IXGTextureAddressComputer** ppComputer)`
@@ -416,14 +476,14 @@
 - `[05]` `HRESULT CopyFromSubresource( void* pDestinationData, uint32_t Subresource, const void* pResourceBaseAddress, uint32_t DestRowPitch, uint32_t DestSlicePitch)`
 
 ## `xgameruntime.dll`
-**Files:** `src/shims/xgameruntime/api_broker.cpp` (538 L), `src/shims/xgameruntime/game_save.cpp` (485 L), `src/shims/xgameruntime/gdk_types.hpp` (119 L), `src/shims/xgameruntime/runtime_internal.hpp` (104 L), `src/shims/xgameruntime/task_queue.cpp` (361 L), `src/shims/xgameruntime/task_queue.hpp` (21 L), `src/shims/xgameruntime/xgameruntime.cpp` (173 L), `src/shims/xgameruntime/xgameruntime.def` (36 L)
+**Files:** `src/shims/xgameruntime/api_broker.cpp` (676 L), `src/shims/xgameruntime/game_save.cpp` (485 L), `src/shims/xgameruntime/gdk_types.hpp` (119 L), `src/shims/xgameruntime/runtime_internal.hpp` (106 L), `src/shims/xgameruntime/task_queue.cpp` (361 L), `src/shims/xgameruntime/task_queue.hpp` (21 L), `src/shims/xgameruntime/xgameruntime.cpp` (186 L), `src/shims/xgameruntime/xgameruntime.def` (36 L)
 
 **DLL Exports (`.def`):** `XGameRuntimeInitialize`, `XGameRuntimeUninitialize`, `XSystemGetDeviceType`, `XTaskQueueCreate`, `XTaskQueueDispatch`, `XTaskQueueCloseHandle`, `XAsyncGetStatus`, `XUserAddAsync`, `XUserAddResult`, `XUserGetGamertag`, `XUserGetId`, `XUserGetState`, `XUserGetLocalId`, `XUserCloseHandle`, `XGameSaveInitializeProviderAsync`, `XGameSaveInitializeProviderResult`, `XGameSaveCloseProvider`, `XGameSaveCreateContainer`, `XGameSaveCloseContainer`, `XGameSaveCreateUpdate`, `XGameSaveCloseUpdate`, `XGameSaveSubmitBlobWrite`, `XGameSaveSubmitBlobDelete`, `XGameSaveSubmitUpdateAsync`, `XGameSaveSubmitUpdateResult`, `XGameSaveReadBlobDataAsync`, `XGameSaveReadBlobDataResult`, `DllCanUnloadNow`, `InitializeApiImpl`, `InitializeApiImplEx`, `InitializeApiImplEx2`, `QueryApiImpl`, `UninitializeApiImpl`, `XErrorReport`
 
 ## `xmem.dll`
-**Files:** `src/shims/xmem/xmem.cpp` (311 L), `src/shims/xmem/xmem.def` (13 L), `src/shims/xmem/xmem.hpp` (62 L)
+**Files:** `src/shims/xmem/xmem.cpp` (953 L), `src/shims/xmem/xmem.def` (17 L), `src/shims/xmem/xmem.hpp` (62 L)
 
-**DLL Exports (`.def`):** `XMemAlloc`, `XMemFree`, `XMemSize`, `XMemAllocDefault`, `XMemFreeDefault`, `XMemSizeDefault`, `XMemAllocatePhysicalPages`, `XMemMapPhysicalPages`, `XMemFreePhysicalPages`, `XMemVirtualAlloc`, `XMemGetWorkingSetStatistics`
+**DLL Exports (`.def`):** `XMemAlloc`, `XMemFree`, `XMemSize`, `XMemAllocDefault`, `XMemFreeDefault`, `XMemSizeDefault`, `XMemAllocatePhysicalPages`, `XMemMapPhysicalPages`, `XMemFreePhysicalPages`, `XMemVirtualAlloc`, `XMemGetWorkingSetStatistics`, `XMemIsToolsMemAvailable`, `XMemMapPhysicalPagesScatter`, `XMemTransferMemory`, `XMemVirtualQuery`
 
 **C Entrypoints:**
 - `void* WINAPI XMemAlloc(size_t dwSize, uint32_t dwAllocAttributes)`
@@ -533,13 +593,13 @@
 ```
 
 ## 6. Recent Git History
+- `91ebc75 feat(gameinput,xgameruntime): GDK v0 gamepad polling + IXUser 2022 and XUserDeviceAssociation`
+- `7a7a092 docs: regenerate status after README edit`
+- `1f90711 Update README.md`
+- `f60b38e Merge pull request #5 from jadeowaowa/sprint-72-scarlett-binary-bringup`
+- `8097519 docs: add dynamic README progress dashboard and update Sprint 72 status & wiki`
 - `f0a8e01 feat(xg_xs,d3d12_xs): GCN 1D_THIN layout and shadow texture detiler`
 - `9e0c298 wip(terraria): PresentX menu rendering, CBV bounce ring, GDK xg_xs, shadow texture upload`
 - `f4f0d7e Sprint 71: RDNA2 independent-oracle suite (28 cases) & 255-ELF gfx1030 corpus sweep`
 - `2de878f Merge sprint-70-xvd-and-parser-hardening: real XVD geometry, parser hardening, and status CI (74/74)`
 - `385b503 feat(xvd,loader,ci): migrate real 12 KiB XVD geometry, harden PE/GameConfig parsers, add status drift check`
-- `45eafbf Merge docs/truth-reset-s69: truthful baseline docs and Sprint 70-73 roadmap`
-- `98f616b docs: reconcile all repo docs to Sprint 69 truth, add THIRD_PARTY.md, and set Sprints 70-73 Xbox timeline`
-- `cac4aa2 Remove duplicate roadmap row, clarify sample scope, and rebuild wiki`
-- `58e4fea Add Apache-2.0 LICENSE, sync roadmap/docs/wiki, and verify 72/72 tests`
-- `e7d0912 Merge sprint-69-studio-liquid-glass: Direct2D/DComp Liquid Glass UI & wiki`

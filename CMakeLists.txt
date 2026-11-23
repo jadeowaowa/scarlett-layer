@@ -156,6 +156,31 @@ set_target_properties(xfrontpaneldisplay PROPERTIES OUTPUT_NAME "XFrontPanelDisp
 target_link_libraries(xfrontpaneldisplay PRIVATE sc_common)
 sc_set_runtime_dir(xfrontpaneldisplay "${SC_BIN_DIR}/shims")
 
+# Shim #14: XCRDAPI.dll -> build/bin/shims/
+add_library(xcrdapi SHARED
+    src/shims/xcrdapi/xcrdapi.cpp
+    src/shims/xcrdapi/xcrdapi.def
+)
+set_target_properties(xcrdapi PROPERTIES OUTPUT_NAME "XCRDAPI")
+target_link_libraries(xcrdapi PRIVATE sc_common)
+sc_set_runtime_dir(xcrdapi "${SC_BIN_DIR}/shims")
+
+# Shim #15: chad.dll -> build/bin/shims/
+add_library(chad SHARED
+    src/shims/chad/chad.cpp
+    src/shims/chad/chad.def
+)
+target_link_libraries(chad PRIVATE sc_common)
+sc_set_runtime_dir(chad "${SC_BIN_DIR}/shims")
+
+# Shim #16: xapu.dll -> build/bin/shims/
+add_library(xapu SHARED
+    src/shims/xapu/xapu.cpp
+    src/shims/xapu/xapu.def
+)
+target_link_libraries(xapu PRIVATE sc_common)
+sc_set_runtime_dir(xapu "${SC_BIN_DIR}/shims")
+
 # Runtime multi-module LoadLibrary IAT hook DLL -> build/bin/
 add_library(scarlett_hook SHARED
     src/loader/scarlett_hook.cpp

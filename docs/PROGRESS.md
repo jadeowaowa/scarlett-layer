@@ -36,6 +36,7 @@
 | Sprint 69 | Direct2D 1.1 + DirectWrite + DirectComposition Liquid Glass UI on `scarlett_studio.exe`, Apache-2.0 `LICENSE`, wiki rebuild, `v0.69.0-pre` release archive | Done (72/72 Tier 1) |
 | Sprint 70 | Real 12 KiB `emoose/xvdtool` XVD offsets (`0x280`/`0x284`/`0x288`/`0x28C`/`0x470`) & hash-tree geometry, `game_config.hpp` path containment, `pe_inspector.hpp` bounds/overflow hardening, `tools/generate_status.py` CI drift check | Done (74/74 Tier 1) |
 | Sprint 71 | 28-case independent-oracle RDNA2 differential GPU suite (4 CTests), lifter/CFG/FP16/LDS fixes, `rdna2_sweep.exe` + 255-ELF real `gfx1030` corpus sweep (`docs/RDNA2_CORPUS_REPORT.md`) | Done (78/78 Tier 1) |
+| Sprint 72 | Retail Scarlett bring-up milestones: `dstorage_xs` `SCLZ` zlib block inflation, `xg_xs` `GetResourceTiling` packed-mip splitting, `d3d12_xs` GPU descriptor-table validation + depth-stencil flag sanitization + `CreateCommandListX`/`ResetX` shims, new `chad`/`xapu`/`xcrdapi` shims; reaches `PresentX` `frame=120` (next blocker: `DXGI_ERROR_DEVICE_REMOVED`) | In Progress |
 
 ## Shim & Export Coverage
 

@@ -146,4 +146,12 @@ BOOL WINAPI ApuIsVirtualAddressValid(const void* virtualAddress) {
     return virtualAddress != nullptr ? TRUE : FALSE;
 }
 
+HRESULT WINAPI ApuCreateHeap(uint32_t /*cachedSizeInBytes*/, uint32_t /*nonCachedSizeInBytes*/) {
+    return S_OK;
+}
+
+void* WINAPI ApuMapApuAddress(uint32_t apuAddress) {
+    return reinterpret_cast<void*>(static_cast<uintptr_t>(apuAddress));
+}
+
 } // extern "C"

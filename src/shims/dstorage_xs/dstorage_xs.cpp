@@ -1231,6 +1231,703 @@ private:
 
 } // namespace
 
+
+namespace gdk_ds {
+
+inline constexpr GUID IID_GdkFactoryX2 =
+    { 0x62959d11, 0xd45f, 0x4884, { 0xa0, 0xa3, 0xf7, 0x86, 0x2e, 0xa2, 0x43, 0xae } };
+inline constexpr GUID IID_GdkFileX =
+    { 0x43704f9f, 0x27c6, 0x4a9f, { 0x88, 0x15, 0xd1, 0x65, 0x27, 0x89, 0x4d, 0xf4 } };
+inline constexpr GUID IID_GdkStatusArrayX =
+    { 0xcd66d752, 0x2786, 0x44f7, { 0x90, 0x70, 0xe2, 0xa6, 0xfd, 0xad, 0x3f, 0x1b } };
+inline constexpr GUID IID_GdkQueueX2 =
+    { 0x3c02cb0c, 0xc050, 0x4195, { 0x99, 0xa1, 0xa1, 0xce, 0x94, 0xba, 0x33, 0xc5 } };
+inline constexpr GUID IID_GdkFileInternal =
+    { 0x5c4a42f1, 0x9b70, 0x4d1e, { 0xa1, 0x20, 0x00, 0x53, 0x43, 0x41, 0x52, 0xf1 } };
+inline constexpr GUID IID_GdkStatusInternal =
+    { 0x5c4a42f2, 0x9b70, 0x4d1e, { 0xa1, 0x20, 0x00, 0x53, 0x43, 0x41, 0x52, 0xf2 } };
+
+struct GdkQueueDesc {
+    uint64_t    SourceType;
+    uint16_t    Capacity;
+    int8_t      Priority;
+    uint8_t     Pad0[5];
+    const char* Name;
+};
+static_assert(sizeof(GdkQueueDesc) == 0x18, "GdkQueueDesc ABI mismatch");
+
+struct GdkQueueDesc1 {
+    uint64_t    SourceType;
+    uint16_t    Capacity;
+    int8_t      Priority;
+    uint8_t     Pad0[5];
+    const char* Name;
+    uint64_t    Options;
+};
+static_assert(sizeof(GdkQueueDesc1) == 0x20, "GdkQueueDesc1 ABI mismatch");
+
+struct GdkQueueInfo {
+    GdkQueueDesc Desc;
+    uint16_t     EmptySlotCount;
+    uint16_t     RequestCountUntilAutoSubmit;
+    uint32_t     Pad;
+};
+
+struct GdkQueueInfo1 {
+    GdkQueueDesc1 Desc;
+    uint16_t      EmptySlotCount;
+    uint16_t      RequestCountUntilAutoSubmit;
+    uint32_t      Pad;
+};
+
+struct GdkRequest {
+    uint64_t Options;
+    union {
+        void* Destination;
+        struct {
+            uintptr_t* DestinationPageArray;
+            uint16_t   DestinationPageOffset;
+        };
+    };
+    uint32_t DestinationSize;
+    uint32_t Pad0;
+    union {
+        struct {
+            IUnknown* File;
+            uint64_t  FileOffset;
+        };
+        const void* Source;
+        struct {
+            uintptr_t* SourcePageArray;
+            uint16_t   SourcePageOffset;
+        };
+    };
+    uint32_t    SourceSize;
+    uint32_t    IntermediateSize;
+    uint64_t    CancellationTag;
+    const char* Name;
+};
+static_assert(sizeof(GdkRequest) == 0x48, "GdkRequest ABI mismatch");
+
+struct GdkErrorRecord {
+    uint32_t   FailureCount;
+    uint32_t   Pad0;
+    uint32_t   CommandType;
+    HRESULT    HResult;
+    GdkRequest FailedRequest;
+};
+
+class GdkStorageFileX final : public IUnknown {
+public:
+    GdkStorageFileX(HANDLE h, std::string path)
+        : m_handle(h), m_path(std::move(path)) {}
+
+    ~GdkStorageFileX() {
+        Close();
+    }
+
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv) override {
+        if (!ppv) return E_POINTER;
+        if (IsEqualGUID(riid, __uuidof(IUnknown)) ||
+            IsEqualGUID(riid, IID_GdkFileX) ||
+            IsEqualGUID(riid, IID_GdkFileInternal)) {
+            *ppv = this;
+            AddRef();
+            return S_OK;
+        }
+        *ppv = nullptr;
+        return E_NOINTERFACE;
+    }
+
+    ULONG STDMETHODCALLTYPE AddRef() override {
+        return m_refs.fetch_add(1, std::memory_order_relaxed) + 1;
+    }
+
+    ULONG STDMETHODCALLTYPE Release() override {
+        ULONG c = m_refs.fetch_sub(1, std::memory_order_acq_rel) - 1;
+        if (c == 0) delete this;
+        return c;
+    }
+
+    // slot 3 (+0x18)
+    virtual void STDMETHODCALLTYPE Close() {
+        std::lock_guard<std::mutex> lock(m_ioMtx);
+        if (m_handle != INVALID_HANDLE_VALUE) {
+            CloseHandle(m_handle);
+            m_handle = INVALID_HANDLE_VALUE;
+        }
+    }
+
+    // slot 4 (+0x20) — caller owns duplicated HANDLE and closes it via CloseHandle()
+    virtual HANDLE STDMETHODCALLTYPE GetHandle() {
+        std::lock_guard<std::mutex> lock(m_ioMtx);
+        if (m_handle == INVALID_HANDLE_VALUE) {
+            return INVALID_HANDLE_VALUE;
+        }
+        HANDLE dup = INVALID_HANDLE_VALUE;
+        if (!DuplicateHandle(GetCurrentProcess(), m_handle, GetCurrentProcess(), &dup,
+                             0, FALSE, DUPLICATE_SAME_ACCESS)) {
+            return INVALID_HANDLE_VALUE;
+        }
+        return dup;
+    }
+
+    HRESULT ReadSlice(uint64_t offset, void* dst, uint32_t size, uint32_t& outRead) {
+        outRead = 0;
+        if (!dst && size > 0) return E_INVALIDARG;
+        std::lock_guard<std::mutex> lock(m_ioMtx);
+        if (m_handle == INVALID_HANDLE_VALUE) return E_HANDLE;
+        LARGE_INTEGER pos{};
+        pos.QuadPart = static_cast<LONGLONG>(offset);
+        if (!SetFilePointerEx(m_handle, pos, nullptr, FILE_BEGIN)) {
+            return HRESULT_FROM_WIN32(GetLastError());
+        }
+        auto* cursor = static_cast<uint8_t*>(dst);
+        uint32_t rem = size;
+        while (rem > 0) {
+            DWORD got = 0;
+            if (!ReadFile(m_handle, cursor, rem, &got, nullptr)) {
+                return HRESULT_FROM_WIN32(GetLastError());
+            }
+            if (got == 0) {
+                return HRESULT_FROM_WIN32(ERROR_HANDLE_EOF);
+            }
+            cursor += got;
+            rem -= got;
+            outRead += got;
+        }
+        return S_OK;
+    }
+
+private:
+    std::atomic<ULONG> m_refs{1};
+    std::mutex         m_ioMtx;
+    HANDLE             m_handle{INVALID_HANDLE_VALUE};
+    std::string        m_path;
+};
+
+class GdkStatusArrayX final : public IUnknown {
+public:
+    explicit GdkStatusArrayX(uint32_t capacity) : m_slots(capacity) {}
+
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv) override {
+        if (!ppv) return E_POINTER;
+        if (IsEqualGUID(riid, __uuidof(IUnknown)) ||
+            IsEqualGUID(riid, IID_GdkStatusArrayX) ||
+            IsEqualGUID(riid, IID_GdkStatusInternal)) {
+            *ppv = this;
+            AddRef();
+            return S_OK;
+        }
+        *ppv = nullptr;
+        return E_NOINTERFACE;
+    }
+
+    ULONG STDMETHODCALLTYPE AddRef() override {
+        return m_refs.fetch_add(1, std::memory_order_relaxed) + 1;
+    }
+
+    ULONG STDMETHODCALLTYPE Release() override {
+        ULONG c = m_refs.fetch_sub(1, std::memory_order_acq_rel) - 1;
+        if (c == 0) delete this;
+        return c;
+    }
+
+    // slot 3 (+0x18)
+    virtual bool STDMETHODCALLTYPE IsComplete(uint32_t index) {
+        std::lock_guard<std::mutex> lock(m_mtx);
+        return index < m_slots.size() ? m_slots[index].complete : false;
+    }
+
+    // slot 4 (+0x20)
+    virtual HRESULT STDMETHODCALLTYPE GetHResult(uint32_t index) {
+        std::lock_guard<std::mutex> lock(m_mtx);
+        return index < m_slots.size() ? m_slots[index].hr : E_INVALIDARG;
+    }
+
+    void ResetSlot(uint32_t index) {
+        std::lock_guard<std::mutex> lock(m_mtx);
+        if (index < m_slots.size()) {
+            m_slots[index].complete = false;
+            m_slots[index].hr = E_PENDING;
+        }
+    }
+
+    void CompleteSlot(uint32_t index, HRESULT hr) {
+        std::lock_guard<std::mutex> lock(m_mtx);
+        if (index < m_slots.size()) {
+            m_slots[index].hr = hr;
+            m_slots[index].complete = true;
+        }
+    }
+
+private:
+    struct Slot {
+        bool    complete{true};
+        HRESULT hr{S_OK};
+    };
+    std::atomic<ULONG> m_refs{1};
+    std::mutex         m_mtx;
+    std::vector<Slot>  m_slots;
+};
+
+class GdkStorageQueueX2 final : public IUnknown {
+public:
+    explicit GdkStorageQueueX2(const GdkQueueDesc1& desc)
+        : m_desc(desc)
+        , m_name(desc.Name ? desc.Name : "gdk_queue") {
+        m_desc.Name = m_name.c_str();
+        m_errEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        m_worker = std::thread([this]() { WorkerLoop(); });
+        char buf[192];
+        std::snprintf(buf, sizeof(buf),
+                      "-> [GDK] created queue '%s' (src=%u cap=%u prio=%d opts=0x%llX)",
+                      m_name.c_str(), static_cast<unsigned>(m_desc.SourceType),
+                      static_cast<unsigned>(m_desc.Capacity), static_cast<int>(m_desc.Priority),
+                      static_cast<unsigned long long>(m_desc.Options));
+        sc::log::Write(sc::log::Level::Info, "dstorage_xs", "CreateQueue1", buf);
+    }
+
+    ~GdkStorageQueueX2() {
+        Close();
+        if (m_errEvent) {
+            CloseHandle(m_errEvent);
+            m_errEvent = nullptr;
+        }
+    }
+
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv) override {
+        if (!ppv) return E_POINTER;
+        if (IsEqualGUID(riid, __uuidof(IUnknown)) || IsEqualGUID(riid, IID_GdkQueueX2)) {
+            *ppv = this;
+            AddRef();
+            return S_OK;
+        }
+        // Accept base IDStorageQueueX / X1 IIDs as well
+        *ppv = this;
+        AddRef();
+        return S_OK;
+    }
+
+    ULONG STDMETHODCALLTYPE AddRef() override {
+        return m_refs.fetch_add(1, std::memory_order_relaxed) + 1;
+    }
+
+    ULONG STDMETHODCALLTYPE Release() override {
+        ULONG c = m_refs.fetch_sub(1, std::memory_order_acq_rel) - 1;
+        if (c == 0) delete this;
+        return c;
+    }
+
+    // slot 3 (+0x18)
+    virtual void STDMETHODCALLTYPE EnqueueRequest(const GdkRequest* req) {
+        if (!req) return;
+        Op op{};
+        op.kind = OpKind::Read;
+        op.req = *req;
+        const uint64_t srcType = (req->Options >> 22) & 1ULL;
+        if (srcType == 0 && req->File) {
+            void* raw = nullptr;
+            if (SUCCEEDED(req->File->QueryInterface(IID_GdkFileInternal, &raw))) {
+                op.file.Attach(static_cast<GdkStorageFileX*>(raw));
+            }
+        }
+        std::lock_guard<std::mutex> lock(m_mtx);
+        m_staged.push_back(std::move(op));
+    }
+
+    // slot 4 (+0x20)
+    virtual void STDMETHODCALLTYPE EnqueueStatus(IUnknown* statusArray, uint32_t index) {
+        if (!statusArray) return;
+        void* raw = nullptr;
+        if (FAILED(statusArray->QueryInterface(IID_GdkStatusInternal, &raw))) return;
+        Op op{};
+        op.kind = OpKind::Status;
+        op.statusArray.Attach(static_cast<GdkStatusArrayX*>(raw));
+        op.statusIndex = index;
+        op.statusArray->ResetSlot(index);
+        std::lock_guard<std::mutex> lock(m_mtx);
+        m_staged.push_back(std::move(op));
+    }
+
+    // slot 5 (+0x28)
+    virtual void STDMETHODCALLTYPE EnqueueSignal(ID3D12Fence* fence, uint64_t value) {
+        if (!fence) return;
+        Op op{};
+        op.kind = OpKind::Fence;
+        op.fence = fence;
+        op.fenceValue = value;
+        std::lock_guard<std::mutex> lock(m_mtx);
+        m_staged.push_back(std::move(op));
+    }
+
+    // slot 6 (+0x30)
+    virtual void STDMETHODCALLTYPE Submit() {
+        {
+            std::lock_guard<std::mutex> lock(m_mtx);
+            if (m_staged.empty()) return;
+            m_batches.push_back(std::move(m_staged));
+            m_staged.clear();
+        }
+        m_cv.notify_one();
+    }
+
+    // slot 7 (+0x38)
+    virtual void STDMETHODCALLTYPE CancelRequestsWithTag(uint64_t /*mask*/, uint64_t /*value*/) {}
+
+    // slot 8 (+0x40)
+    virtual void STDMETHODCALLTYPE Close() {
+        {
+            std::lock_guard<std::mutex> lock(m_mtx);
+            m_stopping = true;
+        }
+        m_cv.notify_all();
+        if (m_worker.joinable()) {
+            m_worker.join();
+        }
+    }
+
+    // slot 9 (+0x48)
+    virtual HANDLE STDMETHODCALLTYPE GetErrorEvent() {
+        HANDLE dup = nullptr;
+        if (m_errEvent) {
+            DuplicateHandle(GetCurrentProcess(), m_errEvent, GetCurrentProcess(), &dup,
+                            0, FALSE, DUPLICATE_SAME_ACCESS);
+        }
+        return dup;
+    }
+
+    // slot 10 (+0x50)
+    virtual void STDMETHODCALLTYPE RetrieveErrorRecord(GdkErrorRecord* record) {
+        if (!record) return;
+        std::lock_guard<std::mutex> lock(m_errMtx);
+        *record = m_errRecord;
+        std::memset(&m_errRecord, 0, sizeof(m_errRecord));
+        if (m_errEvent) ResetEvent(m_errEvent);
+    }
+
+    // slot 11 (+0x58)
+    virtual void STDMETHODCALLTYPE Query(GdkQueueInfo* info) {
+        if (!info) return;
+        std::memset(info, 0, sizeof(*info));
+        info->Desc.SourceType = m_desc.SourceType;
+        info->Desc.Capacity   = m_desc.Capacity;
+        info->Desc.Priority   = m_desc.Priority;
+        info->Desc.Name       = m_desc.Name;
+        const uint32_t pend = PendingCount();
+        info->EmptySlotCount = (m_desc.Capacity > pend)
+            ? static_cast<uint16_t>(m_desc.Capacity - pend) : 0u;
+        info->RequestCountUntilAutoSubmit = static_cast<uint16_t>(m_desc.Capacity / 2u);
+    }
+
+    // slot 12 (+0x60) — IDStorageQueueX1
+    virtual void STDMETHODCALLTYPE EnqueueSetEvent(HANDLE hEvent) {
+        if (!hEvent) return;
+        Op op{};
+        op.kind = OpKind::Event;
+        op.eventHandle = hEvent;
+        std::lock_guard<std::mutex> lock(m_mtx);
+        m_staged.push_back(std::move(op));
+    }
+
+    // slot 13 (+0x68) — IDStorageQueueX2
+    virtual void STDMETHODCALLTYPE Query1(GdkQueueInfo1* info) {
+        if (!info) return;
+        std::memset(info, 0, sizeof(*info));
+        info->Desc = m_desc;
+        const uint32_t pend = PendingCount();
+        info->EmptySlotCount = (m_desc.Capacity > pend)
+            ? static_cast<uint16_t>(m_desc.Capacity - pend) : 0u;
+        info->RequestCountUntilAutoSubmit = (m_desc.Options & 1ULL)
+            ? 0u : static_cast<uint16_t>(m_desc.Capacity / 2u);
+    }
+
+private:
+    enum class OpKind { Read, Status, Fence, Event };
+    struct Op {
+        OpKind                  kind{OpKind::Read};
+        GdkRequest              req{};
+        ComPtr<GdkStorageFileX> file;
+        ComPtr<GdkStatusArrayX> statusArray;
+        uint32_t                statusIndex{0};
+        ComPtr<ID3D12Fence>     fence;
+        uint64_t                fenceValue{0};
+        HANDLE                  eventHandle{nullptr};
+    };
+
+    uint32_t PendingCount() {
+        std::lock_guard<std::mutex> lock(m_mtx);
+        size_t n = m_staged.size();
+        for (const auto& b : m_batches) n += b.size();
+        return static_cast<uint32_t>(n);
+    }
+
+    void RecordError(HRESULT hr, const GdkRequest& req) {
+        std::lock_guard<std::mutex> lock(m_errMtx);
+        if (m_errRecord.FailureCount == 0) {
+            m_errRecord.CommandType = 0;
+            m_errRecord.HResult = hr;
+            m_errRecord.FailedRequest = req;
+        }
+        ++m_errRecord.FailureCount;
+        if (m_errEvent) SetEvent(m_errEvent);
+    }
+
+    HRESULT ExecuteRead(const Op& op) {
+        const uint64_t opts     = op.req.Options;
+        const bool zlib         = (opts & 1ULL) != 0;
+        const uint64_t bcpack   = (opts >> 1) & 0xFULL;
+        const uint64_t swizzle  = (opts >> 5) & 0xFFFFULL;
+        const bool dstPhys      = ((opts >> 21) & 1ULL) != 0;
+        const uint64_t srcType  = (opts >> 22) & 1ULL;
+        const bool srcPhys      = ((opts >> 23) & 1ULL) != 0;
+
+        if (bcpack != 0 || swizzle != 0 || dstPhys || srcPhys) {
+            static std::atomic<uint32_t> s_warned{0};
+            if (s_warned.fetch_add(1, std::memory_order_relaxed) < 8) {
+                char buf[224];
+                std::snprintf(buf, sizeof(buf),
+                              "-> [GDK] unsupported flags opts=0x%llX (zlib=%d bcpack=%llu swz=%llu dstP=%d srcP=%d srcSz=%u dstSz=%u)",
+                              static_cast<unsigned long long>(opts), zlib ? 1 : 0,
+                              static_cast<unsigned long long>(bcpack), static_cast<unsigned long long>(swizzle),
+                              dstPhys ? 1 : 0, srcPhys ? 1 : 0, op.req.SourceSize, op.req.DestinationSize);
+                sc::log::Write(sc::log::Level::Warn, "dstorage_xs", "GdkRead", buf);
+            }
+            return E_NOTIMPL;
+        }
+
+        if (zlib) {
+            if (!op.req.Destination || op.req.SourceSize == 0 || op.req.DestinationSize == 0) {
+                return E_INVALIDARG;
+            }
+            std::vector<uint8_t> compressed;
+            const void* srcPtr = nullptr;
+            uint32_t srcBytes = op.req.SourceSize;
+            if (srcType == 0) {
+                if (!op.file) return E_HANDLE;
+                compressed.resize(op.req.SourceSize);
+                uint32_t got = 0;
+                HRESULT hr = op.file->ReadSlice(op.req.FileOffset, compressed.data(), op.req.SourceSize, got);
+                if (FAILED(hr)) return hr;
+                srcPtr = compressed.data();
+                srcBytes = got;
+            } else {
+                if (!op.req.Source) return E_INVALIDARG;
+                srcPtr = op.req.Source;
+            }
+            size_t decompressedBytes = 0;
+            const bool ok = sc::codec::DecompressZlib(
+                srcPtr, srcBytes,
+                op.req.Destination, op.req.DestinationSize, decompressedBytes);
+            if (!ok) {
+                static std::atomic<uint32_t> s_zlibErr{0};
+                if (s_zlibErr.fetch_add(1, std::memory_order_relaxed) < 8) {
+                    char buf[192];
+                    std::snprintf(buf, sizeof(buf),
+                                  "-> [GDK] zlib decompress FAILED srcSz=%u dstSz=%u out=%zu",
+                                  srcBytes, op.req.DestinationSize, decompressedBytes);
+                    sc::log::Write(sc::log::Level::Warn, "dstorage_xs", "GdkRead", buf);
+                }
+                return E_FAIL;
+            }
+            static std::atomic<uint32_t> s_zlibOk{0};
+            if (s_zlibOk.fetch_add(1, std::memory_order_relaxed) < 4) {
+                char buf[160];
+                std::snprintf(buf, sizeof(buf),
+                              "-> [GDK] zlib decompressed %u B -> %zu B (dstSz=%u)",
+                              srcBytes, decompressedBytes, op.req.DestinationSize);
+                sc::log::Write(sc::log::Level::Info, "dstorage_xs", "GdkRead", buf);
+            }
+            return S_OK;
+        }
+
+        if (!op.req.Destination || op.req.SourceSize > op.req.DestinationSize) {
+            return E_INVALIDARG;
+        }
+
+        if (srcType == 0) {
+            if (!op.file) return E_HANDLE;
+            uint32_t got = 0;
+            return op.file->ReadSlice(op.req.FileOffset, op.req.Destination, op.req.SourceSize, got);
+        }
+        if (!op.req.Source) return E_INVALIDARG;
+        std::memcpy(op.req.Destination, op.req.Source, op.req.SourceSize);
+        return S_OK;
+    }
+
+    void WorkerLoop() {
+        while (true) {
+            std::vector<Op> batch;
+            {
+                std::unique_lock<std::mutex> lock(m_mtx);
+                m_cv.wait(lock, [this]() { return m_stopping || !m_batches.empty(); });
+                if (m_stopping && m_batches.empty()) return;
+                batch = std::move(m_batches.front());
+                m_batches.pop_front();
+            }
+            HRESULT batchHr = S_OK;
+            for (const auto& op : batch) {
+                switch (op.kind) {
+                    case OpKind::Read: {
+                        HRESULT hr = ExecuteRead(op);
+                        if (FAILED(hr)) {
+                            if (SUCCEEDED(batchHr)) batchHr = hr;
+                            RecordError(hr, op.req);
+                        }
+                        break;
+                    }
+                    case OpKind::Status:
+                        if (op.statusArray) op.statusArray->CompleteSlot(op.statusIndex, batchHr);
+                        batchHr = S_OK;
+                        break;
+                    case OpKind::Fence:
+                        if (op.fence) op.fence->Signal(op.fenceValue);
+                        break;
+                    case OpKind::Event:
+                        if (op.eventHandle) SetEvent(op.eventHandle);
+                        break;
+                }
+            }
+        }
+    }
+
+    std::atomic<ULONG>           m_refs{1};
+    GdkQueueDesc1                m_desc{};
+    std::string                  m_name;
+    HANDLE                       m_errEvent{nullptr};
+    std::mutex                   m_mtx;
+    std::condition_variable      m_cv;
+    std::vector<Op>              m_staged;
+    std::deque<std::vector<Op>>  m_batches;
+    bool                         m_stopping{false};
+    std::thread                  m_worker;
+    std::mutex                   m_errMtx;
+    GdkErrorRecord               m_errRecord{};
+};
+
+class GdkStorageFactoryX2 final : public IUnknown {
+public:
+    GdkStorageFactoryX2() {
+        sc::log::Write(sc::log::Level::Info, "dstorage_xs", "GdkStorageFactoryX2",
+                       "-> initialized Xbox Series IDStorageFactoryX2");
+    }
+
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv) override {
+        if (!ppv) return E_POINTER;
+        if (IsEqualGUID(riid, __uuidof(IUnknown)) || IsEqualGUID(riid, IID_GdkFactoryX2)) {
+            *ppv = this;
+            AddRef();
+            return S_OK;
+        }
+        *ppv = nullptr;
+        return E_NOINTERFACE;
+    }
+
+    ULONG STDMETHODCALLTYPE AddRef() override {
+        return m_refs.fetch_add(1, std::memory_order_relaxed) + 1;
+    }
+
+    ULONG STDMETHODCALLTYPE Release() override {
+        ULONG c = m_refs.fetch_sub(1, std::memory_order_acq_rel) - 1;
+        if (c == 0) delete this;
+        return c;
+    }
+
+    // slot 3 (+0x18)
+    virtual HRESULT STDMETHODCALLTYPE CreateQueue(const GdkQueueDesc* desc, REFIID riid, void** ppv) {
+        if (!desc || !ppv) return E_INVALIDARG;
+        GdkQueueDesc1 d1{};
+        d1.SourceType = desc->SourceType;
+        d1.Capacity   = desc->Capacity;
+        d1.Priority   = desc->Priority;
+        d1.Name       = desc->Name;
+        d1.Options    = 0;
+        return CreateQueue1(&d1, riid, ppv);
+    }
+
+    // slot 4 (+0x20)
+    virtual HRESULT STDMETHODCALLTYPE OpenFile(const wchar_t* path, REFIID riid, void** ppv) {
+        if (!path || !*path || !ppv) return E_INVALIDARG;
+        *ppv = nullptr;
+        bool wasVirtual = false;
+        const std::filesystem::path hostPath = sc::vfs::TranslatePath(path, &wasVirtual);
+        HANDLE hFile = CreateFileW(
+            hostPath.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (hFile == INVALID_HANDLE_VALUE) {
+            DWORD err = GetLastError();
+            std::string msg = "-> [GDK] OpenFile FAILED: " + WideToUtf8(path) + " -> " +
+                              WideToUtf8(hostPath.c_str()) + " (err=" + std::to_string(err) + ")";
+            sc::log::Write(sc::log::Level::Warn, "dstorage_xs", "OpenFile", msg.c_str());
+            return HRESULT_FROM_WIN32(err);
+        }
+        std::string utf8Host = WideToUtf8(hostPath.c_str());
+        std::string msg = wasVirtual
+            ? ("-> [GDK] opened [VFS]: " + WideToUtf8(path) + " -> " + utf8Host)
+            : ("-> [GDK] opened: " + utf8Host);
+        sc::log::Write(sc::log::Level::Info, "dstorage_xs", "OpenFile", msg.c_str());
+        auto* f = new GdkStorageFileX(hFile, std::move(utf8Host));
+        HRESULT hr = f->QueryInterface(riid, ppv);
+        f->Release();
+        return hr;
+    }
+
+    // slot 5 (+0x28)
+    virtual HRESULT STDMETHODCALLTYPE CreateStatusArray(
+        uint32_t capacity, const char* /*name*/, REFIID riid, void** ppv) {
+        if (capacity == 0 || !ppv) return E_INVALIDARG;
+        *ppv = nullptr;
+        auto* arr = new GdkStatusArrayX(capacity);
+        HRESULT hr = arr->QueryInterface(riid, ppv);
+        arr->Release();
+        return hr;
+    }
+
+    // slot 6 (+0x30)
+    virtual void STDMETHODCALLTYPE SetDebugFlags(uint32_t flags) {
+        m_debugFlags = flags;
+    }
+
+    // slot 7 (+0x38)
+    virtual HRESULT STDMETHODCALLTYPE SetCpuAffinity(uint64_t affinity) {
+        m_cpuAffinity = affinity;
+        return S_OK;
+    }
+
+    // slot 8 (+0x40)
+    virtual HRESULT STDMETHODCALLTYPE SetStagingBufferSize(uint32_t size) {
+        m_stagingSize = size;
+        char buf[96];
+        std::snprintf(buf, sizeof(buf), "-> [GDK] stagingSize=%u B", size);
+        sc::log::Write(sc::log::Level::Info, "dstorage_xs", "SetStagingBufferSize", buf);
+        return S_OK;
+    }
+
+    // slot 9 (+0x48) — IDStorageFactoryX1
+    virtual HRESULT STDMETHODCALLTYPE GetStats(void* stats) {
+        if (stats) std::memset(stats, 0, 64);
+        return S_OK;
+    }
+
+    // slot 10 (+0x50) — IDStorageFactoryX2
+    virtual HRESULT STDMETHODCALLTYPE CreateQueue1(const GdkQueueDesc1* desc, REFIID riid, void** ppv) {
+        if (!desc || !ppv) return E_INVALIDARG;
+        *ppv = nullptr;
+        auto* q = new GdkStorageQueueX2(*desc);
+        HRESULT hr = q->QueryInterface(riid, ppv);
+        q->Release();
+        return hr;
+    }
+
+private:
+    std::atomic<ULONG> m_refs{1};
+    uint32_t           m_debugFlags{0};
+    uint64_t           m_cpuAffinity{0};
+    uint32_t           m_stagingSize{32u * 1024u * 1024u};
+};
+
+} // namespace gdk_ds
+
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID) {
     if (reason == DLL_PROCESS_ATTACH) {
         DisableThreadLibraryCalls(hModule);
@@ -1248,10 +1945,26 @@ HRESULT WINAPI DStorageGetFactory(REFIID riid, void** ppv) {
         return E_POINTER;
     }
     *ppv = nullptr;
-    auto* factory = new ScarlettStorageFactoryX();
-    HRESULT hr = factory->QueryInterface(riid, ppv);
-    factory->Release();
-    return hr;
+    if (IsEqualGUID(riid, IID_IDStorageFactoryX)) {
+        auto* factory = new ScarlettStorageFactoryX();
+        HRESULT hr = factory->QueryInterface(riid, ppv);
+        factory->Release();
+        return hr;
+    }
+    if (IsEqualGUID(riid, gdk_ds::IID_GdkFactoryX2)) {
+        auto* factory = new gdk_ds::GdkStorageFactoryX2();
+        HRESULT hr = factory->QueryInterface(riid, ppv);
+        factory->Release();
+        return hr;
+    }
+    char gbuf[128];
+    std::snprintf(gbuf, sizeof(gbuf),
+                  "-> unmapped factory IID {%08lX-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
+                  riid.Data1, riid.Data2, riid.Data3,
+                  riid.Data4[0], riid.Data4[1], riid.Data4[2], riid.Data4[3],
+                  riid.Data4[4], riid.Data4[5], riid.Data4[6], riid.Data4[7]);
+    sc::log::Write(sc::log::Level::Warn, "dstorage_xs", __FUNCTION__, gbuf);
+    return E_NOINTERFACE;
 }
 
 HRESULT WINAPI DStorageSetConfiguration(const DSTORAGE_CONFIGURATION* configuration) {

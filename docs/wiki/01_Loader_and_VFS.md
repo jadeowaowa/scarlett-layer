@@ -1,9 +1,9 @@
 # 01 — Loader, Runtime IAT Hooking & Common Utilities
 
 ## Source Files
-- `CMakeLists.txt` (297 lines)
+- `CMakeLists.txt` (322 lines)
 - `src/common/ansi_path.hpp` (99 lines)
-- `src/common/codecs.hpp` (343 lines)
+- `src/common/codecs.hpp` (577 lines)
 - `src/common/config.hpp` (73 lines)
 - `src/common/stub.hpp` (63 lines)
 - `src/common/vfs.hpp` (173 lines)
@@ -14,7 +14,7 @@
 - `src/loader/pe_inspector.hpp` (564 lines)
 - `src/loader/pe_patcher.cpp` (453 lines)
 - `src/loader/pe_patcher.hpp` (19 lines)
-- `src/loader/scarlett_hook.cpp` (1208 lines)
+- `src/loader/scarlett_hook.cpp` (1530 lines)
 - `tools/audit_imports.py` (242 lines)
 - `tools/build_wiki.py` (505 lines)
 - `tools/generate_status.py` (236 lines)
@@ -24,7 +24,7 @@
 ## `src/common/ansi_path.hpp`
 
 ## `src/common/codecs.hpp`
-- **Structs:** `ScLzHeader`
+- **Structs:** `ScLzHeader`, `BitReader`, `Huff`
 
 ## `src/common/config.hpp`
 

@@ -4,3 +4,6 @@ EXPORTS
     D3D12SerializeRootSignature = ScarlettSerializeRootSignature
     D3D12XboxSetProcessDebugFlags
     D3DMapEsramMemory
+    D3D12ConfigureVirtualMemoryX
+    D3D12SerializeVersionedRootSignature = ScarlettSerializeVersionedRootSignature
+    D3D12CreateRootSignatureDeserializer = ScarlettCreateRootSignatureDeserializer

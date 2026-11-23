@@ -4,3 +4,4 @@ EXPORTS
     XGComputeTexture2DLayout
     XGCreateTextureComputer
     XGComputeOptimalTileMode
+    XGSuggestSwizzleMode

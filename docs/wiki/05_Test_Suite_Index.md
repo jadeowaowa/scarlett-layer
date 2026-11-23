@@ -174,5 +174,5 @@
 - `src/tests/scarlett_tests/tests_d3d12_shaders_present.cpp` (1949 lines)
 - `src/tests/scarlett_tests/tests_loader_e2e.cpp` (2009 lines)
 - `src/tests/scarlett_tests/tests_rdna2_oracle.cpp` (801 lines)
-- `src/tests/scarlett_tests/tests_runtime_io.cpp` (967 lines)
+- `src/tests/scarlett_tests/tests_runtime_io.cpp` (938 lines)
 - `src/tests/scarlett_tests/tests_storage_swizzle.cpp` (1597 lines)

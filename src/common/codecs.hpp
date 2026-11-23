@@ -340,4 +340,238 @@ inline bool DecodeImaAdpcmMono(
     return !outPcm.empty();
 }
 
+
+// 3. RFC 1950 (zlib) / RFC 1951 (raw deflate) Inflater for GDK DirectStorage
+inline bool InflateRawDeflate(
+    const uint8_t* src, size_t srcSize,
+    uint8_t* dst, size_t dstCap, size_t& outSize) {
+    outSize = 0;
+    if (!src || !dst) return false;
+
+    struct BitReader {
+        const uint8_t* p;
+        const uint8_t* end;
+        uint64_t buf = 0;
+        int cnt = 0;
+        bool ensure(int n) {
+            while (cnt < n && p < end) {
+                buf |= static_cast<uint64_t>(*p++) << cnt;
+                cnt += 8;
+            }
+            return cnt >= n;
+        }
+        int readBits(int n) {
+            if (n == 0) return 0;
+            if (!ensure(n)) return -1;
+            const int v = static_cast<int>(buf & ((1ULL << n) - 1ULL));
+            buf >>= n;
+            cnt -= n;
+            return v;
+        }
+        void alignByte() {
+            const int drop = cnt & 7;
+            buf >>= drop;
+            cnt -= drop;
+        }
+    } br{src, src + srcSize};
+
+    struct Huff {
+        uint16_t count[16]{};
+        uint16_t sym[288]{};
+    };
+
+    auto buildHuff = [](const uint8_t* lengths, int numSyms, Huff& h) -> bool {
+        std::memset(&h, 0, sizeof(h));
+        for (int i = 0; i < numSyms; ++i) {
+            if (lengths[i] > 15) return false;
+            h.count[lengths[i]]++;
+        }
+        h.count[0] = 0;
+        uint16_t offs[16]{};
+        for (int len = 1; len < 15; ++len) {
+            offs[len + 1] = static_cast<uint16_t>(offs[len] + h.count[len]);
+        }
+        for (int i = 0; i < numSyms; ++i) {
+            if (lengths[i] != 0) {
+                h.sym[offs[lengths[i]]++] = static_cast<uint16_t>(i);
+            }
+        }
+        return true;
+    };
+
+    auto decodeHuff = [&br](const Huff& h) -> int {
+        int code = 0, first = 0, index = 0;
+        for (int len = 1; len <= 15; ++len) {
+            const int bit = br.readBits(1);
+            if (bit < 0) return -1;
+            code |= bit;
+            const int c = h.count[len];
+            if (code - c < first) {
+                return h.sym[index + (code - first)];
+            }
+            index += c;
+            first = (first + c) << 1;
+            code <<= 1;
+        }
+        return -1;
+    };
+
+    static constexpr uint16_t kLenBase[29] = {
+        3,4,5,6,7,8,9,10,11,13,15,17,19,23,27,31,
+        35,43,51,59,67,83,99,115,131,163,195,227,258
+    };
+    static constexpr uint8_t kLenExtra[29] = {
+        0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,
+        3,3,3,3,4,4,4,4,5,5,5,5,0
+    };
+    static constexpr uint16_t kDistBase[30] = {
+        1,2,3,4,5,7,9,13,17,25,33,49,65,97,129,193,
+        257,385,513,769,1025,1537,2049,3073,4097,6145,8193,12289,16385,24577
+    };
+    static constexpr uint8_t kDistExtra[30] = {
+        0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,
+        7,7,8,8,9,9,10,10,11,11,12,12,13,13
+    };
+    static constexpr uint8_t kCodeOrder[19] = {
+        16,17,18,0,8,7,9,6,10,5,11,4,12,3,13,2,14,1,15
+    };
+
+    size_t outPos = 0;
+    int bfinal = 0;
+    do {
+        bfinal = br.readBits(1);
+        const int btype = br.readBits(2);
+        if (bfinal < 0 || btype < 0 || btype == 3) return false;
+
+        if (btype == 0) {
+            br.alignByte();
+            const int len = br.readBits(16);
+            const int nlen = br.readBits(16);
+            if (len < 0 || nlen < 0 || ((len ^ 0xFFFF) != nlen)) return false;
+            if (outPos + static_cast<size_t>(len) > dstCap) return false;
+            br.p -= (br.cnt / 8);
+            br.buf = 0;
+            br.cnt = 0;
+            if (static_cast<size_t>(br.end - br.p) < static_cast<size_t>(len)) return false;
+            std::memcpy(dst + outPos, br.p, static_cast<size_t>(len));
+            br.p += len;
+            outPos += static_cast<size_t>(len);
+            continue;
+        }
+
+        Huff litLen{}, dist{};
+        if (btype == 1) {
+            uint8_t ll[288]{};
+            for (int i = 0; i <= 143; ++i) ll[i] = 8;
+            for (int i = 144; i <= 255; ++i) ll[i] = 9;
+            for (int i = 256; i <= 279; ++i) ll[i] = 7;
+            for (int i = 280; i <= 287; ++i) ll[i] = 8;
+            uint8_t dl[32]{};
+            for (int i = 0; i < 32; ++i) dl[i] = 5;
+            if (!buildHuff(ll, 288, litLen) || !buildHuff(dl, 32, dist)) return false;
+        } else {
+            const int hlit = br.readBits(5) + 257;
+            const int hdist = br.readBits(5) + 1;
+            const int hclen = br.readBits(4) + 4;
+            if (hlit < 257 || hlit > 286 || hdist < 1 || hdist > 30 || hclen < 4) return false;
+
+            uint8_t clLens[19]{};
+            for (int i = 0; i < hclen; ++i) {
+                const int v = br.readBits(3);
+                if (v < 0) return false;
+                clLens[kCodeOrder[i]] = static_cast<uint8_t>(v);
+            }
+            Huff clHuff{};
+            if (!buildHuff(clLens, 19, clHuff)) return false;
+
+            uint8_t lengths[320]{};
+            int idx = 0;
+            const int total = hlit + hdist;
+            while (idx < total) {
+                const int s = decodeHuff(clHuff);
+                if (s < 0) return false;
+                if (s < 16) {
+                    lengths[idx++] = static_cast<uint8_t>(s);
+                } else {
+                    uint8_t repVal = 0;
+                    int repCnt = 0;
+                    if (s == 16) {
+                        if (idx == 0) return false;
+                        const int e = br.readBits(2);
+                        if (e < 0) return false;
+                        repVal = lengths[idx - 1];
+                        repCnt = 3 + e;
+                    } else if (s == 17) {
+                        const int e = br.readBits(3);
+                        if (e < 0) return false;
+                        repCnt = 3 + e;
+                    } else {
+                        const int e = br.readBits(7);
+                        if (e < 0) return false;
+                        repCnt = 11 + e;
+                    }
+                    if (idx + repCnt > total) return false;
+                    for (int r = 0; r < repCnt; ++r) lengths[idx++] = repVal;
+                }
+            }
+            if (!buildHuff(lengths, hlit, litLen) || !buildHuff(lengths + hlit, hdist, dist)) return false;
+        }
+
+        while (true) {
+            const int sym = decodeHuff(litLen);
+            if (sym < 0) return false;
+            if (sym < 256) {
+                if (outPos >= dstCap) return false;
+                dst[outPos++] = static_cast<uint8_t>(sym);
+            } else if (sym == 256) {
+                break;
+            } else {
+                const int lenIdx = sym - 257;
+                if (lenIdx < 0 || lenIdx >= 29) return false;
+                const int extraL = br.readBits(kLenExtra[lenIdx]);
+                if (extraL < 0) return false;
+                const size_t matchLen = static_cast<size_t>(kLenBase[lenIdx] + extraL);
+
+                const int distSym = decodeHuff(dist);
+                if (distSym < 0 || distSym >= 30) return false;
+                const int extraD = br.readBits(kDistExtra[distSym]);
+                if (extraD < 0) return false;
+                const size_t matchDist = static_cast<size_t>(kDistBase[distSym] + extraD);
+
+                if (matchDist == 0 || matchDist > outPos || outPos + matchLen > dstCap) return false;
+                for (size_t k = 0; k < matchLen; ++k) {
+                    dst[outPos] = dst[outPos - matchDist];
+                    ++outPos;
+                }
+            }
+        }
+    } while (!bfinal);
+
+    outSize = outPos;
+    return true;
+}
+
+inline bool DecompressZlib(
+    const void* compData, size_t compSize,
+    void* outData, size_t outCap, size_t& outSize) {
+    outSize = 0;
+    if (!compData || !outData || compSize < 2 || outCap == 0) return false;
+    const auto* src = static_cast<const uint8_t*>(compData);
+    auto* dst = static_cast<uint8_t*>(outData);
+
+    // Check for RFC 1950 zlib 2-byte header (CM=8, CINFO<=7, FCHECK mod 31 == 0, FDICT=0)
+    const uint8_t cmf = src[0];
+    const uint8_t flg = src[1];
+    if (compSize >= 6 &&
+        (cmf & 0x0Fu) == 8u &&
+        (cmf >> 4u) <= 7u &&
+        (((static_cast<uint16_t>(cmf) << 8) | flg) % 31u) == 0u &&
+        (flg & 0x20u) == 0u) {
+        if (InflateRawDeflate(src + 2, compSize - 2, dst, outCap, outSize)) {
+            return true;
+        }
+    }
+    // Fallback: raw RFC 1951 deflate stream
+    return InflateRawDeflate(src, compSize, dst, outCap, outSize);
+}
 } // namespace sc::codec

@@ -69,6 +69,7 @@ inline constexpr GUID kClsidXAnalyticsInfo = MakeGuid(0xb884675d, 0xb738, 0x4a9c
 inline constexpr GUID kClsidXSystem        = MakeGuid(0xe349bd1a, 0xfc20, 0x4e40, 0xb9, 0x9c, 0x41, 0x78, 0xcc, 0x6b, 0x40, 0x9f);
 inline constexpr GUID kIidXSystem          = MakeGuid(0x1861cf2e, 0xe18b, 0x4834, 0xa9, 0xf5, 0xb4, 0xa4, 0xe6, 0xef, 0xb4, 0xcf);
 inline constexpr GUID kClsidXNetworking    = MakeGuid(0x37e56907, 0x2f10, 0x41e8, 0xb7, 0x2f, 0x36, 0xed, 0xb1, 0x85, 0x33, 0x1a);
+inline constexpr GUID kIidXNetworking2     = MakeGuid(0xbf2346b2, 0x39af, 0x4658, 0xb5, 0xea, 0x44, 0x71, 0x3c, 0x7e, 0x83, 0xb3);
 
 inline constexpr GUID    kIidIUnknown      = MakeGuid(0x00000000, 0x0000, 0x0000, 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46);
 inline constexpr HRESULT kRegDbClassNotReg = static_cast<HRESULT>(0x80040154L);
@@ -648,7 +649,7 @@ HRESULT WINAPI QueryApiImpl(const GUID* clsid, const GUID* iid, void** ppv) {
         *ppv = &g_gameSaveSvc;
         return S_OK;
     }
-    if (GuidEquals(*clsid, kClsidXNetworking) && GuidEquals(*iid, kClsidXNetworking)) {
+    if (GuidEquals(*clsid, kClsidXNetworking) && (GuidEquals(*iid, kClsidXNetworking) || GuidEquals(*iid, kIidXNetworking2))) {
         static XNetworkingServiceImpl g_networkingSvc;
         *ppv = &g_networkingSvc;
         return S_OK;

@@ -11,3 +11,7 @@ EXPORTS
     XMemFreePhysicalPages
     XMemVirtualAlloc
     XMemGetWorkingSetStatistics
+    XMemIsToolsMemAvailable
+    XMemMapPhysicalPagesScatter
+    XMemTransferMemory
+    XMemVirtualQuery

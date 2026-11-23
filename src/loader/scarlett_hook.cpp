@@ -2,6 +2,8 @@
 #include "common/ansi_path.hpp"
 #include "common/config.hpp"
 #include "common/stub.hpp"
+#include "common/vfs.hpp"
+#include <sys/stat.h>
 
 #include <atomic>
 #include <cctype>
@@ -248,6 +250,9 @@ void WINAPI HookOutputDebugStringA(LPCSTR lpOutputString) {
         while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) s.pop_back();
         if (!s.empty()) {
             sc::log::Write(sc::log::Level::Info, "guest_dbg", "OutputDebugStringA", s.c_str());
+            if (s.find("WER") != std::string::npos || s.find("crash.log") != std::string::npos) {
+                LogCallStack("WER_OutputDebugStringA", 0);
+            }
         }
     }
     ::OutputDebugStringA(lpOutputString);
@@ -338,16 +343,64 @@ int __cdecl TraceIl2CppInit(const char* domain) {
     return rc;
 }
 
+LPCWSTR TranslateVfsPathW(LPCWSTR raw, std::wstring& storage, bool& wasVirtual) {
+    wasVirtual = false;
+    if (!raw || !raw[0]) return raw;
+    LPCWSTR probe = raw;
+    bool hadExtPrefix = false;
+    if (probe[0] == L'\\' && probe[1] == L'\\' && probe[2] == L'?' && probe[3] == L'\\') {
+        probe += 4;
+        hadExtPrefix = true;
+    }
+    if (probe[0] != L'\0' && probe[1] == L':') {
+        const wchar_t d = static_cast<wchar_t>(std::towupper(probe[0]));
+        if (d == L'G' || d == L'T' || d == L'S') {
+            std::filesystem::path mapped = sc::vfs::TranslatePath(probe, &wasVirtual);
+            if (wasVirtual) {
+                storage = mapped.wstring();
+                if (hadExtPrefix && !storage.empty() && storage.rfind(L"\\\\?\\", 0) != 0) {
+                    storage = L"\\\\?\\" + storage;
+                }
+                return storage.c_str();
+            }
+        }
+    }
+    return raw;
+}
+
+bool TryTranslateVfsPathA(LPCSTR raw, std::wstring& outWide) {
+    if (!raw || !raw[0]) return false;
+    LPCSTR probe = raw;
+    if (probe[0] == '\\' && probe[1] == '\\' && probe[2] == '?' && probe[3] == '\\') {
+        probe += 4;
+    }
+    if (probe[0] == '\0' || probe[1] != ':') return false;
+    const char d = static_cast<char>(std::toupper(static_cast<unsigned char>(probe[0])));
+    if (d != 'G' && d != 'T' && d != 'S') return false;
+    std::wstring wideIn = AnsiToWide(raw);
+    bool wasVirt = false;
+    TranslateVfsPathW(wideIn.c_str(), outWide, wasVirt);
+    return wasVirt;
+}
+
 HANDLE WINAPI HookCreateFileW(
     LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode,
     LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition,
     DWORD dwFlagsAndAttributes, HANDLE hTemplateFile) {
-    HANDLE h = ::CreateFileW(lpFileName, dwDesiredAccess, dwShareMode,
+    std::wstring mapped;
+    bool wasVirt = false;
+    LPCWSTR effective = TranslateVfsPathW(lpFileName, mapped, wasVirt);
+    if (wasVirt && mapped.empty()) {
+        SetLastError(ERROR_ACCESS_DENIED);
+        return INVALID_HANDLE_VALUE;
+    }
+    HANDLE h = ::CreateFileW(effective, dwDesiredAccess, dwShareMode,
                              lpSecurityAttributes, dwCreationDisposition,
                              dwFlagsAndAttributes, hTemplateFile);
     if (h == INVALID_HANDLE_VALUE && TraceBootEnabled()) {
         DWORD err = GetLastError();
         std::string msg = "FAILED: " + WideToUtf8(lpFileName ? lpFileName : L"")
+                        + (wasVirt ? (" -> " + WideToUtf8(mapped)) : "")
                         + " (err=" + std::to_string(err) + ")";
         sc::log::Write(sc::log::Level::Warn, "file_trace", "CreateFileW", msg.c_str());
         SetLastError(err);
@@ -359,16 +412,24 @@ using CreateFile2Fn = HANDLE(WINAPI*)(LPCWSTR, DWORD, DWORD, DWORD, void*);
 HANDLE WINAPI HookCreateFile2(
     LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode,
     DWORD dwCreationDisposition, void* pCreateExParams) {
+    std::wstring mapped;
+    bool wasVirt = false;
+    LPCWSTR effective = TranslateVfsPathW(lpFileName, mapped, wasVirt);
+    if (wasVirt && mapped.empty()) {
+        SetLastError(ERROR_ACCESS_DENIED);
+        return INVALID_HANDLE_VALUE;
+    }
     static CreateFile2Fn s_orig = []() -> CreateFile2Fn {
         HMODULE kb = GetModuleHandleW(L"kernelbase.dll");
         if (!kb) kb = GetModuleHandleW(L"kernel32.dll");
         return kb ? reinterpret_cast<CreateFile2Fn>(GetProcAddress(kb, "CreateFile2")) : nullptr;
     }();
-    HANDLE h = s_orig ? s_orig(lpFileName, dwDesiredAccess, dwShareMode, dwCreationDisposition, pCreateExParams)
+    HANDLE h = s_orig ? s_orig(effective, dwDesiredAccess, dwShareMode, dwCreationDisposition, pCreateExParams)
                       : INVALID_HANDLE_VALUE;
     if (h == INVALID_HANDLE_VALUE && TraceBootEnabled()) {
         DWORD err = GetLastError();
         std::string msg = "FAILED: " + WideToUtf8(lpFileName ? lpFileName : L"")
+                        + (wasVirt ? (" -> " + WideToUtf8(mapped)) : "")
                         + " (err=" + std::to_string(err) + ")";
         sc::log::Write(sc::log::Level::Warn, "file_trace", "CreateFile2", msg.c_str());
         SetLastError(err);
@@ -377,10 +438,18 @@ HANDLE WINAPI HookCreateFile2(
 }
 
 DWORD WINAPI HookGetFileAttributesW(LPCWSTR lpFileName) {
-    DWORD attr = ::GetFileAttributesW(lpFileName);
+    std::wstring mapped;
+    bool wasVirt = false;
+    LPCWSTR effective = TranslateVfsPathW(lpFileName, mapped, wasVirt);
+    if (wasVirt && mapped.empty()) {
+        SetLastError(ERROR_ACCESS_DENIED);
+        return INVALID_FILE_ATTRIBUTES;
+    }
+    DWORD attr = ::GetFileAttributesW(effective);
     if (attr == INVALID_FILE_ATTRIBUTES && TraceBootEnabled()) {
         DWORD err = GetLastError();
         std::string msg = "FAILED: " + WideToUtf8(lpFileName ? lpFileName : L"")
+                        + (wasVirt ? (" -> " + WideToUtf8(mapped)) : "")
                         + " (err=" + std::to_string(err) + ")";
         sc::log::Write(sc::log::Level::Warn, "file_trace", "GetFileAttributesW", msg.c_str());
         SetLastError(err);
@@ -388,16 +457,152 @@ DWORD WINAPI HookGetFileAttributesW(LPCWSTR lpFileName) {
     return attr;
 }
 
+DWORD WINAPI HookGetFileAttributesA(LPCSTR lpFileName) {
+    std::wstring mapped;
+    if (TryTranslateVfsPathA(lpFileName, mapped)) {
+        if (mapped.empty()) {
+            SetLastError(ERROR_ACCESS_DENIED);
+            return INVALID_FILE_ATTRIBUTES;
+        }
+        return ::GetFileAttributesW(mapped.c_str());
+    }
+    return ::GetFileAttributesA(lpFileName);
+}
+
 BOOL WINAPI HookGetFileAttributesExW(LPCWSTR lpFileName, GET_FILEEX_INFO_LEVELS fInfoLevelId, LPVOID lpFileInformation) {
-    BOOL ok = ::GetFileAttributesExW(lpFileName, fInfoLevelId, lpFileInformation);
+    std::wstring mapped;
+    bool wasVirt = false;
+    LPCWSTR effective = TranslateVfsPathW(lpFileName, mapped, wasVirt);
+    if (wasVirt && mapped.empty()) {
+        SetLastError(ERROR_ACCESS_DENIED);
+        return FALSE;
+    }
+    BOOL ok = ::GetFileAttributesExW(effective, fInfoLevelId, lpFileInformation);
     if (!ok && TraceBootEnabled()) {
         DWORD err = GetLastError();
         std::string msg = "FAILED: " + WideToUtf8(lpFileName ? lpFileName : L"")
+                        + (wasVirt ? (" -> " + WideToUtf8(mapped)) : "")
                         + " (err=" + std::to_string(err) + ")";
         sc::log::Write(sc::log::Level::Warn, "file_trace", "GetFileAttributesExW", msg.c_str());
         SetLastError(err);
     }
     return ok;
+}
+
+HANDLE WINAPI HookFindFirstFileW(LPCWSTR lpFileName, LPWIN32_FIND_DATAW lpFindFileData) {
+    std::wstring mapped;
+    bool wasVirt = false;
+    LPCWSTR effective = TranslateVfsPathW(lpFileName, mapped, wasVirt);
+    if (wasVirt && mapped.empty()) {
+        SetLastError(ERROR_ACCESS_DENIED);
+        return INVALID_HANDLE_VALUE;
+    }
+    return ::FindFirstFileW(effective, lpFindFileData);
+}
+
+BOOL WINAPI HookCreateDirectoryW(LPCWSTR lpPathName, LPSECURITY_ATTRIBUTES lpSecurityAttributes) {
+    std::wstring mapped;
+    bool wasVirt = false;
+    LPCWSTR effective = TranslateVfsPathW(lpPathName, mapped, wasVirt);
+    if (wasVirt && mapped.empty()) {
+        SetLastError(ERROR_ACCESS_DENIED);
+        return FALSE;
+    }
+    return ::CreateDirectoryW(effective, lpSecurityAttributes);
+}
+
+BOOL WINAPI HookRemoveDirectoryW(LPCWSTR lpPathName) {
+    std::wstring mapped;
+    bool wasVirt = false;
+    LPCWSTR effective = TranslateVfsPathW(lpPathName, mapped, wasVirt);
+    if (wasVirt && mapped.empty()) {
+        SetLastError(ERROR_ACCESS_DENIED);
+        return FALSE;
+    }
+    return ::RemoveDirectoryW(effective);
+}
+
+BOOL WINAPI HookDeleteFileW(LPCWSTR lpFileName) {
+    std::wstring mapped;
+    bool wasVirt = false;
+    LPCWSTR effective = TranslateVfsPathW(lpFileName, mapped, wasVirt);
+    if (wasVirt && mapped.empty()) {
+        SetLastError(ERROR_ACCESS_DENIED);
+        return FALSE;
+    }
+    return ::DeleteFileW(effective);
+}
+
+BOOL WINAPI HookSetFileAttributesW(LPCWSTR lpFileName, DWORD dwFileAttributes) {
+    std::wstring mapped;
+    bool wasVirt = false;
+    LPCWSTR effective = TranslateVfsPathW(lpFileName, mapped, wasVirt);
+    if (wasVirt && mapped.empty()) {
+        SetLastError(ERROR_ACCESS_DENIED);
+        return FALSE;
+    }
+    return ::SetFileAttributesW(effective, dwFileAttributes);
+}
+
+BOOL WINAPI HookGetDiskFreeSpaceExW(
+    LPCWSTR lpDirectoryName,
+    PULARGE_INTEGER lpFreeBytesAvailableToCaller,
+    PULARGE_INTEGER lpTotalNumberOfBytes,
+    PULARGE_INTEGER lpTotalNumberOfFreeBytes) {
+    std::wstring mapped;
+    bool wasVirt = false;
+    LPCWSTR effective = TranslateVfsPathW(lpDirectoryName, mapped, wasVirt);
+    if (wasVirt && mapped.empty()) {
+        SetLastError(ERROR_ACCESS_DENIED);
+        return FALSE;
+    }
+    return ::GetDiskFreeSpaceExW(effective, lpFreeBytesAvailableToCaller, lpTotalNumberOfBytes, lpTotalNumberOfFreeBytes);
+}
+
+BOOL WINAPI HookMoveFileExW(LPCWSTR lpExistingFileName, LPCWSTR lpNewFileName, DWORD dwFlags) {
+    std::wstring m1, m2;
+    bool v1 = false, v2 = false;
+    LPCWSTR e1 = TranslateVfsPathW(lpExistingFileName, m1, v1);
+    LPCWSTR e2 = TranslateVfsPathW(lpNewFileName, m2, v2);
+    if ((v1 && m1.empty()) || (v2 && m2.empty())) {
+        SetLastError(ERROR_ACCESS_DENIED);
+        return FALSE;
+    }
+    return ::MoveFileExW(e1, e2, dwFlags);
+}
+
+int __cdecl HookWstat64(const wchar_t* path, struct __stat64* buffer) {
+    std::wstring mapped;
+    bool wasVirt = false;
+    LPCWSTR effective = TranslateVfsPathW(path, mapped, wasVirt);
+    if (wasVirt && mapped.empty()) {
+        return -1;
+    }
+    using Wstat64Fn = int(__cdecl*)(const wchar_t*, struct __stat64*);
+    static Wstat64Fn s_orig = []() -> Wstat64Fn {
+        HMODULE ucrt = GetModuleHandleW(L"ucrtbase.dll");
+        return ucrt ? reinterpret_cast<Wstat64Fn>(GetProcAddress(ucrt, "_wstat64")) : nullptr;
+    }();
+    return s_orig ? s_orig(effective, buffer) : ::_wstat64(effective, buffer);
+}
+
+int __cdecl HookCrtRemove(const char* path) {
+    std::wstring mapped;
+    if (TryTranslateVfsPathA(path, mapped)) {
+        if (mapped.empty()) return -1;
+        using WremoveFn = int(__cdecl*)(const wchar_t*);
+        static WremoveFn s_wrem = []() -> WremoveFn {
+            HMODULE ucrt = GetModuleHandleW(L"ucrtbase.dll");
+            return ucrt ? reinterpret_cast<WremoveFn>(GetProcAddress(ucrt, "_wremove")) : nullptr;
+        }();
+        return s_wrem ? s_wrem(mapped.c_str()) : ::_wremove(mapped.c_str());
+    }
+    using RemoveFn = int(__cdecl*)(const char*);
+    static RemoveFn s_rem = []() -> RemoveFn {
+        HMODULE ucrt = GetModuleHandleW(L"ucrtbase.dll");
+        return ucrt ? reinterpret_cast<RemoveFn>(GetProcAddress(ucrt, "remove")) : nullptr;
+    }();
+    return s_rem ? s_rem(path) : std::remove(path);
 }
 
 int __cdecl HookPuts(const char* s) {
@@ -435,19 +640,135 @@ std::string FormatVehAddr(void* addr) {
     return buf;
 }
 
+static std::mutex g_cpuEmuVehMtx;
+
+static size_t DecodeClwbOrClflushoptLength(const uint8_t* ip, bool& isClwb) {
+    isClwb = false;
+    size_t i = 0;
+    bool has66 = false;
+    while (i < 6) {
+        uint8_t b = ip[i];
+        if (b == 0x66) { has66 = true; ++i; continue; }
+        if (b == 0x67 || b == 0x26 || b == 0x2E || b == 0x36 || b == 0x3E || b == 0x64 || b == 0x65) {
+            ++i; continue;
+        }
+        break;
+    }
+    if (!has66) return 0;
+    if ((ip[i] & 0xF0) == 0x40) ++i; // optional REX
+    if (ip[i] != 0x0F || ip[i + 1] != 0xAE) return 0;
+    i += 2;
+    uint8_t modrm = ip[i++];
+    uint8_t mod = (modrm >> 6) & 3;
+    uint8_t reg = (modrm >> 3) & 7;
+    uint8_t rm  = modrm & 7;
+    if (mod == 3 || (reg != 6 && reg != 7)) return 0; // /6 = CLWB, /7 = CLFLUSHOPT
+    isClwb = (reg == 6);
+    if (rm == 4) {
+        uint8_t sib = ip[i++];
+        if (mod == 0 && (sib & 7) == 5) i += 4;
+    } else if (mod == 0 && rm == 5) {
+        i += 4;
+    }
+    if (mod == 1) i += 1;
+    else if (mod == 2) i += 4;
+    return i;
+}
+
+static LONG CALLBACK XboxCpuEmulationVeh(EXCEPTION_POINTERS* ep) {
+    if (!ep || !ep->ExceptionRecord || !ep->ContextRecord) {
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
+    if (ep->ExceptionRecord->ExceptionCode != STATUS_ILLEGAL_INSTRUCTION) {
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
+    auto* ip = reinterpret_cast<uint8_t*>(ep->ContextRecord->Rip);
+    if (!ip) return EXCEPTION_CONTINUE_SEARCH;
+
+    // Emulate Zen 2 CLZERO (0F 01 FC): zeroes the 64-byte cache line at [RAX & ~63]
+    if (ip[0] == 0x0F && ip[1] == 0x01 && ip[2] == 0xFC) {
+        void* line = reinterpret_cast<void*>(ep->ContextRecord->Rax & ~63ULL);
+        std::memset(line, 0, 64);
+        ep->ContextRecord->Rip += 3;
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
+
+    std::lock_guard<std::mutex> lock(g_cpuEmuVehMtx);
+    // If another thread already NOP-patched this exact site, just re-execute the NOPs.
+    if (ip[0] == 0x90) {
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
+
+    bool isClwb = false;
+    const size_t len = DecodeClwbOrClflushoptLength(ip, isClwb);
+    if (len > 0) {
+        DWORD oldProt = 0;
+        bool patched = false;
+        if (VirtualProtect(ip, len, PAGE_EXECUTE_READWRITE, &oldProt)) {
+            std::memset(ip, 0x90, len);
+            DWORD tmp = 0;
+            VirtualProtect(ip, len, oldProt, &tmp);
+            FlushInstructionCache(GetCurrentProcess(), ip, len);
+            patched = true;
+        }
+        static std::atomic<uint32_t> s_patchLogs{0};
+        if (s_patchLogs.fetch_add(1, std::memory_order_relaxed) < 16) {
+            char msg[192];
+            std::snprintf(msg, sizeof(msg), "-> %s (%zuB) at %s (%s)",
+                          isClwb ? "CLWB" : "CLFLUSHOPT", len,
+                          FormatVehAddr(ip).c_str(),
+                          patched ? "NOP-patched" : "skipped");
+            sc::log::Write(sc::log::Level::Info, "scarlett_hook", "CpuEmuVeh", msg);
+        }
+        ep->ContextRecord->Rip += len;
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
 LONG CALLBACK BootTraceVeh(PEXCEPTION_POINTERS ep) {
     if (!ep || !ep->ExceptionRecord || !ep->ContextRecord) {
         return EXCEPTION_CONTINUE_SEARCH;
     }
     const DWORD code = ep->ExceptionRecord->ExceptionCode;
-    if (code != EXCEPTION_ACCESS_VIOLATION &&
-        code != EXCEPTION_ILLEGAL_INSTRUCTION &&
-        code != EXCEPTION_PRIV_INSTRUCTION &&
-        code != EXCEPTION_INT_DIVIDE_BY_ZERO &&
-        code != EXCEPTION_STACK_OVERFLOW) {
+    if (code == EXCEPTION_BREAKPOINT && ep->ContextRecord) {
+        const auto* ip = reinterpret_cast<const uint8_t*>(ep->ContextRecord->Rip);
+        if (ip && ip[0] == 0xCCu) {
+            static std::atomic<uint32_t> s_bpLogs{0};
+            if (s_bpLogs.fetch_add(1, std::memory_order_relaxed) < 8) {
+                char bmsg[160];
+                std::snprintf(bmsg, sizeof(bmsg), "Continued past int3 at %s",
+                              FormatVehAddr(ep->ExceptionRecord->ExceptionAddress).c_str());
+                sc::log::Write(sc::log::Level::Warn, "scarlett_hook", "VEH", bmsg);
+            }
+            ep->ContextRecord->Rip += 1;
+            return EXCEPTION_CONTINUE_EXECUTION;
+        }
+    }
+    if (code == EXCEPTION_ILLEGAL_INSTRUCTION && ep->ContextRecord) {
+        const auto* ip = reinterpret_cast<const uint8_t*>(ep->ContextRecord->Rip);
+        if (ip && ip[0] == 0x0Fu && ip[1] == 0x01u && (ip[2] == 0xFAu || ip[2] == 0xFBu)) {
+            const bool isMwaitx = (ip[2] == 0xFBu);
+            static std::atomic<uint32_t> s_monxLogs{0};
+            if (s_monxLogs.fetch_add(1, std::memory_order_relaxed) < 4) {
+                char mmsg[128];
+                std::snprintf(mmsg, sizeof(mmsg), "Emulated %s at %s",
+                              isMwaitx ? "MWAITX" : "MONITORX",
+                              FormatVehAddr(ep->ExceptionRecord->ExceptionAddress).c_str());
+                sc::log::Write(sc::log::Level::Info, "scarlett_hook", "VEH", mmsg);
+            }
+            ep->ContextRecord->Rip += 3;
+            if (isMwaitx) {
+                ::SwitchToThread();
+            }
+            return EXCEPTION_CONTINUE_EXECUTION;
+        }
+    }
+    const bool isFatalClass = (code >= 0x80000000u && code != 0xE06D7363u);
+    if (!isFatalClass) {
         return EXCEPTION_CONTINUE_SEARCH;
     }
-    if (InterlockedIncrement(&g_vehLogCount) > 8) {
+    if (InterlockedIncrement(&g_vehLogCount) > 24) {
         return EXCEPTION_CONTINUE_SEARCH;
     }
 
@@ -975,6 +1296,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID) {
     if (TraceBootEnabled()) {
         AddVectoredExceptionHandler(1, BootTraceVeh);
     }
+    AddVectoredExceptionHandler(1, XboxCpuEmulationVeh);
         sc::log::Write(sc::log::Level::Info, "scarlett_hook", "DllMain", buf);
     } else if (reason == DLL_PROCESS_DETACH) {
         const uint32_t drained = ScarlettHookRunGuestAtExit();
