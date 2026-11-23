@@ -1,6 +1,6 @@
 # Scarlett Layer — Roadmap (Sprint 71 Baseline)
 
-**Current Baseline:** Sprint 71 (on top of `v0.69.0-pre`, Apache-2.0) — **78/78 Tier 1 self-authored synthetic CTests passing** (`42 cpu`, `36 gpu`), **0 Tier 2 automated external Xbox-targeted binary tests**, zero `/W4 /permissive-` warnings, zero `d3d12_debug` errors under `SCARLETT_STRICT_D3D12=1`, and GitHub Actions Windows CI running both `cpu` and `gpu` suites on Microsoft WARP.
+**Current Baseline:** Sprint 71 (on top of `v0.69.0-pre`, Apache-2.0) — **79/79 Tier 1 self-authored synthetic CTests passing** (`43 cpu`, `36 gpu`), **0 Tier 2 automated external Xbox-targeted binary tests**, zero `/W4 /permissive-` warnings, zero `d3d12_debug` errors under `SCARLETT_STRICT_D3D12=1`, and GitHub Actions Windows CI running both `cpu` and `gpu` suites on Microsoft WARP.
 
 ## Completed Recently (Sprints 63-71)
 

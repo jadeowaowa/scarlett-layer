@@ -61,7 +61,7 @@ Shared runtime flags live in `common/config.hpp`.
 
 ### What is demonstrated today
 
-- **Tier 1 (Self-Authored Synthetic Suite): 78/78 passing** (`42 cpu`, `36 gpu`) on both the author's NVIDIA RTX 5070 and Microsoft WARP (`SCARLETT_USE_WARP=1`), with 0 MSVC `/W4 /permissive-` warnings and 0 D3D12 debug-layer errors. Both `cpu` and `gpu` suites run on GitHub Actions Windows CI via WARP. (Includes 1 opt-in local read-only corpus audit test.)
+- **Tier 1 (Self-Authored Synthetic Suite): 79/79 passing** (`43 cpu`, `36 gpu`) on both the author's NVIDIA RTX 5070 and Microsoft WARP (`SCARLETT_USE_WARP=1`), with 0 MSVC `/W4 /permissive-` warnings and 0 D3D12 debug-layer errors. Both `cpu` and `gpu` suites run on GitHub Actions Windows CI via WARP. (Includes 1 opt-in local read-only corpus audit test.)
 - **Real D3D12 GPU readback inside Tier 1 tests:** textured RDNA2 draw, compute dispatch, 3D depth rendering, cross-queue fence sync, import/ordinal rewriting, synthetic `SCLZ` streaming, and a synthetic boot-to-frame-to-save test (`ScarlettTitleBringUpE2E`).
 - **Local Desktop GDK sample boot:** Unmodified Microsoft Public GDK `261000` `SimpleTriangleDesktop.exe` (**PC Desktop target**, not an Xbox console target) boots, renders, and exits cleanly (`code=0`) through `loader.exe --boot` with 0 auto-stub hits on `shims/libHttpClient.dll` and `shims/xgameruntime.dll`.
 
