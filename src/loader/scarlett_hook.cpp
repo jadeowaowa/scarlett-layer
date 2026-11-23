@@ -1,5 +1,13 @@
 #include "auto_stub.hpp"
+#include "import_telemetry.hpp"
 #include "common/ansi_path.hpp"
+
+#if defined(_MSC_VER)
+#include <intrin.h>
+#define SC_CALLER_PC() _ReturnAddress()
+#else
+#define SC_CALLER_PC() __builtin_return_address(0)
+#endif
 #include "common/config.hpp"
 #include "common/stub.hpp"
 
@@ -370,8 +378,13 @@ BOOL WINAPI HookFreeLibrary(HMODULE hLibModule) {
 HMODULE WINAPI HookLoadLibraryW(LPCWSTR lpLibFileName) {
     std::wstring targetWide;
     if (FindShimWide(NormalizeDllKeyW(lpLibFileName), targetWide)) {
-        std::string msg = "[dynamic] " + WideToUtf8(lpLibFileName ? lpLibFileName : L"")
-                        + " -> " + WideToUtf8(targetWide);
+        const std::string reqUtf8 = WideToUtf8(lpLibFileName ? lpLibFileName : L"");
+        const std::string dstUtf8 = WideToUtf8(targetWide);
+        if (sc::loader::ImportTelemetry::Instance().IsEnabled()) {
+            sc::loader::ImportTelemetry::Instance().RecordRedirect(
+                "LoadLibraryW", reqUtf8.c_str(), dstUtf8.c_str(), SC_CALLER_PC());
+        }
+        std::string msg = "[dynamic] " + reqUtf8 + " -> " + dstUtf8;
         sc::log::Write(sc::log::Level::Info, "scarlett_hook", "LoadLibraryW", msg.c_str());
         return g_origLoadLibraryW(targetWide.c_str());
     }
@@ -386,8 +399,13 @@ HMODULE WINAPI HookLoadLibraryA(LPCSTR lpLibFileName) {
     // Route shim redirects directly through g_shimsWide + LoadLibraryW to avoid ANSI path mangling.
     std::wstring targetWide;
     if (g_origLoadLibraryW && FindShimWide(AnsiToWide(NormalizeDllKeyA(lpLibFileName)), targetWide)) {
-        std::string msg = "[dynamic] " + std::string(lpLibFileName ? lpLibFileName : "")
-                        + " -> " + WideToUtf8(targetWide);
+        const std::string reqStr = lpLibFileName ? lpLibFileName : "";
+        const std::string dstUtf8 = WideToUtf8(targetWide);
+        if (sc::loader::ImportTelemetry::Instance().IsEnabled()) {
+            sc::loader::ImportTelemetry::Instance().RecordRedirect(
+                "LoadLibraryA", reqStr.c_str(), dstUtf8.c_str(), SC_CALLER_PC());
+        }
+        std::string msg = "[dynamic] " + reqStr + " -> " + dstUtf8;
         sc::log::Write(sc::log::Level::Info, "scarlett_hook", "LoadLibraryA", msg.c_str());
         return g_origLoadLibraryW(targetWide.c_str());
     }
@@ -401,8 +419,13 @@ HMODULE WINAPI HookLoadLibraryA(LPCSTR lpLibFileName) {
 HMODULE WINAPI HookLoadLibraryExW(LPCWSTR lpLibFileName, HANDLE hFile, DWORD dwFlags) {
     std::wstring targetWide;
     if (FindShimWide(NormalizeDllKeyW(lpLibFileName), targetWide)) {
-        std::string msg = "[dynamic] " + WideToUtf8(lpLibFileName ? lpLibFileName : L"")
-                        + " -> " + WideToUtf8(targetWide);
+        const std::string reqUtf8 = WideToUtf8(lpLibFileName ? lpLibFileName : L"");
+        const std::string dstUtf8 = WideToUtf8(targetWide);
+        if (sc::loader::ImportTelemetry::Instance().IsEnabled()) {
+            sc::loader::ImportTelemetry::Instance().RecordRedirect(
+                "LoadLibraryExW", reqUtf8.c_str(), dstUtf8.c_str(), SC_CALLER_PC());
+        }
+        std::string msg = "[dynamic] " + reqUtf8 + " -> " + dstUtf8;
         sc::log::Write(sc::log::Level::Info, "scarlett_hook", "LoadLibraryExW", msg.c_str());
         return g_origLoadLibraryExW(targetWide.c_str(), hFile, SanitizeFlagsForAbsoluteShim(dwFlags));
     }
@@ -416,8 +439,13 @@ HMODULE WINAPI HookLoadLibraryExW(LPCWSTR lpLibFileName, HANDLE hFile, DWORD dwF
 HMODULE WINAPI HookLoadLibraryExA(LPCSTR lpLibFileName, HANDLE hFile, DWORD dwFlags) {
     std::wstring targetWide;
     if (g_origLoadLibraryExW && FindShimWide(AnsiToWide(NormalizeDllKeyA(lpLibFileName)), targetWide)) {
-        std::string msg = "[dynamic] " + std::string(lpLibFileName ? lpLibFileName : "")
-                        + " -> " + WideToUtf8(targetWide);
+        const std::string reqStr = lpLibFileName ? lpLibFileName : "";
+        const std::string dstUtf8 = WideToUtf8(targetWide);
+        if (sc::loader::ImportTelemetry::Instance().IsEnabled()) {
+            sc::loader::ImportTelemetry::Instance().RecordRedirect(
+                "LoadLibraryExA", reqStr.c_str(), dstUtf8.c_str(), SC_CALLER_PC());
+        }
+        std::string msg = "[dynamic] " + reqStr + " -> " + dstUtf8;
         sc::log::Write(sc::log::Level::Info, "scarlett_hook", "LoadLibraryExA", msg.c_str());
         return g_origLoadLibraryExW(targetWide.c_str(), hFile, SanitizeFlagsForAbsoluteShim(dwFlags));
     }
@@ -494,8 +522,30 @@ FARPROC WINAPI HookGetProcAddress(HMODULE hModule, LPCSTR lpProcName) {
         InterlockedIncrement(&g_ordinalLookupCount);
     }
     FARPROC resolved = g_origGetProcAddress ? g_origGetProcAddress(hModule, lpProcName) : nullptr;
-    if (resolved || !hModule || !lpProcName || !sc::config::IsAutoStubEnabled()) {
+    auto& telemetry = sc::loader::ImportTelemetry::Instance();
+    const bool traceOn = telemetry.IsEnabled();
+
+    if (resolved) {
+        if (traceOn && hModule && lpProcName) {
+            std::string shimDllLower;
+            if (TryGetShimDllName(hModule, shimDllLower)) {
+                const uint16_t ord = isOrdinal
+                    ? static_cast<uint16_t>(reinterpret_cast<uintptr_t>(lpProcName) & 0xFFFFu)
+                    : 0u;
+                telemetry.RecordSymbolLookup(
+                    shimDllLower.c_str(),
+                    isOrdinal ? nullptr : lpProcName,
+                    ord,
+                    sc::loader::SymbolStatus::Resolved,
+                    0ULL,
+                    SC_CALLER_PC());
+            }
+        }
         return resolved;
+    }
+
+    if (!hModule || !lpProcName) {
+        return nullptr;
     }
 
     std::string shimDllLower;
@@ -503,16 +553,32 @@ FARPROC WINAPI HookGetProcAddress(HMODULE hModule, LPCSTR lpProcName) {
         return nullptr;
     }
 
+    const uint16_t ord = isOrdinal
+        ? static_cast<uint16_t>(reinterpret_cast<uintptr_t>(lpProcName) & 0xFFFFu)
+        : 0u;
     std::string symName;
     if (isOrdinal) {
         char ordBuf[32];
-        std::snprintf(ordBuf, sizeof(ordBuf), "#%u",
-                      static_cast<unsigned>(reinterpret_cast<uintptr_t>(lpProcName) & 0xFFFFu));
+        std::snprintf(ordBuf, sizeof(ordBuf), "#%u", static_cast<unsigned>(ord));
         symName = ordBuf;
     } else {
         symName = lpProcName;
     }
-    return g_autoStubs.GetOrCreate(shimDllLower, symName);
+
+    FARPROC stubProc = sc::config::IsAutoStubEnabled()
+        ? g_autoStubs.GetOrCreate(shimDllLower, symName)
+        : nullptr;
+
+    if (traceOn) {
+        telemetry.RecordSymbolLookup(
+            shimDllLower.c_str(),
+            symName.c_str(),
+            ord,
+            stubProc ? sc::loader::SymbolStatus::AutoStubbed : sc::loader::SymbolStatus::Unresolved,
+            stubProc ? sc::loader::AutoStubEngine::DefaultPolicyFor(symName) : 0ULL,
+            SC_CALLER_PC());
+    }
+    return stubProc;
 }
 
 void DiscoverShimsWin32() {
@@ -612,6 +678,11 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID) {
         }
 
         DiscoverShimsWin32();
+        sc::loader::SetAutoStubCallObserver([](const sc::loader::AutoStubMeta& meta, const void* callerPc) noexcept {
+            sc::loader::ImportTelemetry::Instance().RecordRuntimeStubCall(
+                meta.dllName.c_str(), meta.symbolName.c_str(), meta.defaultReturn, callerPc);
+        });
+        sc::loader::ImportTelemetry::Instance().InitializeFromEnv(g_exeModule);
         uint32_t patched = HookAllLoadedTitleModules(k32);
 
         char buf[160];
@@ -631,6 +702,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID) {
             reportPath = WideToUtf8(envReport->wstring());
         }
         g_autoStubs.DumpHotlist(reportPath.empty() ? nullptr : reportPath.c_str(), true);
+        sc::loader::SetAutoStubCallObserver(nullptr);
+        sc::loader::ImportTelemetry::Instance().Shutdown();
     }
     return TRUE;
 }
@@ -848,4 +921,32 @@ extern "C" __declspec(dllexport) BOOL WINAPI ScarlettHookRegisterTestShim(
     }
     g_shimsWide[keyW] = fullWidePath;
     return TRUE;
+}
+
+extern "C" __declspec(dllexport) BOOL WINAPI ScarlettHookTelemetryEnable(
+    const wchar_t* outputPathW,
+    BOOL installVeh) {
+    return sc::loader::ImportTelemetry::Instance().Enable(
+        outputPathW, g_exeModule, installVeh != FALSE) ? TRUE : FALSE;
+}
+
+extern "C" __declspec(dllexport) void WINAPI ScarlettHookTelemetryDisable() {
+    sc::loader::ImportTelemetry::Instance().Disable();
+}
+
+extern "C" __declspec(dllexport) void WINAPI ScarlettHookTelemetryResetForTest() {
+    sc::loader::ImportTelemetry::Instance().ResetForTests();
+}
+
+extern "C" __declspec(dllexport) BOOL WINAPI ScarlettHookTelemetryFlush(
+    const char* reasonUtf8) {
+    return sc::loader::ImportTelemetry::Instance().Flush(reasonUtf8) ? TRUE : FALSE;
+}
+
+extern "C" __declspec(dllexport) void WINAPI ScarlettHookTelemetryGetStats(
+    uint32_t* outUniqueSymbols,
+    uint64_t* outTotalStubCalls,
+    uint32_t* outRedirects) {
+    sc::loader::ImportTelemetry::Instance().GetStats(
+        outUniqueSymbols, outTotalStubCalls, outRedirects);
 }
