@@ -311,7 +311,7 @@ public:
             ReleaseSRWLockShared(&g_synthLock);
 
             hasGp = true;
-            resolved |= GameInputKindGamepad;
+            resolved |= ((inputKind & GameInputKindGamepad) != 0) ? GameInputKindGamepad : 0x00020000u;
             if (!rDev) rDev = m_gpDev;
 
             if (!usedSynth) {
