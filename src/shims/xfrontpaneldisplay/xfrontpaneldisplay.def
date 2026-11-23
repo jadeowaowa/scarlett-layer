@@ -1,0 +1,8 @@
+LIBRARY XFrontPanelDisplay
+EXPORTS
+    XFrontPanelIsSupported
+    XFrontPanelGetScreenDimensions
+    XFrontPanelPresentBuffer
+    XFrontPanelGetLightStates
+    XFrontPanelSetLightStates
+    XFrontPanelGetButtonStates

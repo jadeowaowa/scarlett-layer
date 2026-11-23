@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <vector>
 
@@ -158,7 +159,7 @@ public:
         if (!ppvObject) {
             return E_POINTER;
         }
-        if (IsEqualGUID(riid, __uuidof(IUnknown)) || IsEqualGUID(riid, IID_IGameInput)) {
+        if (IsEqualGUID(riid, __uuidof(IUnknown)) || IsEqualGUID(riid, IID_IGameInput) || IsEqualGUID(riid, IID_IGameInputGdk)) {
             *ppvObject = static_cast<IGameInput*>(this);
             AddRef();
             return S_OK;
@@ -280,9 +281,114 @@ public:
         return S_OK;
     }
 
+    HRESULT STDMETHODCALLTYPE GetNextReading(
+        IGameInputReading*, GameInputKind, void*, IGameInputReading** reading) override {
+        if (reading) *reading = nullptr;
+        return GAMEINPUT_E_READING_NOT_FOUND;
+    }
+
+    HRESULT STDMETHODCALLTYPE GetPreviousReading(
+        IGameInputReading*, GameInputKind, void*, IGameInputReading** reading) override {
+        if (reading) *reading = nullptr;
+        return GAMEINPUT_E_READING_NOT_FOUND;
+    }
+
+    HRESULT STDMETHODCALLTYPE GetTemporalReading(
+        uint64_t, void*, IGameInputReading** reading) override {
+        if (reading) *reading = nullptr;
+        return GAMEINPUT_E_READING_NOT_FOUND;
+    }
+
+    HRESULT STDMETHODCALLTYPE RegisterReadingCallback(
+        void*, GameInputKind inputKind, float, void*, void*, uint64_t* callbackToken) override {
+        uint64_t tok = m_nextToken.fetch_add(1, std::memory_order_relaxed);
+        if (callbackToken) *callbackToken = tok;
+        char msg[128];
+        std::snprintf(msg, sizeof(msg), "-> kind=0x%X token=%llu", static_cast<unsigned>(inputKind),
+                      static_cast<unsigned long long>(tok));
+        sc::log::Write(sc::log::Level::Info, "gameinput", "RegisterReadingCallback", msg);
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE RegisterDeviceCallback(
+        void*, GameInputKind inputKind, uint32_t statusFilter, uint32_t enumerationKind,
+        void*, void*, uint64_t* callbackToken) override {
+        uint64_t tok = m_nextToken.fetch_add(1, std::memory_order_relaxed);
+        if (callbackToken) *callbackToken = tok;
+        char msg[160];
+        std::snprintf(msg, sizeof(msg), "-> kind=0x%X status=0x%X enum=%u token=%llu",
+                      static_cast<unsigned>(inputKind), statusFilter, enumerationKind,
+                      static_cast<unsigned long long>(tok));
+        sc::log::Write(sc::log::Level::Info, "gameinput", "RegisterDeviceCallback", msg);
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE RegisterSystemButtonCallback(
+        void*, uint32_t buttonFilter, void*, void*, uint64_t* callbackToken) override {
+        uint64_t tok = m_nextToken.fetch_add(1, std::memory_order_relaxed);
+        if (callbackToken) *callbackToken = tok;
+        char msg[128];
+        std::snprintf(msg, sizeof(msg), "-> filter=0x%X token=%llu", buttonFilter,
+                      static_cast<unsigned long long>(tok));
+        sc::log::Write(sc::log::Level::Info, "gameinput", "RegisterSystemButtonCallback", msg);
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE RegisterKeyboardLayoutCallback(
+        void*, void*, void*, uint64_t* callbackToken) override {
+        uint64_t tok = m_nextToken.fetch_add(1, std::memory_order_relaxed);
+        if (callbackToken) *callbackToken = tok;
+        return S_OK;
+    }
+
+    void STDMETHODCALLTYPE StopCallback(uint64_t) override {}
+
+    bool STDMETHODCALLTYPE UnregisterCallback(uint64_t, uint64_t) override {
+        return true;
+    }
+
+    HRESULT STDMETHODCALLTYPE CreateDispatcher(void** dispatcher) override {
+        if (dispatcher) *dispatcher = nullptr;
+        sc::log::Write(sc::log::Level::Warn, "gameinput", "CreateDispatcher", "-> E_NOTIMPL");
+        return E_NOTIMPL;
+    }
+
+    HRESULT STDMETHODCALLTYPE CreateAggregateDevice(GameInputKind, void** device) override {
+        if (device) *device = nullptr;
+        sc::log::Write(sc::log::Level::Warn, "gameinput", "CreateAggregateDevice", "-> E_NOTIMPL");
+        return E_NOTIMPL;
+    }
+
+    HRESULT STDMETHODCALLTYPE FindDeviceFromId(const void*, void** device) override {
+        if (device) *device = nullptr;
+        return E_NOTIMPL;
+    }
+
+    HRESULT STDMETHODCALLTYPE FindDeviceFromObject(IUnknown*, void** device) override {
+        if (device) *device = nullptr;
+        return E_NOTIMPL;
+    }
+
+    HRESULT STDMETHODCALLTYPE FindDeviceFromPlatformHandle(HANDLE, void** device) override {
+        if (device) *device = nullptr;
+        return E_NOTIMPL;
+    }
+
+    HRESULT STDMETHODCALLTYPE FindDeviceFromPlatformString(LPCWSTR, void** device) override {
+        if (device) *device = nullptr;
+        return E_NOTIMPL;
+    }
+
+    HRESULT STDMETHODCALLTYPE EnableOemDeviceSupport(uint16_t, uint16_t, uint8_t, uint8_t) override {
+        return S_OK;
+    }
+
+    void STDMETHODCALLTYPE SetFocusPolicy(uint32_t) override {}
+
 private:
     std::atomic<ULONG> m_refs{1};
     std::atomic<bool> m_loggedGamepad{false};
+    std::atomic<uint64_t> m_nextToken{1};
 };
 
 } // namespace

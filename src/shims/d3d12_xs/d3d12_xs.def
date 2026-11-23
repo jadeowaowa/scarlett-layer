@@ -2,3 +2,5 @@ LIBRARY d3d12_xs
 EXPORTS
     D3D12XboxCreateDevice
     D3D12SerializeRootSignature = ScarlettSerializeRootSignature
+    D3D12XboxSetProcessDebugFlags
+    D3DMapEsramMemory

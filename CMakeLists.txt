@@ -147,6 +147,15 @@ set_target_properties(xcurl PROPERTIES OUTPUT_NAME "XCurl")
 target_link_libraries(xcurl PRIVATE sc_common)
 sc_set_runtime_dir(xcurl "${SC_BIN_DIR}/shims")
 
+# Shim #13: XFrontPanelDisplay.dll -> build/bin/shims/
+add_library(xfrontpaneldisplay SHARED
+    src/shims/xfrontpaneldisplay/xfrontpaneldisplay.cpp
+    src/shims/xfrontpaneldisplay/xfrontpaneldisplay.def
+)
+set_target_properties(xfrontpaneldisplay PROPERTIES OUTPUT_NAME "XFrontPanelDisplay")
+target_link_libraries(xfrontpaneldisplay PRIVATE sc_common)
+sc_set_runtime_dir(xfrontpaneldisplay "${SC_BIN_DIR}/shims")
+
 # Runtime multi-module LoadLibrary IAT hook DLL -> build/bin/
 add_library(scarlett_hook SHARED
     src/loader/scarlett_hook.cpp

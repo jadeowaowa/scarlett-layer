@@ -182,6 +182,21 @@ DiscoveredShims DiscoverShims(const std::filesystem::path& shimDir) {
             result.unrepresentableKeys.insert(std::move(key));
         }
     }
+    // Xbox One GDK -> Scarlett shim aliases
+    static constexpr std::pair<const char*, const char*> kShimAliases[] = {
+        {"d3d12_x.dll", "d3d12_xs.dll"},
+        {"xg_x.dll",    "xg_xs.dll"},
+    };
+    for (const auto& [aliasKey, targetKey] : kShimAliases) {
+        if (result.ansiByKey.find(aliasKey) == result.ansiByKey.end()) {
+            auto it = result.ansiByKey.find(targetKey);
+            if (it != result.ansiByKey.end()) {
+                result.ansiByKey.emplace(aliasKey, it->second);
+            } else if (result.unrepresentableKeys.count(targetKey) > 0) {
+                result.unrepresentableKeys.insert(aliasKey);
+            }
+        }
+    }
     return result;
 }
 

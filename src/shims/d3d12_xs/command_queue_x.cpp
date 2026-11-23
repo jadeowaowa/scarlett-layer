@@ -192,7 +192,7 @@ public:
 
         D3D12_RESOURCE_DESC dstDesc = dstBackBuffer->GetDesc();
         if (srcDesc.Width == dstDesc.Width && srcDesc.Height == dstDesc.Height &&
-            srcDesc.Format == dstDesc.Format) {
+            srcDesc.Format == dstDesc.Format && srcDesc.MipLevels == dstDesc.MipLevels) {
             m_copyCmdList->CopyResource(dstBackBuffer, srcResource);
         } else {
             D3D12_TEXTURE_COPY_LOCATION dstLoc{};
@@ -334,10 +334,30 @@ private:
             return E_FAIL;
         }
 
+        auto sanitizeSwapChainFormat = [](DXGI_FORMAT fmt) -> DXGI_FORMAT {
+            switch (fmt) {
+                case DXGI_FORMAT_R8G8B8A8_UNORM:
+                case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
+                case DXGI_FORMAT_R8G8B8A8_TYPELESS:
+                    return DXGI_FORMAT_R8G8B8A8_UNORM;
+                case DXGI_FORMAT_B8G8R8A8_UNORM:
+                case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
+                case DXGI_FORMAT_B8G8R8A8_TYPELESS:
+                    return DXGI_FORMAT_B8G8R8A8_UNORM;
+                case DXGI_FORMAT_R10G10B10A2_UNORM:
+                case DXGI_FORMAT_R10G10B10A2_TYPELESS:
+                    return DXGI_FORMAT_R10G10B10A2_UNORM;
+                case DXGI_FORMAT_R16G16B16A16_FLOAT:
+                case DXGI_FORMAT_R16G16B16A16_TYPELESS:
+                    return DXGI_FORMAT_R16G16B16A16_FLOAT;
+                default:
+                    return DXGI_FORMAT_R8G8B8A8_UNORM;
+            }
+        };
         DXGI_SWAP_CHAIN_DESC1 scDesc{};
         scDesc.Width = width;
         scDesc.Height = height;
-        scDesc.Format = desc.Format;
+        scDesc.Format = sanitizeSwapChainFormat(desc.Format);
         scDesc.SampleDesc.Count = 1;
         scDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
         scDesc.BufferCount = kSwapBufferCount;
@@ -347,7 +367,10 @@ private:
         HRESULT hr = m_factory->CreateSwapChainForHwnd(
             m_queue.Get(), m_hwnd, &scDesc, nullptr, nullptr, &sc1);
         if (FAILED(hr)) {
-            sc::log::Write(sc::log::Level::Error, "d3d12_xs", "InitPresentationPipeline", "-> CreateSwapChainForHwnd failed");
+            char errBuf[160];
+            std::snprintf(errBuf, sizeof(errBuf), "-> CreateSwapChainForHwnd failed hr=0x%08lX %ux%u srcFmt=%u scFmt=%u",
+                          static_cast<unsigned long>(hr), width, height, static_cast<unsigned>(desc.Format), static_cast<unsigned>(scDesc.Format));
+            sc::log::Write(sc::log::Level::Error, "d3d12_xs", "InitPresentationPipeline", errBuf);
             return hr;
         }
 

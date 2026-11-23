@@ -210,6 +210,282 @@ BOOL    WINAPI HookGetModuleHandleExA(DWORD dwFlags, LPCSTR lpModuleName, HMODUL
 FARPROC WINAPI HookGetProcAddress(HMODULE hModule, LPCSTR lpProcName);
 BOOL    WINAPI HookFreeLibrary(HMODULE hLibModule);
 
+bool TraceBootEnabled() {
+    static const bool s_enabled = []() {
+        char buf[8]{};
+        return GetEnvironmentVariableA("SCARLETT_TRACE_BOOT", buf, sizeof(buf)) > 0 && buf[0] != '0';
+    }();
+    return s_enabled;
+}
+
+void LogCallStack(const char* reason, uint32_t code) {
+    char hdr[128];
+    std::snprintf(hdr, sizeof(hdr), "code=%u (0x%08X) backtrace:", code, code);
+    sc::log::Write(sc::log::Level::Warn, "scarlett_hook", reason, hdr);
+    void* frames[12]{};
+    USHORT count = CaptureStackBackTrace(1, 12, frames, nullptr);
+    for (USHORT i = 0; i < count; ++i) {
+        HMODULE mod = nullptr;
+        char line[320];
+        if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                               static_cast<LPCSTR>(frames[i]), &mod) && mod) {
+            char path[MAX_PATH]{};
+            GetModuleFileNameA(mod, path, MAX_PATH);
+            const char* name = std::strrchr(path, '\\');
+            name = name ? name + 1 : path;
+            auto rva = reinterpret_cast<uintptr_t>(frames[i]) - reinterpret_cast<uintptr_t>(mod);
+            std::snprintf(line, sizeof(line), "  #%02u %s+0x%llX", i, name, static_cast<unsigned long long>(rva));
+        } else {
+            std::snprintf(line, sizeof(line), "  #%02u 0x%p", i, frames[i]);
+        }
+        sc::log::Write(sc::log::Level::Warn, "scarlett_hook", "StackFrame", line);
+    }
+}
+
+void WINAPI HookOutputDebugStringA(LPCSTR lpOutputString) {
+    if (lpOutputString && lpOutputString[0] != '\0') {
+        std::string s(lpOutputString);
+        while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) s.pop_back();
+        if (!s.empty()) {
+            sc::log::Write(sc::log::Level::Info, "guest_dbg", "OutputDebugStringA", s.c_str());
+        }
+    }
+    ::OutputDebugStringA(lpOutputString);
+}
+
+void WINAPI HookOutputDebugStringW(LPCWSTR lpOutputString) {
+    if (lpOutputString && lpOutputString[0] != L'\0') {
+        std::string s = WideToUtf8(lpOutputString);
+        while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) s.pop_back();
+        if (!s.empty()) {
+            sc::log::Write(sc::log::Level::Info, "guest_dbg", "OutputDebugStringW", s.c_str());
+        }
+    }
+    ::OutputDebugStringW(lpOutputString);
+}
+
+void WINAPI HookExitProcess(UINT uExitCode) {
+    LogCallStack("ExitProcess", uExitCode);
+    ::ExitProcess(uExitCode);
+}
+
+void __cdecl HookCrtExit(int status) {
+    LogCallStack("CRT::exit", static_cast<uint32_t>(status));
+    using ExitFn = void(__cdecl*)(int);
+    HMODULE ucrt = GetModuleHandleW(L"ucrtbase.dll");
+    auto fn = ucrt ? reinterpret_cast<ExitFn>(GetProcAddress(ucrt, "exit")) : nullptr;
+    if (fn) fn(status);
+    ::ExitProcess(static_cast<UINT>(status));
+}
+
+[[noreturn]] void __cdecl HookCrtAbort() {
+    LogCallStack("CRT::abort", 0xC0000409u);
+    using AbortFn = void(__cdecl*)();
+    HMODULE ucrt = GetModuleHandleW(L"ucrtbase.dll");
+    auto fn = ucrt ? reinterpret_cast<AbortFn>(GetProcAddress(ucrt, "abort")) : nullptr;
+    if (fn) fn();
+    ::TerminateProcess(::GetCurrentProcess(), 0xC0000409u);
+}
+
+[[noreturn]] void __cdecl HookCrtTerminate() {
+    LogCallStack("CRT::terminate", 0xC0000409u);
+    using TermFn = void(__cdecl*)();
+    HMODULE ucrt = GetModuleHandleW(L"ucrtbase.dll");
+    auto fn = ucrt ? reinterpret_cast<TermFn>(GetProcAddress(ucrt, "terminate")) : nullptr;
+    if (fn) fn();
+    ::TerminateProcess(::GetCurrentProcess(), 0xC0000409u);
+}
+
+void __cdecl HookCrtWassert(const wchar_t* expr, const wchar_t* file, unsigned line) {
+    char msg[320];
+    std::snprintf(msg, sizeof(msg), "-> line=%u", line);
+    sc::log::Write(sc::log::Level::Error, "scarlett_hook", "CRT::_wassert", msg);
+    LogCallStack("CRT::_wassert", line);
+    using WassertFn = void(__cdecl*)(const wchar_t*, const wchar_t*, unsigned);
+    HMODULE ucrt = GetModuleHandleW(L"ucrtbase.dll");
+    auto fn = ucrt ? reinterpret_cast<WassertFn>(GetProcAddress(ucrt, "_wassert")) : nullptr;
+    if (fn) fn(expr, file, line);
+}
+
+using Il2CppInitFn    = int(__cdecl*)(const char*);
+using Il2CppSetDirFn  = void(__cdecl*)(const char*);
+Il2CppInitFn   g_realIl2CppInit      = nullptr;
+Il2CppSetDirFn g_realIl2CppConfigDir = nullptr;
+Il2CppSetDirFn g_realIl2CppDataDir   = nullptr;
+Il2CppSetDirFn g_realIl2CppTempDir   = nullptr;
+
+void __cdecl TraceIl2CppSetConfigDir(const char* dir) {
+    sc::log::Write(sc::log::Level::Info, "il2cpp_trace", "il2cpp_set_config_dir", dir ? dir : "<null>");
+    if (g_realIl2CppConfigDir) g_realIl2CppConfigDir(dir);
+}
+
+void __cdecl TraceIl2CppSetDataDir(const char* dir) {
+    sc::log::Write(sc::log::Level::Info, "il2cpp_trace", "il2cpp_set_data_dir", dir ? dir : "<null>");
+    if (g_realIl2CppDataDir) g_realIl2CppDataDir(dir);
+}
+
+void __cdecl TraceIl2CppSetTempDir(const char* dir) {
+    sc::log::Write(sc::log::Level::Info, "il2cpp_trace", "il2cpp_set_temp_dir", dir ? dir : "<null>");
+    if (g_realIl2CppTempDir) g_realIl2CppTempDir(dir);
+}
+
+int __cdecl TraceIl2CppInit(const char* domain) {
+    sc::log::Write(sc::log::Level::Info, "il2cpp_trace", "il2cpp_init[enter]", domain ? domain : "<null>");
+    int rc = g_realIl2CppInit ? g_realIl2CppInit(domain) : 0;
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "-> returned %d", rc);
+    sc::log::Write(sc::log::Level::Info, "il2cpp_trace", "il2cpp_init[exit]", buf);
+    return rc;
+}
+
+HANDLE WINAPI HookCreateFileW(
+    LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode,
+    LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition,
+    DWORD dwFlagsAndAttributes, HANDLE hTemplateFile) {
+    HANDLE h = ::CreateFileW(lpFileName, dwDesiredAccess, dwShareMode,
+                             lpSecurityAttributes, dwCreationDisposition,
+                             dwFlagsAndAttributes, hTemplateFile);
+    if (h == INVALID_HANDLE_VALUE && TraceBootEnabled()) {
+        DWORD err = GetLastError();
+        std::string msg = "FAILED: " + WideToUtf8(lpFileName ? lpFileName : L"")
+                        + " (err=" + std::to_string(err) + ")";
+        sc::log::Write(sc::log::Level::Warn, "file_trace", "CreateFileW", msg.c_str());
+        SetLastError(err);
+    }
+    return h;
+}
+
+using CreateFile2Fn = HANDLE(WINAPI*)(LPCWSTR, DWORD, DWORD, DWORD, void*);
+HANDLE WINAPI HookCreateFile2(
+    LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode,
+    DWORD dwCreationDisposition, void* pCreateExParams) {
+    static CreateFile2Fn s_orig = []() -> CreateFile2Fn {
+        HMODULE kb = GetModuleHandleW(L"kernelbase.dll");
+        if (!kb) kb = GetModuleHandleW(L"kernel32.dll");
+        return kb ? reinterpret_cast<CreateFile2Fn>(GetProcAddress(kb, "CreateFile2")) : nullptr;
+    }();
+    HANDLE h = s_orig ? s_orig(lpFileName, dwDesiredAccess, dwShareMode, dwCreationDisposition, pCreateExParams)
+                      : INVALID_HANDLE_VALUE;
+    if (h == INVALID_HANDLE_VALUE && TraceBootEnabled()) {
+        DWORD err = GetLastError();
+        std::string msg = "FAILED: " + WideToUtf8(lpFileName ? lpFileName : L"")
+                        + " (err=" + std::to_string(err) + ")";
+        sc::log::Write(sc::log::Level::Warn, "file_trace", "CreateFile2", msg.c_str());
+        SetLastError(err);
+    }
+    return h;
+}
+
+DWORD WINAPI HookGetFileAttributesW(LPCWSTR lpFileName) {
+    DWORD attr = ::GetFileAttributesW(lpFileName);
+    if (attr == INVALID_FILE_ATTRIBUTES && TraceBootEnabled()) {
+        DWORD err = GetLastError();
+        std::string msg = "FAILED: " + WideToUtf8(lpFileName ? lpFileName : L"")
+                        + " (err=" + std::to_string(err) + ")";
+        sc::log::Write(sc::log::Level::Warn, "file_trace", "GetFileAttributesW", msg.c_str());
+        SetLastError(err);
+    }
+    return attr;
+}
+
+BOOL WINAPI HookGetFileAttributesExW(LPCWSTR lpFileName, GET_FILEEX_INFO_LEVELS fInfoLevelId, LPVOID lpFileInformation) {
+    BOOL ok = ::GetFileAttributesExW(lpFileName, fInfoLevelId, lpFileInformation);
+    if (!ok && TraceBootEnabled()) {
+        DWORD err = GetLastError();
+        std::string msg = "FAILED: " + WideToUtf8(lpFileName ? lpFileName : L"")
+                        + " (err=" + std::to_string(err) + ")";
+        sc::log::Write(sc::log::Level::Warn, "file_trace", "GetFileAttributesExW", msg.c_str());
+        SetLastError(err);
+    }
+    return ok;
+}
+
+int __cdecl HookPuts(const char* s) {
+    if (s && s[0] != '\0' && TraceBootEnabled()) {
+        sc::log::Write(sc::log::Level::Info, "guest_dbg", "puts", s);
+    }
+    using PutsFn = int(__cdecl*)(const char*);
+    static PutsFn s_orig = []() -> PutsFn {
+        HMODULE ucrt = GetModuleHandleW(L"ucrtbase.dll");
+        return ucrt ? reinterpret_cast<PutsFn>(GetProcAddress(ucrt, "puts")) : nullptr;
+    }();
+    return s_orig ? s_orig(s) : 0;
+}
+
+volatile LONG g_vehLogCount = 0;
+
+std::string FormatVehAddr(void* addr) {
+    HMODULE mod = nullptr;
+    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           static_cast<LPCSTR>(addr), &mod) && mod) {
+        char path[MAX_PATH]{};
+        GetModuleFileNameA(mod, path, MAX_PATH);
+        const char* name = std::strrchr(path, '\\');
+        name = name ? name + 1 : path;
+        const auto rva = reinterpret_cast<uintptr_t>(addr) - reinterpret_cast<uintptr_t>(mod);
+        char buf[192];
+        std::snprintf(buf, sizeof(buf), "%s+0x%llX (0x%llX)", name,
+                      static_cast<unsigned long long>(rva),
+                      static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(addr)));
+        return buf;
+    }
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "0x%llX",
+                  static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(addr)));
+    return buf;
+}
+
+LONG CALLBACK BootTraceVeh(PEXCEPTION_POINTERS ep) {
+    if (!ep || !ep->ExceptionRecord || !ep->ContextRecord) {
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
+    const DWORD code = ep->ExceptionRecord->ExceptionCode;
+    if (code != EXCEPTION_ACCESS_VIOLATION &&
+        code != EXCEPTION_ILLEGAL_INSTRUCTION &&
+        code != EXCEPTION_PRIV_INSTRUCTION &&
+        code != EXCEPTION_INT_DIVIDE_BY_ZERO &&
+        code != EXCEPTION_STACK_OVERFLOW) {
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
+    if (InterlockedIncrement(&g_vehLogCount) > 8) {
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
+
+    const auto& ctx = *ep->ContextRecord;
+    char msg[512];
+    if (code == EXCEPTION_ACCESS_VIOLATION && ep->ExceptionRecord->NumberParameters >= 2) {
+        const auto op = ep->ExceptionRecord->ExceptionInformation[0];
+        const char* opStr = (op == 0) ? "READ" : (op == 1) ? "WRITE" : (op == 8) ? "EXEC" : "OP";
+        std::snprintf(msg, sizeof(msg),
+                      "code=0x%08lX (%s addr=0x%llX) RIP=%s",
+                      code, opStr,
+                      static_cast<unsigned long long>(ep->ExceptionRecord->ExceptionInformation[1]),
+                      FormatVehAddr(ep->ExceptionRecord->ExceptionAddress).c_str());
+    } else {
+        std::snprintf(msg, sizeof(msg),
+                      "code=0x%08lX RIP=%s",
+                      code,
+                      FormatVehAddr(ep->ExceptionRecord->ExceptionAddress).c_str());
+    }
+    sc::log::Write(sc::log::Level::Error, "scarlett_hook", "VEH", msg);
+
+    char regs[384];
+    std::snprintf(regs, sizeof(regs),
+                  "RAX=0x%llX RBX=0x%llX RCX=0x%llX RDX=0x%llX R8=0x%llX R9=0x%llX RSP=0x%llX RBP=0x%llX",
+                  static_cast<unsigned long long>(ctx.Rax),
+                  static_cast<unsigned long long>(ctx.Rbx),
+                  static_cast<unsigned long long>(ctx.Rcx),
+                  static_cast<unsigned long long>(ctx.Rdx),
+                  static_cast<unsigned long long>(ctx.R8),
+                  static_cast<unsigned long long>(ctx.R9),
+                  static_cast<unsigned long long>(ctx.Rsp),
+                  static_cast<unsigned long long>(ctx.Rbp));
+    sc::log::Write(sc::log::Level::Error, "scarlett_hook", "VEH[regs]", regs);
+
+    LogCallStack("VEH[bt]", code);
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
 uint32_t PatchModuleIat(HMODULE mod) {
     if (!mod) {
         return 0;
@@ -236,6 +512,20 @@ uint32_t PatchModuleIat(HMODULE mod) {
         if (std::strcmp(name, "GetModuleHandleExA") == 0)   return reinterpret_cast<void*>(&HookGetModuleHandleExA);
         if (std::strcmp(name, "GetProcAddress") == 0)       return reinterpret_cast<void*>(&HookGetProcAddress);
         if (std::strcmp(name, "FreeLibrary") == 0)          return reinterpret_cast<void*>(&HookFreeLibrary);
+        if (TraceBootEnabled()) {
+            if (std::strcmp(name, "OutputDebugStringA") == 0)   return reinterpret_cast<void*>(&HookOutputDebugStringA);
+            if (std::strcmp(name, "OutputDebugStringW") == 0)   return reinterpret_cast<void*>(&HookOutputDebugStringW);
+            if (std::strcmp(name, "ExitProcess") == 0)          return reinterpret_cast<void*>(&HookExitProcess);
+            if (std::strcmp(name, "exit") == 0)                 return reinterpret_cast<void*>(&HookCrtExit);
+            if (std::strcmp(name, "abort") == 0)                return reinterpret_cast<void*>(&HookCrtAbort);
+            if (std::strcmp(name, "terminate") == 0)            return reinterpret_cast<void*>(&HookCrtTerminate);
+            if (std::strcmp(name, "_wassert") == 0)             return reinterpret_cast<void*>(&HookCrtWassert);
+            if (std::strcmp(name, "CreateFileW") == 0)          return reinterpret_cast<void*>(&HookCreateFileW);
+            if (std::strcmp(name, "CreateFile2") == 0)          return reinterpret_cast<void*>(&HookCreateFile2);
+            if (std::strcmp(name, "GetFileAttributesW") == 0)   return reinterpret_cast<void*>(&HookGetFileAttributesW);
+            if (std::strcmp(name, "GetFileAttributesExW") == 0) return reinterpret_cast<void*>(&HookGetFileAttributesExW);
+            if (std::strcmp(name, "puts") == 0)                 return reinterpret_cast<void*>(&HookPuts);
+        }
         return nullptr;
     };
 
@@ -378,6 +668,11 @@ HMODULE WINAPI HookLoadLibraryW(LPCWSTR lpLibFileName) {
     HMODULE mod = g_origLoadLibraryW(lpLibFileName);
     if (mod) {
         HookModuleIfEligible(mod, true);
+    } else if (TraceBootEnabled()) {
+        DWORD err = GetLastError();
+        std::string msg = "LoadLibrary FAILED: " + WideToUtf8(lpLibFileName ? lpLibFileName : L"") + " (err=" + std::to_string(err) + ")";
+        sc::log::Write(sc::log::Level::Warn, "scarlett_hook", "LoadLibraryW", msg.c_str());
+        SetLastError(err);
     }
     return mod;
 }
@@ -394,6 +689,11 @@ HMODULE WINAPI HookLoadLibraryA(LPCSTR lpLibFileName) {
     HMODULE mod = g_origLoadLibraryA(lpLibFileName);
     if (mod) {
         HookModuleIfEligible(mod, true);
+    } else if (TraceBootEnabled()) {
+        DWORD err = GetLastError();
+        std::string msg = "LoadLibrary FAILED: " + std::string(lpLibFileName ? lpLibFileName : "") + " (err=" + std::to_string(err) + ")";
+        sc::log::Write(sc::log::Level::Warn, "scarlett_hook", "LoadLibraryA", msg.c_str());
+        SetLastError(err);
     }
     return mod;
 }
@@ -409,6 +709,11 @@ HMODULE WINAPI HookLoadLibraryExW(LPCWSTR lpLibFileName, HANDLE hFile, DWORD dwF
     HMODULE mod = g_origLoadLibraryExW(lpLibFileName, hFile, dwFlags);
     if (mod && !IsDataOnlyLoad(dwFlags)) {
         HookModuleIfEligible(mod, true);
+    } else if (!mod && TraceBootEnabled()) {
+        DWORD err = GetLastError();
+        std::string msg = "LoadLibrary FAILED: " + WideToUtf8(lpLibFileName ? lpLibFileName : L"") + " (err=" + std::to_string(err) + ")";
+        sc::log::Write(sc::log::Level::Warn, "scarlett_hook", "LoadLibraryExW", msg.c_str());
+        SetLastError(err);
     }
     return mod;
 }
@@ -424,6 +729,11 @@ HMODULE WINAPI HookLoadLibraryExA(LPCSTR lpLibFileName, HANDLE hFile, DWORD dwFl
     HMODULE mod = g_origLoadLibraryExA(lpLibFileName, hFile, dwFlags);
     if (mod && !IsDataOnlyLoad(dwFlags)) {
         HookModuleIfEligible(mod, true);
+    } else if (!mod && TraceBootEnabled()) {
+        DWORD err = GetLastError();
+        std::string msg = "LoadLibrary FAILED: " + std::string(lpLibFileName ? lpLibFileName : "") + " (err=" + std::to_string(err) + ")";
+        sc::log::Write(sc::log::Level::Warn, "scarlett_hook", "LoadLibraryExA", msg.c_str());
+        SetLastError(err);
     }
     return mod;
 }
@@ -494,6 +804,35 @@ FARPROC WINAPI HookGetProcAddress(HMODULE hModule, LPCSTR lpProcName) {
         InterlockedIncrement(&g_ordinalLookupCount);
     }
     FARPROC resolved = g_origGetProcAddress ? g_origGetProcAddress(hModule, lpProcName) : nullptr;
+    if (TraceBootEnabled() && !isOrdinal && lpProcName) {
+        if (resolved) {
+            if (std::strcmp(lpProcName, "il2cpp_init") == 0) {
+                g_realIl2CppInit = reinterpret_cast<Il2CppInitFn>(resolved);
+                return reinterpret_cast<FARPROC>(&TraceIl2CppInit);
+            }
+            if (std::strcmp(lpProcName, "il2cpp_set_config_dir") == 0) {
+                g_realIl2CppConfigDir = reinterpret_cast<Il2CppSetDirFn>(resolved);
+                return reinterpret_cast<FARPROC>(&TraceIl2CppSetConfigDir);
+            }
+            if (std::strcmp(lpProcName, "il2cpp_set_data_dir") == 0) {
+                g_realIl2CppDataDir = reinterpret_cast<Il2CppSetDirFn>(resolved);
+                return reinterpret_cast<FARPROC>(&TraceIl2CppSetDataDir);
+            }
+            if (std::strcmp(lpProcName, "il2cpp_set_temp_dir") == 0) {
+                g_realIl2CppTempDir = reinterpret_cast<Il2CppSetDirFn>(resolved);
+                return reinterpret_cast<FARPROC>(&TraceIl2CppSetTempDir);
+            }
+        } else {
+            DWORD err = GetLastError();
+            char modPath[MAX_PATH]{};
+            if (hModule) GetModuleFileNameA(hModule, modPath, MAX_PATH);
+            const char* modName = std::strrchr(modPath, '\\');
+            modName = modName ? modName + 1 : modPath;
+            std::string msg = std::string(modName) + "!" + lpProcName + " -> nullptr (err=" + std::to_string(err) + ")";
+            sc::log::Write(sc::log::Level::Warn, "scarlett_hook", "GetProcAddress[miss]", msg.c_str());
+            SetLastError(err);
+        }
+    }
     if (resolved || !hModule || !lpProcName || !sc::config::IsAutoStubEnabled()) {
         return resolved;
     }
@@ -557,6 +896,21 @@ void DiscoverShimsWin32() {
     } while (FindNextFileW(hFind, &fd));
 
     FindClose(hFind);
+
+    // Xbox One GDK -> Scarlett shim aliases
+    static constexpr std::pair<const wchar_t*, const wchar_t*> kShimAliasesW[] = {
+        {L"d3d12_x.dll", L"d3d12_xs.dll"},
+        {L"xg_x.dll",    L"xg_xs.dll"},
+    };
+    std::lock_guard<std::mutex> lock(g_shimMapMtx);
+    for (const auto& [aliasKey, targetKey] : kShimAliasesW) {
+        if (g_shimsWide.find(aliasKey) == g_shimsWide.end()) {
+            auto it = g_shimsWide.find(targetKey);
+            if (it != g_shimsWide.end()) {
+                g_shimsWide.emplace(aliasKey, it->second);
+            }
+        }
+    }
 }
 
 uint32_t HookAllLoadedTitleModules(HMODULE k32) {
@@ -618,6 +972,9 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID) {
         std::snprintf(buf, sizeof(buf),
                       "-> armed %u multi-module LoadLibrary IAT hook(s) across %zu discovered shim(s)",
                       patched, g_shimsWide.size());
+    if (TraceBootEnabled()) {
+        AddVectoredExceptionHandler(1, BootTraceVeh);
+    }
         sc::log::Write(sc::log::Level::Info, "scarlett_hook", "DllMain", buf);
     } else if (reason == DLL_PROCESS_DETACH) {
         const uint32_t drained = ScarlettHookRunGuestAtExit();

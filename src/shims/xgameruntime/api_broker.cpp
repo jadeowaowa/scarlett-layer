@@ -65,6 +65,7 @@ inline constexpr GUID kIidXGame            = MakeGuid(0x2549f142, 0x6419, 0x4a06
 inline constexpr GUID kClsidXAnalyticsInfo = MakeGuid(0xb884675d, 0xb738, 0x4a9c, 0x81, 0x5d, 0x9a, 0x9a, 0x1e, 0x0c, 0x6c, 0x9b);
 inline constexpr GUID kClsidXSystem        = MakeGuid(0xe349bd1a, 0xfc20, 0x4e40, 0xb9, 0x9c, 0x41, 0x78, 0xcc, 0x6b, 0x40, 0x9f);
 inline constexpr GUID kIidXSystem          = MakeGuid(0x1861cf2e, 0xe18b, 0x4834, 0xa9, 0xf5, 0xb4, 0xa4, 0xe6, 0xef, 0xb4, 0xcf);
+inline constexpr GUID kClsidXNetworking    = MakeGuid(0x37e56907, 0x2f10, 0x41e8, 0xb7, 0x2f, 0x36, 0xed, 0xb1, 0x85, 0x33, 0x1a);
 
 inline constexpr GUID    kIidIUnknown      = MakeGuid(0x00000000, 0x0000, 0x0000, 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46);
 inline constexpr HRESULT kRegDbClassNotReg = static_cast<HRESULT>(0x80040154L);
@@ -123,32 +124,37 @@ struct XAsyncServiceImpl final : public StaticComService {
         return S_OK;
     }
     virtual HRESULT STDMETHODCALLTYPE QueueDuplicateHandle(XTaskQueueHandle h, XTaskQueueHandle* outH) { // +0x78 (15)
-        if (!outH) return E_POINTER;
-        *outH = h;
-        return S_OK;
+        return sc::runtime::DuplicateTaskQueueHandle(h, outH);
     }
     virtual bool    STDMETHODCALLTYPE QueueDispatch(XTaskQueueHandle q, XTaskQueuePort p, uint32_t timeoutMs) { // +0x80 (16)
         return XTaskQueueDispatch(q, p, timeoutMs);
     }
     virtual void    STDMETHODCALLTYPE QueueCloseHandle(XTaskQueueHandle q) { XTaskQueueCloseHandle(q); } // +0x88 (17)
-    virtual HRESULT STDMETHODCALLTYPE QueueSubmitCallback(XTaskQueueHandle, XTaskQueuePort, void* ctx, void(CALLBACK* cb)(void*, bool)) { // +0x90 (18)
-        if (cb) cb(ctx, false);
-        return S_OK;
+    virtual HRESULT STDMETHODCALLTYPE QueueSubmitCallback(XTaskQueueHandle q, XTaskQueuePort port, void* ctx, void(CALLBACK* cb)(void*, bool)) { // +0x90 (18)
+        return sc::runtime::SubmitTaskCallback(q, port, 0, ctx, cb);
     }
-    virtual HRESULT STDMETHODCALLTYPE QueueSubmitDelayedCallback(XTaskQueueHandle, XTaskQueuePort, uint32_t, void* ctx, void(CALLBACK* cb)(void*, bool)) { // +0x98 (19)
-        if (cb) cb(ctx, false);
-        return S_OK;
+    virtual HRESULT STDMETHODCALLTYPE QueueSubmitDelayedCallback(XTaskQueueHandle q, XTaskQueuePort port, uint32_t delayMs, void* ctx, void(CALLBACK* cb)(void*, bool)) { // +0x98 (19)
+        return sc::runtime::SubmitTaskCallback(q, port, delayMs, ctx, cb);
     }
     virtual HRESULT STDMETHODCALLTYPE QueueRegisterWaiter(XTaskQueueHandle, XTaskQueuePort, HANDLE, void*, void*, uint64_t*) { return S_OK; } // +0xA0 (20)
     virtual void    STDMETHODCALLTYPE QueueUnregisterWaiter(XTaskQueueHandle, uint64_t) {} // +0xA8 (21)
-    virtual HRESULT STDMETHODCALLTYPE QueueTerminate(XTaskQueueHandle, bool, void*, void*) { return S_OK; } // +0xB0 (22)
+    virtual HRESULT STDMETHODCALLTYPE QueueTerminate(XTaskQueueHandle q, bool wait, void* ctx, void(CALLBACK* cb)(void*)) { // +0xB0 (22)
+        return sc::runtime::TerminateTaskQueue(q, wait, ctx, cb);
+    }
     virtual HRESULT STDMETHODCALLTYPE QueueRegisterMonitor(XTaskQueueHandle, void*, void*, uint64_t*) { return S_OK; } // +0xB8 (23)
     virtual void    STDMETHODCALLTYPE QueueUnregisterMonitor(XTaskQueueHandle, uint64_t) {} // +0xC0 (24)
     virtual bool    STDMETHODCALLTYPE QueueGetCurrentProcess(XTaskQueueHandle* outQ) { // +0xC8 (25)
-        if (outQ) *outQ = nullptr;
-        return false;
+        if (!outQ) return false;
+        XTaskQueueHandle pq = sc::runtime::GetProcessTaskQueue();
+        if (!pq) {
+            *outQ = nullptr;
+            return false;
+        }
+        return SUCCEEDED(sc::runtime::DuplicateTaskQueueHandle(pq, outQ));
     }
-    virtual void    STDMETHODCALLTYPE QueueSetCurrentProcess(XTaskQueueHandle) {} // +0xD0 (26)
+    virtual void    STDMETHODCALLTYPE QueueSetCurrentProcess(XTaskQueueHandle q) { // +0xD0 (26)
+        sc::runtime::SetProcessTaskQueue(q);
+    }
     virtual HRESULT STDMETHODCALLTYPE ThreadSetTimeSensitive(bool sensitive) { // +0xD8 (27)
         g_threadTimeSensitive = sensitive;
         return S_OK;
@@ -202,6 +208,123 @@ struct XAnalyticsInfoServiceImpl final : public StaticComService {
         std::snprintf(info.family, sizeof(info.family), "Windows.Xbox");
         std::snprintf(info.form, sizeof(info.form), "Xbox Series X");
         return info;
+    }
+};
+
+// --- Service 9: XNetworking (CLSID 37e56907-2f10-41e8-b72f-36edb185331a) ---
+struct XNetworkingConnectivityHintShim {
+    uint32_t connectivityLevel;    // 3 = InternetAccess
+    uint32_t connectivityCost;     // 1 = Unrestricted
+    uint32_t ianaInterfaceType;    // 6 = Ethernet
+    bool     networkInitialized;
+    bool     approachingDataLimit;
+    bool     overDataLimit;
+    bool     roaming;
+};
+
+struct XNetworkingServiceImpl final : public StaticComService {
+    std::atomic<uint64_t> nextToken{1};
+
+    // slot 3 (+0x18)
+    virtual HRESULT STDMETHODCALLTYPE QueryPreferredLocalUdpMultiplayerPort(uint16_t* port) {
+        if (!port) return E_POINTER;
+        *port = 3074;
+        sc::log::Write(sc::log::Level::Info, "xgameruntime", "XNetworking::QueryPreferredLocalUdpMultiplayerPort", "-> 3074");
+        return S_OK;
+    }
+    // slot 4 (+0x20)
+    virtual HRESULT STDMETHODCALLTYPE QueryPreferredLocalUdpMultiplayerPortAsync(XAsyncBlock* ab) {
+        if (!ab) return E_POINTER;
+        std::memset(ab->internal, 0, sizeof(ab->internal));
+        if (ab->callback) ab->callback(ab);
+        return S_OK;
+    }
+    // slot 5 (+0x28)
+    virtual HRESULT STDMETHODCALLTYPE QueryPreferredLocalUdpMultiplayerPortAsyncResult(XAsyncBlock*, uint16_t* port) {
+        if (!port) return E_POINTER;
+        *port = 3074;
+        return S_OK;
+    }
+    // slot 6 (+0x30)
+    virtual HRESULT STDMETHODCALLTYPE RegisterPreferredLocalUdpMultiplayerPortChanged(
+        XTaskQueueHandle, void*, void*, uint64_t* token) {
+        if (!token) return E_POINTER;
+        *token = nextToken.fetch_add(1, std::memory_order_relaxed);
+        return S_OK;
+    }
+    // slot 7 (+0x38)
+    virtual bool STDMETHODCALLTYPE UnregisterPreferredLocalUdpMultiplayerPortChanged(uint64_t, bool) {
+        return true;
+    }
+    // slot 8 (+0x40)
+    virtual HRESULT STDMETHODCALLTYPE QuerySecurityInformationForUrlAsync(const char*, XAsyncBlock*) {
+        return E_NOTIMPL;
+    }
+    // slot 9 (+0x48)
+    virtual HRESULT STDMETHODCALLTYPE QuerySecurityInformationForUrlAsyncResultSize(XAsyncBlock*, size_t* sz) {
+        if (sz) *sz = 0;
+        return E_NOTIMPL;
+    }
+    // slot 10 (+0x50)
+    virtual HRESULT STDMETHODCALLTYPE QuerySecurityInformationForUrlAsyncResult(
+        XAsyncBlock*, size_t, size_t*, uint8_t*, void**) {
+        return E_NOTIMPL;
+    }
+    // slot 11 (+0x58)
+    virtual HRESULT STDMETHODCALLTYPE QuerySecurityInformationForUrlUtf16Async(const wchar_t*, XAsyncBlock*) {
+        return E_NOTIMPL;
+    }
+    // slot 12 (+0x60)
+    virtual HRESULT STDMETHODCALLTYPE QuerySecurityInformationForUrlUtf16AsyncResultSize(XAsyncBlock*, size_t* sz) {
+        if (sz) *sz = 0;
+        return E_NOTIMPL;
+    }
+    // slot 13 (+0x68)
+    virtual HRESULT STDMETHODCALLTYPE QuerySecurityInformationForUrlUtf16AsyncResult(
+        XAsyncBlock*, size_t, size_t*, uint8_t*, void**) {
+        return E_NOTIMPL;
+    }
+    // slot 14 (+0x70)
+    virtual HRESULT STDMETHODCALLTYPE VerifyServerCertificate(void*, const void*) {
+        return S_OK;
+    }
+    // slot 15 (+0x78)
+    virtual HRESULT STDMETHODCALLTYPE GetConnectivityHint(XNetworkingConnectivityHintShim* hint) {
+        if (!hint) return E_POINTER;
+        hint->connectivityLevel    = 3; // InternetAccess
+        hint->connectivityCost     = 1; // Unrestricted
+        hint->ianaInterfaceType    = 6; // IF_TYPE_ETHERNET_CSMACD
+        hint->networkInitialized   = true;
+        hint->approachingDataLimit = false;
+        hint->overDataLimit        = false;
+        hint->roaming              = false;
+        sc::log::Write(sc::log::Level::Info, "xgameruntime", "XNetworking::GetConnectivityHint", "-> InternetAccess");
+        return S_OK;
+    }
+    // slot 16 (+0x80)
+    virtual HRESULT STDMETHODCALLTYPE RegisterConnectivityHintChanged(
+        XTaskQueueHandle, void*, void*, uint64_t* token) {
+        if (!token) return E_POINTER;
+        *token = nextToken.fetch_add(1, std::memory_order_relaxed);
+        sc::log::Write(sc::log::Level::Info, "xgameruntime", "XNetworking::RegisterConnectivityHintChanged", "-> S_OK");
+        return S_OK;
+    }
+    // slot 17 (+0x88)
+    virtual bool STDMETHODCALLTYPE UnregisterConnectivityHintChanged(uint64_t, bool) {
+        return true;
+    }
+    // slot 18 (+0x90)
+    virtual HRESULT STDMETHODCALLTYPE QueryConfigurationSetting(uint32_t, uint64_t* value) {
+        if (value) *value = 65536;
+        return S_OK;
+    }
+    // slot 19 (+0x98)
+    virtual HRESULT STDMETHODCALLTYPE SetConfigurationSetting(uint32_t, uint64_t) {
+        return S_OK;
+    }
+    // slot 20 (+0xA0)
+    virtual HRESULT STDMETHODCALLTYPE QueryStatistics(uint32_t, void*) {
+        return E_NOTIMPL;
     }
 };
 
@@ -388,12 +511,22 @@ HRESULT WINAPI QueryApiImpl(const GUID* clsid, const GUID* iid, void** ppv) {
         *ppv = &g_gameSaveSvc;
         return S_OK;
     }
+    if (GuidEquals(*clsid, kClsidXNetworking) && GuidEquals(*iid, kClsidXNetworking)) {
+        static XNetworkingServiceImpl g_networkingSvc;
+        *ppv = &g_networkingSvc;
+        return S_OK;
+    }
 
-    char buf[160];
+    char buf[220];
     std::snprintf(buf, sizeof(buf),
-                  "-> unmapped GDK service CLSID={%08lX-%04X-%04X-...} IID={%08lX-%04X-%04X-...}",
+                  "-> unmapped GDK service CLSID={%08lX-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X} "
+                  "IID={%08lX-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
                   clsid->Data1, clsid->Data2, clsid->Data3,
-                  iid->Data1, iid->Data2, iid->Data3);
+                  clsid->Data4[0], clsid->Data4[1], clsid->Data4[2], clsid->Data4[3],
+                  clsid->Data4[4], clsid->Data4[5], clsid->Data4[6], clsid->Data4[7],
+                  iid->Data1, iid->Data2, iid->Data3,
+                  iid->Data4[0], iid->Data4[1], iid->Data4[2], iid->Data4[3],
+                  iid->Data4[4], iid->Data4[5], iid->Data4[6], iid->Data4[7]);
     sc::log::Write(sc::log::Level::Warn, "xgameruntime", "QueryApiImpl", buf);
     return kRegDbClassNotReg;
 }
