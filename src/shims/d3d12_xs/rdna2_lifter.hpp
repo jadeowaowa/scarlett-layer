@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <map>
 #include <set>
@@ -154,13 +154,18 @@ struct UsageScan {
     bool hasBranches{false};
     bool usesVsColor{false};
     bool usesGidX{false};
+    uint32_t maxCbvDwords{64u};
 };
 
 inline void ScanProgram(const DecodedProgram& prog, bool isVs, UsageScan& u) {
-    auto markSrc = [&](uint16_t s) {
+    auto markSrc = [&](uint16_t s, uint32_t lit = 0u) {
         if (s <= kSrcSgprMax) u.sgprs.insert(static_cast<uint8_t>(s));
         else if (s >= kSrcVgprBase && s < kSrcVgprBase + 256u) {
             const uint8_t v = static_cast<uint8_t>(s - kSrcVgprBase);
+            u.vgprs.insert(v);
+            if (isVs && v >= 4u && v <= 7u) u.usesVsColor = true;
+        } else if (s == kSrcSdwa || s == kSrcDpp16) {
+            const uint8_t v = static_cast<uint8_t>(lit & 0xFFu);
             u.vgprs.insert(v);
             if (isVs && v >= 4u && v <= 7u) u.usesVsColor = true;
         }
@@ -200,13 +205,13 @@ inline void ScanProgram(const DecodedProgram& prog, bool isVs, UsageScan& u) {
             case InstFormat::Vop1:
                 if (i.opcode == kVop1Readfirstlane) markSdst(i.vdst);
                 else markV(i.vdst);
-                markSrc(i.src0);
+                markSrc(i.src0, i.literal32);
                 break;
             case InstFormat::Vop2:
-                markV(i.vdst); markSrc(i.src0); markSrc(i.src1);
+                markV(i.vdst); markSrc(i.src0, i.literal32); markSrc(i.src1, i.literal32);
                 break;
             case InstFormat::Vopc:
-                markSrc(i.src0); markSrc(i.src1);
+                markSrc(i.src0, i.literal32); markSrc(i.src1, i.literal32);
                 break;
             case InstFormat::Vop3:
                 if (i.opcode < 0x100u) {
@@ -214,21 +219,34 @@ inline void ScanProgram(const DecodedProgram& prog, bool isVs, UsageScan& u) {
                 } else if (i.opcode == kVop3ReadlaneB32) {
                     markSdst(i.vdst);
                 } else {
-                    markV(i.vdst, (i.opcode == kVop3MadU64U32) ? 2u : 1u);
+                    const bool is64Dst = (i.opcode == kVop3MadU64U32 || i.opcode == kVop3LshlrevB64 ||
+                                          i.opcode == kVop3LshrrevB64 || i.opcode == kVop3AshrrevI64);
+                    markV(i.vdst, is64Dst ? 2u : 1u);
+                    if (is64Dst && i.src1 >= kSrcVgprBase && i.src1 + 1u < kSrcVgprBase + 256u) {
+                        markV(static_cast<uint8_t>((i.src1 - kSrcVgprBase) + 1u));
+                    }
                     if (i.opcode == kVop3AddCoU32 || i.opcode == kVop3SubCoU32 || i.opcode == kVop3MadU64U32) {
                         markSdst(i.sdst);
                     }
                 }
                 if (i.opcode == kVop3LshlAddU32 && i.src0 == 2u) u.usesGidX = true;
-                markSrc(i.src0); markSrc(i.src1); markSrc(i.src2);
+                markSrc(i.src0, i.literal32); markSrc(i.src1, i.literal32); markSrc(i.src2, i.literal32);
                 break;
             case InstFormat::Vop3p:
-                markV(i.vdst); markSrc(i.src0); markSrc(i.src1); markSrc(i.src2);
+                markV(i.vdst); markSrc(i.src0, i.literal32); markSrc(i.src1, i.literal32); markSrc(i.src2, i.literal32);
                 break;
-            case InstFormat::Smem:
+            case InstFormat::Smem: {
                 u.hasSmem = true;
-                markSdst(i.smemSdata, std::max<uint8_t>(1u, SmemDwordCount(i.opcode)));
+                const uint8_t cnt = std::max<uint8_t>(1u, SmemDwordCount(i.opcode));
+                markSdst(i.smemSdata, cnt);
+                if ((i.smemOffset % 4u) == 0u) {
+                    const uint32_t endDw = (i.smemOffset / 4u) + cnt;
+                    if (endDw <= 16384u && endDw > u.maxCbvDwords) {
+                        u.maxCbvDwords = endDw;
+                    }
+                }
                 break;
+            }
             case InstFormat::Vintrp:
                 markV(i.vdst); u.interpParams.insert(i.vintrpAttr);
                 break;
@@ -289,28 +307,65 @@ inline bool EmitCommonInst(
         if (!FmtU(i.src0, i.hasLiteral, i.literal32, s0, err)) return false;
         const std::string d = SdstLhs(i.sdst);
         switch (i.opcode) {
-            case kSop1MovB32: case kSop1MovB64: case kSop1WqmB64:
+            case kSop1MovB32: case kSop1MovB64:
+            case kSop1WqmB32: case kSop1WqmB64:
+            case kSop1QuadmaskB32: case kSop1QuadmaskB64:
                 out += ind + d + " = " + s0 + ";\n"; break;
+            case kSop1CmovB32: case kSop1CmovB64:
+                out += ind + "if (_scc != 0u) " + d + " = " + s0 + ";\n"; break;
             case kSop1NotB32: case kSop1NotB64:
                 out += ind + d + " = (~(" + s0 + ")); _scc = (" + d + " != 0u) ? 1u : 0u;\n"; break;
-            case kSop1BrevB32:
+            case kSop1BrevB32: case kSop1BrevB64:
                 out += ind + d + " = reversebits(" + s0 + ");\n"; break;
+            case kSop1Bcnt0I32B32:
+                out += ind + d + " = countbits(~(" + s0 + ")); _scc = (" + d + " != 0u) ? 1u : 0u;\n"; break;
             case kSop1Bcnt1I32B32: case kSop1Bcnt1I32B64:
                 out += ind + d + " = countbits(" + s0 + "); _scc = (" + d + " != 0u) ? 1u : 0u;\n"; break;
+            case kSop1Ff0I32B32:
+                out += ind + d + " = firstbitlow(~(" + s0 + "));\n"; break;
+            case kSop1Ff1I32B32: case kSop1Ff1I32B64:
+                out += ind + d + " = firstbitlow(" + s0 + ");\n"; break;
             case kSop1FlbitI32B32:
                 out += ind + d + " = firstbithigh(" + s0 + ");\n"; break;
+            case kSop1SextI32I8:
+                out += ind + d + " = asuint((asint(" + s0 + ") << 24) >> 24);\n"; break;
+            case kSop1SextI32I16:
+                out += ind + d + " = asuint((asint(" + s0 + ") << 16) >> 16);\n"; break;
+            case kSop1Bitset0B32:
+                out += ind + d + " = (" + d + " & (~(1u << (" + s0 + " & 31u))));\n"; break;
             case kSop1Bitset1B32:
                 out += ind + d + " = (" + d + " | (1u << (" + s0 + " & 31u)));\n"; break;
+            case kSop1AbsI32:
+                out += ind + "{ int _v = asint(" + s0 + "); " + d + " = asuint(abs(_v)); _scc = (" + d + " != 0u) ? 1u : 0u; }\n"; break;
             case kSop1GetpcB64:
                 out += ind + d + " = 0u;\n"; break;
             case kSop1AndSaveexecB32: case kSop1AndSaveexecB64:
                 out += ind + "{ uint _old = _exec; uint _src = " + s0 + "; " + d + " = _old; _exec = (_old & _src); _scc = (_exec != 0u) ? 1u : 0u; }\n"; break;
             case kSop1OrSaveexecB32: case kSop1OrSaveexecB64:
                 out += ind + "{ uint _old = _exec; uint _src = " + s0 + "; " + d + " = _old; _exec = (_old | _src); _scc = (_exec != 0u) ? 1u : 0u; }\n"; break;
+            case kSop1XorSaveexecB32: case kSop1XorSaveexecB64:
+                out += ind + "{ uint _old = _exec; uint _src = " + s0 + "; " + d + " = _old; _exec = (_old ^ _src); _scc = (_exec != 0u) ? 1u : 0u; }\n"; break;
             case kSop1Andn2SaveexecB32: case kSop1Andn2SaveexecB64:
                 out += ind + "{ uint _old = _exec; uint _src = " + s0 + "; " + d + " = _old; _exec = (_src & (~_old)); _scc = (_exec != 0u) ? 1u : 0u; }\n"; break;
+            case kSop1Orn2SaveexecB32: case kSop1Orn2SaveexecB64:
+                out += ind + "{ uint _old = _exec; uint _src = " + s0 + "; " + d + " = _old; _exec = (_src | (~_old)); _scc = (_exec != 0u) ? 1u : 0u; }\n"; break;
+            case kSop1NandSaveexecB32: case kSop1NandSaveexecB64:
+                out += ind + "{ uint _old = _exec; uint _src = " + s0 + "; " + d + " = _old; _exec = (~(_old & _src)); _scc = (_exec != 0u) ? 1u : 0u; }\n"; break;
+            case kSop1NorSaveexecB32: case kSop1NorSaveexecB64:
+                out += ind + "{ uint _old = _exec; uint _src = " + s0 + "; " + d + " = _old; _exec = (~(_old | _src)); _scc = (_exec != 0u) ? 1u : 0u; }\n"; break;
+            case kSop1XnorSaveexecB32: case kSop1XnorSaveexecB64:
+                out += ind + "{ uint _old = _exec; uint _src = " + s0 + "; " + d + " = _old; _exec = (~(_old ^ _src)); _scc = (_exec != 0u) ? 1u : 0u; }\n"; break;
+            case kSop1Andn1SaveexecB32: case kSop1Andn1SaveexecB64:
+                out += ind + "{ uint _old = _exec; uint _src = " + s0 + "; " + d + " = _old; _exec = ((~_src) & _old); _scc = (_exec != 0u) ? 1u : 0u; }\n"; break;
+            case kSop1Orn1SaveexecB32: case kSop1Orn1SaveexecB64:
+                out += ind + "{ uint _old = _exec; uint _src = " + s0 + "; " + d + " = _old; _exec = ((~_src) | _old); _scc = (_exec != 0u) ? 1u : 0u; }\n"; break;
             default:
-                if (!opts.allowFallbackOps) { err = "unsupported SOP1 opcode"; return false; }
+                if (!opts.allowFallbackOps) {
+                    char b[64];
+                    std::snprintf(b, sizeof(b), "unsupported SOP1 opcode 0x%02X", i.opcode);
+                    err = b;
+                    return false;
+                }
                 out += ind + d + " = " + s0 + ";\n"; break;
         }
         return true;
@@ -420,14 +475,13 @@ inline bool EmitCommonInst(
     if (i.format == InstFormat::Smem) {
         const uint8_t cnt = SmemDwordCount(i.opcode);
         if (cnt == 0u) return true;
-        if ((i.smemOffset % 4u) != 0u || (i.smemOffset / 4u) + cnt > 64u) {
-            if (!opts.allowFallbackOps) {
-                err = "SMEM CBV offset out of range for Cb0 (max 256 B)";
-                return false;
-            }
+        const bool oob = (i.smemOffset % 4u) != 0u || (i.smemOffset / 4u) + cnt > 16384u;
+        if (oob && !opts.allowFallbackOps) {
+            err = "SMEM CBV offset out of range for Cb0 (max 65536 B)";
+            return false;
         }
         for (uint8_t k = 0; k < cnt; ++k) {
-            const uint32_t dw = ((i.smemOffset / 4u) + k) % 64u;
+            const uint32_t dw = oob ? (((i.smemOffset / 4u) + k) % 64u) : ((i.smemOffset / 4u) + k);
             const std::string lhs = SdstLhs(static_cast<uint8_t>(i.smemSdata + k));
             out += ind + lhs + " = asuint(gCb0[" + std::to_string(dw / 4u) + "]." + kCh[dw % 4u] + ");\n";
         }
@@ -619,6 +673,69 @@ inline bool EmitCommonInst(
             case kVop3LshlOrB32: out += ind + d + " = ((" + u0 + " << (" + u1 + " & 31u)) | " + u2 + ");\n"; break;
             case kVop3AndOrB32:  out += ind + d + " = ((" + u0 + " & " + u1 + ") | " + u2 + ");\n"; break;
             case kVop3Or3B32:    out += ind + d + " = (" + u0 + " | " + u1 + " | " + u2 + ");\n"; break;
+            case kVop3CubeidF32:
+                out += ind + "{ float _ax = abs(" + f0 + "), _ay = abs(" + f1 + "), _az = abs(" + f2 + "); float _id = (_az >= _ax && _az >= _ay) ? ((" + f2 + " < 0.0f) ? 5.0f : 4.0f) : ((_ay >= _ax) ? ((" + f1 + " < 0.0f) ? 3.0f : 2.0f) : ((" + f0 + " < 0.0f) ? 1.0f : 0.0f)); " + d + " = asuint(_id); }\n"; break;
+            case kVop3CubescF32:
+                out += ind + "{ float _ax = abs(" + f0 + "), _ay = abs(" + f1 + "), _az = abs(" + f2 + "); float _sc = (_az >= _ax && _az >= _ay) ? ((" + f2 + " < 0.0f) ? (-(" + f0 + ")) : (" + f0 + ")) : ((_ay >= _ax) ? (" + f0 + ") : ((" + f0 + " < 0.0f) ? (" + f2 + ") : (-(" + f2 + ")))); " + d + " = asuint(_sc); }\n"; break;
+            case kVop3CubetcF32:
+                out += ind + "{ float _ax = abs(" + f0 + "), _ay = abs(" + f1 + "), _az = abs(" + f2 + "); float _tc = (_az >= _ax && _az >= _ay) ? (-(" + f1 + ")) : ((_ay >= _ax) ? ((" + f1 + " < 0.0f) ? (-(" + f2 + ")) : (" + f2 + ")) : (-(" + f1 + "))); " + d + " = asuint(_tc); }\n"; break;
+            case kVop3CubemaF32:
+                emitF("2.0f * max(abs(" + f0 + "), max(abs(" + f1 + "), abs(" + f2 + ")))"); break;
+            case kVop3LshlrevB64: {
+                const std::string hiSrc = (i.src1 >= kSrcVgprBase && i.src1 + 1u < kSrcVgprBase + 256u)
+                    ? ("v" + std::to_string((i.src1 - kSrcVgprBase) + 1u)) : "0u";
+                out += ind + "{ uint _sh = (" + u0 + " & 63u); uint _lo = " + u1 + "; uint _hi = " + hiSrc
+                     + "; if (_sh == 0u) { " + d + " = _lo; v" + std::to_string(i.vdst + 1u) + " = _hi; }"
+                     + " else if (_sh < 32u) { " + d + " = (_lo << _sh); v" + std::to_string(i.vdst + 1u) + " = ((_hi << _sh) | (_lo >> (32u - _sh))); }"
+                     + " else { " + d + " = 0u; v" + std::to_string(i.vdst + 1u) + " = (_lo << (_sh - 32u)); } }\n";
+                break;
+            }
+            case kVop3LshrrevB64: {
+                const std::string hiSrc = (i.src1 >= kSrcVgprBase && i.src1 + 1u < kSrcVgprBase + 256u)
+                    ? ("v" + std::to_string((i.src1 - kSrcVgprBase) + 1u)) : "0u";
+                out += ind + "{ uint _sh = (" + u0 + " & 63u); uint _lo = " + u1 + "; uint _hi = " + hiSrc
+                     + "; if (_sh == 0u) { " + d + " = _lo; v" + std::to_string(i.vdst + 1u) + " = _hi; }"
+                     + " else if (_sh < 32u) { " + d + " = ((_lo >> _sh) | (_hi << (32u - _sh))); v" + std::to_string(i.vdst + 1u) + " = (_hi >> _sh); }"
+                     + " else { " + d + " = (_hi >> (_sh - 32u)); v" + std::to_string(i.vdst + 1u) + " = 0u; } }\n";
+                break;
+            }
+            case kVop3AshrrevI64: {
+                const std::string hiSrc = (i.src1 >= kSrcVgprBase && i.src1 + 1u < kSrcVgprBase + 256u)
+                    ? ("v" + std::to_string((i.src1 - kSrcVgprBase) + 1u)) : "0u";
+                out += ind + "{ uint _sh = (" + u0 + " & 63u); uint _lo = " + u1 + "; uint _hi = " + hiSrc
+                     + "; if (_sh == 0u) { " + d + " = _lo; v" + std::to_string(i.vdst + 1u) + " = _hi; }"
+                     + " else if (_sh < 32u) { " + d + " = ((_lo >> _sh) | (_hi << (32u - _sh))); v" + std::to_string(i.vdst + 1u) + " = asuint(asint(_hi) >> _sh); }"
+                     + " else { " + d + " = asuint(asint(_hi) >> (_sh - 32u)); v" + std::to_string(i.vdst + 1u) + " = asuint(asint(_hi) >> 31); } }\n";
+                break;
+            }
+            case kVop3AddNcU16:
+                out += ind + d + " = (((" + u0 + " & 0xFFFFu) + (" + u1 + " & 0xFFFFu)) & 0xFFFFu);\n"; break;
+            case kVop3SubNcU16:
+                out += ind + d + " = (((" + u0 + " & 0xFFFFu) - (" + u1 + " & 0xFFFFu)) & 0xFFFFu);\n"; break;
+            case kVop3MulLoU16:
+                out += ind + d + " = (((" + u0 + " & 0xFFFFu) * (" + u1 + " & 0xFFFFu)) & 0xFFFFu);\n"; break;
+            case kVop3LshlrevB16:
+                out += ind + d + " = (((" + u1 + " & 0xFFFFu) << (" + u0 + " & 15u)) & 0xFFFFu);\n"; break;
+            case kVop3LshrrevB16:
+                out += ind + d + " = (((" + u1 + " & 0xFFFFu) >> (" + u0 + " & 15u)) & 0xFFFFu);\n"; break;
+            case kVop3AshrrevI16:
+                out += ind + d + " = (asuint(((asint(" + u1 + ") << 16) >> 16) >> (" + u0 + " & 15u)) & 0xFFFFu);\n"; break;
+            case kVop3MbcntLoU32B32:
+                if (isCompute) {
+                    out += ind + "{ uint _lane = (gtid.x & 31u); uint _mask = (_lane == 0u) ? 0u : ((1u << _lane) - 1u); "
+                         + d + " = (countbits(" + u0 + " & _mask) + " + u1 + "); }\n";
+                } else {
+                    out += ind + d + " = " + u1 + ";\n";
+                }
+                break;
+            case kVop3MbcntHiU32B32:
+                if (isCompute) {
+                    out += ind + "{ uint _hiLane = (gtid.x >= 32u) ? (gtid.x - 32u) : 0u; uint _mask = (gtid.x >= 32u && _hiLane > 0u) ? ((1u << _hiLane) - 1u) : 0u; "
+                         + d + " = (countbits(" + u0 + " & _mask) + " + u1 + "); }\n";
+                } else {
+                    out += ind + d + " = " + u1 + ";\n";
+                }
+                break;
             case kVop3ReadlaneB32: out += ind + SdstLhs(i.vdst) + " = " + u0 + ";\n"; break;
             case kVop3WritelaneB32: out += ind + d + " = " + u0 + ";\n"; break;
             default:
@@ -835,8 +952,10 @@ inline bool EmitBodyWithControlFlow(
     };
 
     bool hasBranches = false;
+    bool hasBarrier = false;
     for (const auto& i : prog.insts) {
-        if (IsBranchOp(i)) { hasBranches = true; break; }
+        if (IsBranchOp(i)) hasBranches = true;
+        if (i.format == InstFormat::Sopp && i.opcode == kSoppBarrier) hasBarrier = true;
     }
 
     if (!hasBranches) {
@@ -863,6 +982,8 @@ inline bool EmitBodyWithControlFlow(
             if (idx + 1u < prog.insts.size()) leaders.insert(idx + 1u);
         } else if (i.format == InstFormat::Sopp && i.opcode == kSoppEndpgm && idx + 1u < prog.insts.size()) {
             leaders.insert(idx + 1u);
+        } else if (isCompute && hasBarrier && i.format == InstFormat::Sopp && i.opcode == kSoppBarrier && idx + 1u < prog.insts.size()) {
+            leaders.insert(idx + 1u);
         }
     }
 
@@ -870,7 +991,10 @@ inline bool EmitBodyWithControlFlow(
     std::map<size_t, uint32_t> instToBlock;
     for (size_t b = 0; b < blocks.size(); ++b) instToBlock[blocks[b]] = static_cast<uint32_t>(b);
 
-    body += "    uint _pc = 0u;\n    [loop] for (uint _step = 0u; _step < 1024u; ++_step) {\n        uint _cur = _pc;\n        _pc = 0xFFFFFFFFu;\n";
+    const bool uniformSyncLoop = isCompute && hasBarrier;
+    body += uniformSyncLoop
+        ? "    uint _pc = 0u;\n    [loop] for (uint _step = 0u; _step < 64u; ++_step) {\n        uint _cur = _pc;\n        _pc = 0xFFFFFFFFu;\n"
+        : "    uint _pc = 0u;\n    [loop] for (uint _step = 0u; _step < 1024u; ++_step) {\n        uint _cur = _pc;\n        _pc = 0xFFFFFFFFu;\n";
     for (size_t b = 0; b < blocks.size(); ++b) {
         const size_t start = blocks[b];
         const size_t end = (b + 1u < blocks.size()) ? blocks[b + 1u] : prog.insts.size();
@@ -907,12 +1031,17 @@ inline bool EmitBodyWithControlFlow(
                 terminated = true;
                 break;
             }
+            if (uniformSyncLoop && i.format == InstFormat::Sopp && i.opcode == kSoppBarrier) {
+                continue; // Synchronized uniformly at the bottom of the lockstep loop
+            }
             if (!emitOne(i, body)) return false;
         }
         if (!terminated) body += "            _pc = " + std::to_string(fallthrough) + "u;\n";
         body += "        }\n";
     }
-    body += "        if (_pc == 0xFFFFFFFFu) break;\n    }\n";
+    body += uniformSyncLoop
+        ? "        GroupMemoryBarrierWithGroupSync();\n    }\n"
+        : "        if (_pc == 0xFFFFFFFFu) break;\n    }\n";
     if (isCompute) hasExportOrStore = hasBufStore;
     return true;
 }
@@ -949,7 +1078,10 @@ inline bool LiftPixelShaderToHlsl(
     }
 
     outHlsl.clear();
-    if (u.hasSmem) outHlsl += "cbuffer Cb0 : register(b0) {\n    float4 gCb0[16];\n};\n";
+    if (u.hasSmem) {
+        const uint32_t cbVecs = std::max<uint32_t>(16u, (u.maxCbvDwords + 3u) / 4u);
+        outHlsl += "cbuffer Cb0 : register(b0) {\n    float4 gCb0[" + std::to_string(cbVecs) + "];\n};\n";
+    }
     if (u.hasMimgSample || u.hasMimgLoad) outHlsl += "Texture2D<float4> gTex0 : register(t0);\n";
     if (u.hasMimgSample) outHlsl += "SamplerState gSamp0 : register(s0);\n";
     if (hasBufLoad) outHlsl += (opts.byteAddressedBuffers ? "ByteAddressBuffer gIn : register(t1);\n" : "StructuredBuffer<uint> gIn : register(t1);\n");
@@ -986,7 +1118,10 @@ inline bool LiftVertexShaderToHlsl(
     }
 
     outHlsl.clear();
-    if (u.hasSmem) outHlsl += "cbuffer Cb0 : register(b0) {\n    float4 gCb0[16];\n};\n";
+    if (u.hasSmem) {
+        const uint32_t cbVecs = std::max<uint32_t>(16u, (u.maxCbvDwords + 3u) / 4u);
+        outHlsl += "cbuffer Cb0 : register(b0) {\n    float4 gCb0[" + std::to_string(cbVecs) + "];\n};\n";
+    }
     if (hasBufLoad) outHlsl += (opts.byteAddressedBuffers ? "ByteAddressBuffer gIn : register(t0);\n" : "StructuredBuffer<uint> gIn : register(t0);\n");
     outHlsl += "struct VSIn {\n    float4 inPos : POSITION;\n";
     if (u.usesVsColor) outHlsl += "    float4 inCol : COLOR;\n";
@@ -1028,7 +1163,10 @@ inline bool LiftComputeShaderToHlsl(
     }
 
     outHlsl.clear();
-    if (u.hasSmem) outHlsl += "cbuffer Cb0 : register(b0) {\n    float4 gCb0[16];\n};\n";
+    if (u.hasSmem) {
+        const uint32_t cbVecs = std::max<uint32_t>(16u, (u.maxCbvDwords + 3u) / 4u);
+        outHlsl += "cbuffer Cb0 : register(b0) {\n    float4 gCb0[" + std::to_string(cbVecs) + "];\n};\n";
+    }
     if (hasBufLoad) outHlsl += (opts.byteAddressedBuffers ? "ByteAddressBuffer gIn : register(t0);\n" : "StructuredBuffer<uint> gIn : register(t0);\n");
     if (u.hasMimgSample || u.hasMimgLoad) outHlsl += "Texture2D<float4> gTex0 : register(t1);\n";
     if (u.hasMimgSample) outHlsl += "SamplerState gSamp0 : register(s0);\n";

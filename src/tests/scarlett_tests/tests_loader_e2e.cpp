@@ -2007,3 +2007,176 @@ bool TestMalformedPeAndConfigHardening() {
     return true;
 }
 
+namespace {
+
+__declspec(noinline) bool TriggerRecoverableWriteAvForTelemetryTest(uintptr_t badAddr) {
+    __try {
+        volatile uint32_t* ptr = reinterpret_cast<volatile uint32_t*>(badAddr);
+        *ptr = 0x5CA7u;
+    } __except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION
+                    ? EXCEPTION_EXECUTE_HANDLER
+                    : EXCEPTION_CONTINUE_SEARCH) {
+        return true;
+    }
+    return false;
+}
+
+std::string ReadTelemetryFileUtf8(const std::filesystem::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        return {};
+    }
+    return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+}
+
+} // namespace
+
+bool TestImportTelemetryAndVehFlushE2E() {
+    HMODULE hookMod = GetModuleHandleW(L"scarlett_hook.dll");
+    HMODULE xgrMod  = GetModuleHandleW(L"xgameruntime.dll");
+    SC_EXPECT(hookMod != nullptr && xgrMod != nullptr);
+
+    using TelEnableFn   = BOOL(WINAPI*)(const wchar_t*, BOOL);
+    using TelDisableFn  = void(WINAPI*)();
+    using TelResetFn    = void(WINAPI*)();
+    using TelFlushFn    = BOOL(WINAPI*)(const char*);
+    using TelGetStatsFn = void(WINAPI*)(uint32_t*, uint64_t*, uint32_t*);
+    using SetPolicyFn   = void(WINAPI*)(const char*, uint64_t);
+
+    auto pEnable    = reinterpret_cast<TelEnableFn>(GetProcAddress(hookMod, "ScarlettHookTelemetryEnable"));
+    auto pDisable   = reinterpret_cast<TelDisableFn>(GetProcAddress(hookMod, "ScarlettHookTelemetryDisable"));
+    auto pReset     = reinterpret_cast<TelResetFn>(GetProcAddress(hookMod, "ScarlettHookTelemetryResetForTest"));
+    auto pFlush     = reinterpret_cast<TelFlushFn>(GetProcAddress(hookMod, "ScarlettHookTelemetryFlush"));
+    auto pGetStats  = reinterpret_cast<TelGetStatsFn>(GetProcAddress(hookMod, "ScarlettHookTelemetryGetStats"));
+    auto pSetPolicy = reinterpret_cast<SetPolicyFn>(GetProcAddress(hookMod, "ScarlettHookSetAutoStubPolicy"));
+    SC_EXPECT(pEnable && pDisable && pReset && pFlush && pGetStats && pSetPolicy);
+
+    const auto traceDir   = sc::vfs::TranslatePath(L"T:\\contrib_telemetry_e2e");
+    const auto mainReport = traceDir / L"telemetry_main.json";
+    const auto vehReport  = traceDir / L"telemetry_veh.json";
+    std::error_code ec;
+    std::filesystem::create_directories(traceDir, ec);
+    std::filesystem::remove(mainReport, ec);
+    std::filesystem::remove(vehReport, ec);
+
+    struct TelemetryScopeGuard {
+        TelResetFn resetFn;
+        std::filesystem::path dir;
+        ~TelemetryScopeGuard() {
+            SetEnvironmentVariableA("SCARLETT_AUTO_STUB", nullptr);
+            if (resetFn) {
+                resetFn();
+            }
+            std::error_code cleanupEc;
+            std::filesystem::remove_all(dir, cleanupEc);
+        }
+    } guard{ pReset, traceDir };
+
+    // 1. Disabled state is a safe no-op
+    pReset();
+    SC_EXPECT(!pFlush("should_not_write"));
+
+    // 2. Enable telemetry (VEH off for checkpoint assertions)
+    SC_EXPECT(pEnable(mainReport.c_str(), FALSE));
+
+    // 2a. Dynamic LoadLibraryW redirect to shim
+    HMODULE loadedXgr = LoadLibraryW(L"xgameruntime.dll");
+    SC_EXPECT(loadedXgr != nullptr);
+    FreeLibrary(loadedXgr);
+
+    // 2b. Resolved export lookup on a shimmed DLL
+    FARPROC pResolved = GetProcAddress(xgrMod, "XSystemGetDeviceType");
+    SC_EXPECT(pResolved != nullptr);
+
+    // 2c. Named auto-stub lookup + 3 runtime invocations (captures caller RVA)
+    using SixArgFn = uint64_t(WINAPI*)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+    FARPROC pNamedStub = GetProcAddress(xgrMod, "XTelemetryProbe_NamedMissing");
+    SC_EXPECT(pNamedStub != nullptr);
+    auto fnNamed = reinterpret_cast<SixArgFn>(pNamedStub);
+    for (int i = 0; i < 3; ++i) {
+        SC_EXPECT(fnNamed(1, 2, 3, 4, 5, 6) == 0x80004001ULL);
+    }
+
+    // 2d. Ordinal auto-stub + policy override + 1 runtime call
+    FARPROC pOrdStub = GetProcAddress(xgrMod, MAKEINTRESOURCEA(9876));
+    SC_EXPECT(pOrdStub != nullptr);
+    pSetPolicy("xgameruntime.dll!#9876", 0x2468ULL);
+    auto fnOrd = reinterpret_cast<SixArgFn>(pOrdStub);
+    SC_EXPECT(fnOrd(0, 0, 0, 0, 0, 0) == 0x2468ULL);
+
+    // 2e. Unresolved lookup when SCARLETT_AUTO_STUB=0
+    SetEnvironmentVariableA("SCARLETT_AUTO_STUB", "0");
+    FARPROC pUnresolved = GetProcAddress(xgrMod, "XTelemetryProbe_Unresolved");
+    SetEnvironmentVariableA("SCARLETT_AUTO_STUB", nullptr);
+    SC_EXPECT(pUnresolved == nullptr);
+
+    uint32_t uniqueSyms = 0;
+    uint64_t totalCalls = 0;
+    uint32_t redirects  = 0;
+    pGetStats(&uniqueSyms, &totalCalls, &redirects);
+    SC_EXPECT(uniqueSyms >= 4u);
+    SC_EXPECT(totalCalls >= 4u);
+    SC_EXPECT(redirects >= 1u);
+
+    SC_EXPECT(pFlush("e2e_checkpoint"));
+    const std::string jsonMain = ReadTelemetryFileUtf8(mainReport);
+    SC_EXPECT(!jsonMain.empty());
+    SC_EXPECT(jsonMain.find("\"schema_version\": 1") != std::string::npos);
+    SC_EXPECT(jsonMain.find("\"flush_reason\": \"e2e_checkpoint\"") != std::string::npos);
+    SC_EXPECT(jsonMain.find("\"api\": \"LoadLibraryW\"") != std::string::npos);
+    SC_EXPECT(jsonMain.find("\"symbol\": \"XSystemGetDeviceType\"") != std::string::npos);
+    SC_EXPECT(jsonMain.find("\"status\": \"resolved\"") != std::string::npos);
+    SC_EXPECT(jsonMain.find("\"symbol\": \"XTelemetryProbe_NamedMissing\"") != std::string::npos);
+    SC_EXPECT(jsonMain.find("\"hits\": 3") != std::string::npos);
+    SC_EXPECT(jsonMain.find("\"ordinal\": 9876") != std::string::npos);
+    SC_EXPECT(jsonMain.find("\"default_return\": \"0x2468\"") != std::string::npos);
+    SC_EXPECT(jsonMain.find("\"symbol\": \"XTelemetryProbe_Unresolved\"") != std::string::npos);
+    SC_EXPECT(jsonMain.find("\"status\": \"unresolved\"") != std::string::npos);
+    SC_EXPECT(jsonMain.find("\"in_target\": true") != std::string::npos);
+
+    // 3. Multi-threaded stub recording & 128-slot ring buffer wrap
+    FARPROC pMtStub = GetProcAddress(xgrMod, "XTelemetryProbe_MtWrap");
+    SC_EXPECT(pMtStub != nullptr);
+    auto fnMt = reinterpret_cast<SixArgFn>(pMtStub);
+
+    constexpr int kThreads = 4;
+    constexpr int kIters   = 40; // 160 calls > 128 ring capacity
+    std::vector<std::thread> workers;
+    workers.reserve(kThreads);
+    for (int t = 0; t < kThreads; ++t) {
+        workers.emplace_back([fnMt]() {
+            for (int i = 0; i < kIters; ++i) {
+                (void)fnMt(0, 0, 0, 0, 0, 0);
+            }
+        });
+    }
+    for (auto& w : workers) {
+        w.join();
+    }
+
+    SC_EXPECT(pFlush("mt_wrap"));
+    const std::string jsonMt = ReadTelemetryFileUtf8(mainReport);
+    SC_EXPECT(jsonMt.find("\"symbol\": \"XTelemetryProbe_MtWrap\"") != std::string::npos);
+    SC_EXPECT(jsonMt.find("\"hits\": 160") != std::string::npos);
+    SC_EXPECT(jsonMt.find("\"seq\": 0,") == std::string::npos); // Wrapped past oldest slot
+
+    // 4. Crash-safe VEH flush on recoverable access violation
+    pReset();
+    SC_EXPECT(pEnable(vehReport.c_str(), TRUE));
+    SC_EXPECT(fnNamed(1, 0, 0, 0, 0, 0) == 0x80004001ULL); // Seed recent_calls trail
+
+    const bool caughtAv = TriggerRecoverableWriteAvForTelemetryTest(static_cast<uintptr_t>(0x1234u));
+    SC_EXPECT(caughtAv);
+    pDisable();
+
+    const std::string jsonVeh = ReadTelemetryFileUtf8(vehReport);
+    SC_EXPECT(!jsonVeh.empty());
+    SC_EXPECT(jsonVeh.find("\"flush_reason\": \"veh_exception\"") != std::string::npos);
+    SC_EXPECT(jsonVeh.find("\"exception_code\": \"0xc0000005\"") != std::string::npos);
+    SC_EXPECT(jsonVeh.find("\"fault_in_target\": true") != std::string::npos);
+    SC_EXPECT(jsonVeh.find("\"access_type\": 1") != std::string::npos);
+    SC_EXPECT(jsonVeh.find("\"access_address\": \"0x1234\"") != std::string::npos);
+    SC_EXPECT(jsonVeh.find("\"symbol\": \"XTelemetryProbe_NamedMissing\"") != std::string::npos);
+
+    return true;
+}

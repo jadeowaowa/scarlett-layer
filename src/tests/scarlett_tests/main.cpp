@@ -17,6 +17,8 @@ bool TestRdna2OracleAluAndCbvDiffE2E();
 bool TestRdna2OracleFp16LdsAndCfDiffE2E();
 bool TestRdna2OracleControlFlowAndRealRgaCsDiffE2E();
 bool TestRdna2OracleGraphicsPipelineDiffE2E();
+bool TestImportTelemetryAndVehFlushE2E();
+bool TestRdna2OracleStrictCorpusOpsE2E();
 
 namespace {
 
@@ -104,6 +106,8 @@ constexpr TestEntry kTests[] = {
     {"Rdna2OracleFp16LdsAndCfDiffE2E",     TestRdna2OracleFp16LdsAndCfDiffE2E},
     {"Rdna2OracleControlFlowAndRealRgaCsDiffE2E", TestRdna2OracleControlFlowAndRealRgaCsDiffE2E},
     {"Rdna2OracleGraphicsPipelineDiffE2E", TestRdna2OracleGraphicsPipelineDiffE2E},
+    {"ImportTelemetryAndVehFlushE2E",     TestImportTelemetryAndVehFlushE2E},
+    {"Rdna2OracleStrictCorpusOpsE2E",      TestRdna2OracleStrictCorpusOpsE2E},
 };
 
 bool EqualsCaseInsensitive(std::string_view a, std::string_view b) {
