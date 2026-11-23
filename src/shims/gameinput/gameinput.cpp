@@ -304,7 +304,7 @@ public:
         GameInputMouseState ms{};
         std::vector<GameInputKeyState> keys;
 
-        if ((inputKind & GameInputKindGamepad) != 0 && (!device || device == m_gpDev)) {
+        if ((inputKind & (GameInputKindGamepad | 0x00020000u)) != 0 && (!device || device == m_gpDev)) {
             bool usedSynth = false;
             AcquireSRWLockShared(&g_synthLock);
             if (g_synthEnabled) { gp = g_synthState; usedSynth = true; }

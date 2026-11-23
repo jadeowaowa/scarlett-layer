@@ -1,4 +1,4 @@
-﻿#include "rdna2_oracle_harness.hpp"
+#include "rdna2_oracle_harness.hpp"
 
 using namespace sc::d3d12;
 using namespace sc::d3d12::rdna2;
@@ -376,6 +376,9 @@ bool TestRdna2OracleFp16LdsAndCfDiffE2E() {
         AppendSopp(w, kSoppBarrier, 0);
         AppendDs(w, 0x37u, 4, 1, 0, 0, 0x0100u);                // read back into v4, v5
         AppendVop1LiteralU32(w, kVop1MovB32, 6, 1024u);         // slot 256 in LDS
+        AppendVop1(w, kVop1MovB32, 7, 128u);                    // 0
+        AppendDs(w, 0x0Du, 0, 6, 7);                            // ds_write_b32: zero-init slot 256
+        AppendSopp(w, kSoppBarrier, 0);
         AppendVop1(w, kVop1MovB32, 7, 128u + 1u);
         AppendDs(w, 0x00u, 0, 6, 7);                            // ds_add_u32 (+1 * 64 lanes)
         AppendSopp(w, kSoppBarrier, 0);
