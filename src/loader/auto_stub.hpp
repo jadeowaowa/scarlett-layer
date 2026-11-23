@@ -29,11 +29,25 @@ struct AutoStubMeta {
     std::atomic<uint64_t> callCount{0};
 };
 
-inline uint64_t WINAPI ScarlettAutoStubDispatch(AutoStubMeta* meta) {
+using AutoStubCallObserver = void(*)(const AutoStubMeta& meta, const void* callerPc) noexcept;
+
+inline std::atomic<AutoStubCallObserver>& AutoStubObserverSlot() noexcept {
+    static std::atomic<AutoStubCallObserver> s_observer{nullptr};
+    return s_observer;
+}
+
+inline void SetAutoStubCallObserver(AutoStubCallObserver observer) noexcept {
+    AutoStubObserverSlot().store(observer, std::memory_order_release);
+}
+
+inline uint64_t WINAPI ScarlettAutoStubDispatch(AutoStubMeta* meta, const void* callerPc) {
     if (!meta) {
         return 0x80004001ULL;
     }
     const uint64_t hit = meta->callCount.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (auto observer = AutoStubObserverSlot().load(std::memory_order_acquire)) {
+        observer(*meta, callerPc);
+    }
     if (hit == 1) {
         char buf[256];
         std::snprintf(buf, sizeof(buf),
@@ -223,8 +237,9 @@ private:
             return false;
         }
 
-        // Strict x64 Windows ABI trampoline (34 bytes + 14x INT3 = 48 bytes):
+        // Strict x64 Windows ABI trampoline (39 bytes + 9x INT3 = 48 bytes):
         //   sub rsp, 0x28          ; align stack to 16B + 32B shadow space
+        //   mov rdx, [rsp + 0x28]  ; arg2 = caller return address
         //   mov rcx, <meta*>       ; arg1 = AutoStubMeta*
         //   mov rax, <dispatch*>   ; target = ScarlettAutoStubDispatch
         //   call rax               ; rax = defaultReturn
@@ -239,6 +254,7 @@ private:
 
         size_t o = 0;
         code[o++] = 0x48; code[o++] = 0x83; code[o++] = 0xEC; code[o++] = 0x28; // sub rsp, 0x28
+        code[o++] = 0x48; code[o++] = 0x8B; code[o++] = 0x54; code[o++] = 0x24; code[o++] = 0x28; // mov rdx, [rsp+0x28]
         code[o++] = 0x48; code[o++] = 0xB9;                                     // mov rcx, imm64
         std::memcpy(code + o, &metaAddr, sizeof(metaAddr)); o += sizeof(metaAddr);
         code[o++] = 0x48; code[o++] = 0xB8;                                     // mov rax, imm64
