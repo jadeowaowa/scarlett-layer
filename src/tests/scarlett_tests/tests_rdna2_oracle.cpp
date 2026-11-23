@@ -1,4 +1,4 @@
-﻿#include "rdna2_oracle_harness.hpp"
+#include "rdna2_oracle_harness.hpp"
 
 using namespace sc::d3d12;
 using namespace sc::d3d12::rdna2;
@@ -795,6 +795,132 @@ bool TestRdna2OracleGraphicsPipelineDiffE2E() {
         SC_EXPECT(runGfx("28_full_rdna2_vs_ps_cbv_diff", { passVs->GetBufferPointer(), passVs->GetBufferSize() },
                          { oBlob->GetBufferPointer(), oBlob->GetBufferSize() },
                          { scxsVs.data(), scxsVs.size() }, { scxsPs.data(), scxsPs.size() }));
+    }
+
+    return true;
+}
+
+bool TestRdna2OracleStrictCorpusOpsE2E() {
+    using namespace sc::test::oracle;
+    ComputeOracle o;
+    SC_EXPECT(o.Init());
+
+    // Case 29: V_MBCNT_LO_U32_B32 (0x365) + V_MBCNT_HI_U32_B32 (0x366) lane-ID prologue
+    {
+        std::vector<uint32_t> w;
+        AppendVop3(w, kVop3MbcntLoU32B32, 1, 193u, 128u, 128u);            // v1 = mbcnt_lo(~0, 0)
+        AppendVop3(w, kVop3MbcntHiU32B32, 1, 193u, VgprSrc(1), 128u);      // v1 = mbcnt_hi(~0, v1) == gtid.x
+        AppendMubufStoreDword(w, 1, 0);
+        AppendSopp(w, kSoppEndpgm);
+        const char* hlsl =
+            "RWStructuredBuffer<uint> gOut : register(u0);\n"
+            "[numthreads(64,1,1)] void CSMain(uint3 dtid : SV_DispatchThreadID, uint3 gtid : SV_GroupThreadID) {\n"
+            "    uint lo = countbits(0xFFFFFFFFu & ((gtid.x & 31u) == 0u ? 0u : ((1u << (gtid.x & 31u)) - 1u)));\n"
+            "    uint hi = (gtid.x >= 32u && (gtid.x - 32u) > 0u) ? countbits(0xFFFFFFFFu & ((1u << (gtid.x - 32u)) - 1u)) : 0u;\n"
+            "    gOut[dtid.x] = lo + hi;\n"
+            "}\n";
+        SC_EXPECT(o.Run("29_v_mbcnt_lo_hi_lane_id", hlsl, w));
+    }
+
+    // Case 30: Corpus VOP3 ops (V_MUL_LO_U16 0x305, V_LSHLREV_B16 0x314, V_LSHLREV_B64 0x2FF, V_CUBEMA_F32 0x147)
+    {
+        std::vector<uint32_t> w;
+        AppendMubufLoadDword(w, 1, 0);                                     // v1 = gIn[tid]
+        AppendSopp(w, kSoppWaitcnt, 0);
+        AppendVop3(w, kVop3MulLoU16, 2, VgprSrc(1), 133u, 128u);           // v2 = (v1 * 5) & 0xFFFF
+        AppendVop3(w, kVop3LshlrevB16, 2, 130u, VgprSrc(2), 128u);         // v2 = (v2 << 2) & 0xFFFF
+        AppendVop1(w, kVop1MovB32, 4, VgprSrc(1));
+        AppendVop1(w, kVop1MovB32, 5, 128u);
+        AppendVop3(w, kVop3LshlrevB64, 6, 132u, VgprSrc(4), 128u);         // v[6:7] = (uint64(v4) << 4)
+        AppendVop2(w, kVop2XorB32, 2, VgprSrc(6), 2);
+        AppendVop2(w, kVop2XorB32, 2, VgprSrc(7), 2);
+        AppendVop3(w, kVop3CubemaF32, 8, kSrcInlineOne, kSrcInlineNegTwo, kSrcInlineFour); // 2 * max(1, 2, 4) = 8.0f
+        AppendVop1(w, kVop1CvtU32F32, 8, VgprSrc(8));                      // 8u
+        AppendVop2(w, kVop2AddNcU32, 2, VgprSrc(8), 2);
+        AppendMubufStoreDword(w, 2, 0);
+        AppendSopp(w, kSoppEndpgm);
+        const char* hlsl =
+            "StructuredBuffer<uint> gIn : register(t0); RWStructuredBuffer<uint> gOut : register(u0);\n"
+            "[numthreads(64,1,1)] void CSMain(uint3 dtid : SV_DispatchThreadID) {\n"
+            "    uint x = gIn[dtid.x];\n"
+            "    uint m = (((x & 0xFFFFu) * 5u) & 0xFFFFu);\n"
+            "    uint r = ((m << 2u) & 0xFFFFu);\n"
+            "    uint lo = (x << 4u); uint hi = (x >> 28u);\n"
+            "    gOut[dtid.x] = (r ^ lo ^ hi) + 8u;\n"
+            "}\n";
+        SC_EXPECT(o.Run("30_vop3_u16_shl64_cubema", hlsl, w));
+    }
+
+    // Case 31: Corpus SOP1 ops (S_WQM_B64 0x0A, S_CMOV_B32 0x05, S_ABS_I32 0x34)
+    {
+        std::vector<uint32_t> w;
+        AppendSop1Literal(w, kSop1MovB32, 4, static_cast<uint32_t>(-42));
+        AppendSop1(w, kSop1AbsI32, 5, SgprSrc(4));                         // s5 = 42, _scc = 1
+        AppendSop1(w, kSop1CmovB32, 6, SgprSrc(5));                        // s6 = 42
+        AppendSop1(w, kSop1WqmB64, 8, SgprSrc(6));                         // s8 = 42
+        AppendVop2(w, kVop2AddNcU32, 1, SgprSrc(8), 0);                    // v1 = tid + 42
+        AppendMubufStoreDword(w, 1, 0);
+        AppendSopp(w, kSoppEndpgm);
+        const char* hlsl =
+            "RWStructuredBuffer<uint> gOut : register(u0);\n"
+            "[numthreads(64,1,1)] void CSMain(uint3 dtid : SV_DispatchThreadID) {\n"
+            "    gOut[dtid.x] = dtid.x + 42u;\n"
+            "}\n";
+        SC_EXPECT(o.Run("31_sop1_wqm64_cmov_abs", hlsl, w));
+    }
+
+    // Case 32: Branched compute shader with s_barrier + LDS exchange (zero FXC X3663 error)
+    {
+        std::vector<uint32_t> w;
+        AppendVop2(w, kVop2LshlrevB32, 1, 130u, 0);                        // v1 = tid * 4 (LDS byte offset)
+        AppendVop2(w, kVop2AddNcU32, 2, 138u, 0);                          // v2 = tid + 10
+        AppendDs(w, 0x0Du, 0, 1, 2);                                       // ds_write_b32 lds[tid] = tid + 10
+        AppendSopc(w, kSopcCmpEqU32, 128u, 128u);                          // _scc = 1
+        AppendSopp(w, kSoppCbranchScc1, 1u);                               // skip 1 dword (nop)
+        AppendSopp(w, kSoppNop, 0);
+        AppendSopp(w, kSoppBarrier, 0);                                    // s_barrier inside branched CFG
+        AppendVop2(w, kVop2XorB32, 3, 129u, 0);                            // v3 = tid ^ 1
+        AppendVop2(w, kVop2LshlrevB32, 3, 130u, 3);                        // v3 = (tid ^ 1) * 4
+        AppendDs(w, 0x36u, 4, 3);                                          // ds_read_b32 v4 = lds[tid ^ 1]
+        AppendMubufStoreDword(w, 4, 0);
+        AppendSopp(w, kSoppEndpgm);
+        const char* hlsl =
+            "RWStructuredBuffer<uint> gOut : register(u0);\n"
+            "[numthreads(64,1,1)] void CSMain(uint3 dtid : SV_DispatchThreadID) {\n"
+            "    gOut[dtid.x] = (dtid.x ^ 1u) + 10u;\n"
+            "}\n";
+        SC_EXPECT(o.Run("32_branched_s_barrier_lds_sync", hlsl, w));
+    }
+
+    // Case 33: Strict lift checks for dynamic Cb0 (>256 B SMEM) and SDWA VGPR declaration (v34)
+    {
+        std::vector<uint32_t> cbW;
+        AppendSmemLoad(cbW, kSmemLoadDword, 4, 0, 0x120u);                 // 288 B > old 256 B cap
+        AppendVop1(cbW, kVop1MovB32, 1, SgprSrc(4));
+        AppendMubufStoreDword(cbW, 1, 0);
+        AppendSopp(cbW, kSoppEndpgm);
+
+        DecodedProgram prog{};
+        std::string hlsl, err;
+        LiftOptions strictOpts{};
+        strictOpts.allowFallbackOps = false;
+        SC_EXPECT(DecodeProgram(cbW.data(), cbW.size() * sizeof(uint32_t), prog, err));
+        SC_EXPECT(LiftComputeShaderToHlsl(prog, hlsl, err, strictOpts));
+        SC_EXPECT(hlsl.find("float4 gCb0[19];") != std::string::npos);
+
+        // SDWA operand referencing v34 must declare v34 and compile cleanly with D3DCompile
+        std::vector<uint32_t> sdwaW;
+        AppendVop1(sdwaW, kVop1MovB32, 1, kSrcSdwa);
+        sdwaW.push_back(34u);                                              // SDWA src0 = v34
+        AppendMubufStoreDword(sdwaW, 1, 0);
+        AppendSopp(sdwaW, kSoppEndpgm);
+        SC_EXPECT(DecodeProgram(sdwaW.data(), sdwaW.size() * sizeof(uint32_t), prog, err));
+        SC_EXPECT(LiftComputeShaderToHlsl(prog, hlsl, err, strictOpts));
+        SC_EXPECT(hlsl.find("uint v34 = 0u;") != std::string::npos);
+
+        Microsoft::WRL::ComPtr<ID3DBlob> blob, errBlob;
+        SC_EXPECT(SUCCEEDED(D3DCompile(hlsl.c_str(), hlsl.size(), "sdwa_v34", nullptr, nullptr,
+                                       "CSMain", "cs_5_0", 0, 0, &blob, &errBlob)));
     }
 
     return true;

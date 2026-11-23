@@ -9,4 +9,4 @@
 - **Human-Only Gates:** Never close `TODO(jade)` items on the owner's behalf (independent human Windows-internals loader audit of `pe_patcher.cpp` / `scarlett_hook.cpp`, GitHub `v1.0.0` release retitling).
 - **Legal & Scope Boundaries:** Reject encrypted XVD/XVC containers unconditionally. Never commit Microsoft GDK headers, retail dumps, leaked binaries, console keys, or GPL-licensed third-party code.
 - **Status & Drift Check:** Run `py tools\generate_status.py`, `py tools\generate_status.py --check`, and `py tools\build_wiki.py` before committing. Never hand-edit `docs/STATUS.md`.
-- **Current Baseline:** Sprint 71 (`79/79` Tier 1 synthetic CTests: `43 cpu`, `36 gpu`; `0` Tier 2 automated external Xbox-targeted binary tests; Apache-2.0). Next focus: Sprints 72-73 in `docs/ROADMAP.md`.
+- **Current Baseline:** Sprint 71 (`80/80` Tier 1 synthetic CTests: `43 cpu`, `37 gpu`; `0` Tier 2 automated external Xbox-targeted binary tests; Apache-2.0). Next focus: Sprints 72-73 in `docs/ROADMAP.md`.

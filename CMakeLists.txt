@@ -258,6 +258,7 @@ set(_sc_gpu_tests
     Rdna2OracleFp16LdsAndCfDiffE2E
     Rdna2OracleControlFlowAndRealRgaCsDiffE2E
     Rdna2OracleGraphicsPipelineDiffE2E
+    Rdna2OracleStrictCorpusOpsE2E
 )
 
 set(_sc_registered_count 0)
