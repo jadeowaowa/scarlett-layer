@@ -44,5 +44,11 @@ echo [ERROR] cmake.exe not found on PATH or in Visual Studio installation.
 exit /b 1
 
 :run_build
+rem Fresh clones have no build tree yet; configure it the same way CI does.
+if exist "%~dp0..\build\CMakeCache.txt" goto :do_build
+"%CMAKE_EXE%" -S "%~dp0.." -B "%~dp0..\build" -G Ninja -DCMAKE_BUILD_TYPE=Debug
+if errorlevel 1 exit /b %errorlevel%
+
+:do_build
 "%CMAKE_EXE%" --build "%~dp0..\build" %*
 exit /b %errorlevel%
