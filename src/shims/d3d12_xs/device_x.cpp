@@ -4142,10 +4142,6 @@ public:
         if (TryTranslateShadowCpuDescriptorHandle(DestDescriptor, shadowDst)) {
             m_device->CreateConstantBufferView(&clean, shadowDst);
         }
-        D3D12_CPU_DESCRIPTOR_HANDLE shadowDst{};
-        if (TryTranslateShadowCpuDescriptorHandle(DestDescriptor, shadowDst)) {
-            m_device->CreateConstantBufferView(&clean, shadowDst);
-        }
     }
     void STDMETHODCALLTYPE CreateShaderResourceView(
         ID3D12Resource* pResource, const D3D12_SHADER_RESOURCE_VIEW_DESC* pDesc,
@@ -4223,10 +4219,6 @@ public:
             if (modified) useDesc = &cleanDesc;
         }
         m_device->CreateUnorderedAccessView(nativeRes, nativeCounter, useDesc, dst);
-        D3D12_CPU_DESCRIPTOR_HANDLE shadowDst{};
-        if (TryTranslateShadowCpuDescriptorHandle(DestDescriptor, shadowDst)) {
-            m_device->CreateUnorderedAccessView(nativeRes, nativeCounter, useDesc, shadowDst);
-        }
         D3D12_CPU_DESCRIPTOR_HANDLE shadowDst{};
         if (TryTranslateShadowCpuDescriptorHandle(DestDescriptor, shadowDst)) {
             m_device->CreateUnorderedAccessView(nativeRes, nativeCounter, useDesc, shadowDst);
