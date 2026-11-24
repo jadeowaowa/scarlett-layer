@@ -525,10 +525,27 @@ bool TestScarlettTitleBringUpE2E() {
     struct LocalKeyState { uint32_t scanCode, codePoint; uint8_t vk; bool isDead; };
     struct ILocalGameInputReading : public IUnknown {
         virtual uint32_t STDMETHODCALLTYPE GetInputKind() = 0;
+        virtual uint64_t STDMETHODCALLTYPE GetSequenceNumber(uint32_t) = 0;
         virtual uint64_t STDMETHODCALLTYPE GetTimestamp() = 0;
-        virtual bool     STDMETHODCALLTYPE GetGamepadState(LocalGamepadState*) = 0;
+        virtual void     STDMETHODCALLTYPE GetDevice(void**) = 0;
+        virtual bool     STDMETHODCALLTYPE GetRawReport(void**) = 0;
+        virtual uint32_t STDMETHODCALLTYPE GetControllerAxisCount() = 0;
+        virtual uint32_t STDMETHODCALLTYPE GetControllerAxisState(uint32_t, float*) = 0;
+        virtual uint32_t STDMETHODCALLTYPE GetControllerButtonCount() = 0;
+        virtual uint32_t STDMETHODCALLTYPE GetControllerButtonState(uint32_t, bool*) = 0;
+        virtual uint32_t STDMETHODCALLTYPE GetControllerSwitchCount() = 0;
+        virtual uint32_t STDMETHODCALLTYPE GetControllerSwitchState(uint32_t, uint32_t*) = 0;
         virtual uint32_t STDMETHODCALLTYPE GetKeyCount() = 0;
         virtual uint32_t STDMETHODCALLTYPE GetKeyState(uint32_t, LocalKeyState*) = 0;
+        virtual bool     STDMETHODCALLTYPE GetMouseState(void*) = 0;
+        virtual uint32_t STDMETHODCALLTYPE GetTouchCount() = 0;
+        virtual uint32_t STDMETHODCALLTYPE GetTouchState(uint32_t, void*) = 0;
+        virtual bool     STDMETHODCALLTYPE GetMotionState(void*) = 0;
+        virtual bool     STDMETHODCALLTYPE GetArcadeStickState(void*) = 0;
+        virtual bool     STDMETHODCALLTYPE GetFlightStickState(void*) = 0;
+        virtual bool     STDMETHODCALLTYPE GetGamepadState(LocalGamepadState*) = 0;
+        virtual bool     STDMETHODCALLTYPE GetRacingWheelState(void*) = 0;
+        virtual bool     STDMETHODCALLTYPE GetUiNavigationState(void*) = 0;
     };
     struct ILocalGameInput : public IUnknown {
         virtual uint64_t STDMETHODCALLTYPE GetCurrentTimestamp() = 0;
@@ -833,10 +850,27 @@ bool TestScarlettFullStack50SprintCapstoneE2E() {
     struct LocalKey { uint32_t sc, cp; uint8_t vk; bool dead; };
     struct ILocalGIRead : public IUnknown {
         virtual uint32_t STDMETHODCALLTYPE GetInputKind() = 0;
+        virtual uint64_t STDMETHODCALLTYPE GetSequenceNumber(uint32_t) = 0;
         virtual uint64_t STDMETHODCALLTYPE GetTimestamp() = 0;
-        virtual bool     STDMETHODCALLTYPE GetGamepadState(LocalPad*) = 0;
+        virtual void     STDMETHODCALLTYPE GetDevice(void**) = 0;
+        virtual bool     STDMETHODCALLTYPE GetRawReport(void**) = 0;
+        virtual uint32_t STDMETHODCALLTYPE GetControllerAxisCount() = 0;
+        virtual uint32_t STDMETHODCALLTYPE GetControllerAxisState(uint32_t, float*) = 0;
+        virtual uint32_t STDMETHODCALLTYPE GetControllerButtonCount() = 0;
+        virtual uint32_t STDMETHODCALLTYPE GetControllerButtonState(uint32_t, bool*) = 0;
+        virtual uint32_t STDMETHODCALLTYPE GetControllerSwitchCount() = 0;
+        virtual uint32_t STDMETHODCALLTYPE GetControllerSwitchState(uint32_t, uint32_t*) = 0;
         virtual uint32_t STDMETHODCALLTYPE GetKeyCount() = 0;
         virtual uint32_t STDMETHODCALLTYPE GetKeyState(uint32_t, LocalKey*) = 0;
+        virtual bool     STDMETHODCALLTYPE GetMouseState(void*) = 0;
+        virtual uint32_t STDMETHODCALLTYPE GetTouchCount() = 0;
+        virtual uint32_t STDMETHODCALLTYPE GetTouchState(uint32_t, void*) = 0;
+        virtual bool     STDMETHODCALLTYPE GetMotionState(void*) = 0;
+        virtual bool     STDMETHODCALLTYPE GetArcadeStickState(void*) = 0;
+        virtual bool     STDMETHODCALLTYPE GetFlightStickState(void*) = 0;
+        virtual bool     STDMETHODCALLTYPE GetGamepadState(LocalPad*) = 0;
+        virtual bool     STDMETHODCALLTYPE GetRacingWheelState(void*) = 0;
+        virtual bool     STDMETHODCALLTYPE GetUiNavigationState(void*) = 0;
     };
     struct ILocalGI : public IUnknown {
         virtual uint64_t STDMETHODCALLTYPE GetCurrentTimestamp() = 0;
