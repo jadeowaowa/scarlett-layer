@@ -1,7 +1,7 @@
 # Scarlett Layer — AI Context Snapshot
 
-**Commit:** `91ebc75` (#154) | **Generated:** 2026-11-23 22:55 UTC  
-**Totals:** 94 files (38,527 LOC) | 16 shims | 78 CTest checks
+**Commit:** `83fd050` (#158) | **Generated:** 2026-11-24 00:07 UTC  
+**Totals:** 94 files (38,740 LOC) | 16 shims | 78 CTest checks
 
 ---
 
@@ -41,6 +41,7 @@
 | Sprint 70 | Real 12 KiB `emoose/xvdtool` XVD offsets (`0x280`/`0x284`/`0x288`/`0x28C`/`0x470`) & hash-tree geometry, `game_config.hpp` path containment, `pe_inspector.hpp` bounds/overflow hardening, `tools/generate_status.py` CI drift check | Done (74/74 Tier 1) |
 | Sprint 71 | 28-case independent-oracle RDNA2 differential GPU suite (4 CTests), lifter/CFG/FP16/LDS fixes, `rdna2_sweep.exe` + 255-ELF real `gfx1030` corpus sweep (`docs/RDNA2_CORPUS_REPORT.md`) | Done (78/78 Tier 1) |
 | Sprint 72 | Retail Scarlett bring-up milestones: `dstorage_xs` `SCLZ` zlib block inflation, `xg_xs` `GetResourceTiling` packed-mip splitting, `d3d12_xs` GPU descriptor-table validation + depth-stencil flag sanitization + `CreateCommandListX`/`ResetX` shims, new `chad`/`xapu`/`xcrdapi` shims; reaches `PresentX` `frame=120` (next blocker: `DXGI_ERROR_DEVICE_REMOVED`) | In Progress |
+| Sprint 73 | `d3d12_xs` stability & D3D12 validation fixes: 4 KiB `m_xboxInlinePad` on `XboxD3D12GraphicsCommandList`, `CreateUnorderedAccessView` non-planar `PlaneSlice` clamp, `CreateRenderTargetView` null-RTV guard for unsupported/non-RT formats (`B4G4R4A4_UNORM`), CPU-readable shadow descriptor heap mirroring for `SHADER_VISIBLE` `CopyDescriptors*`, and `DrawInstanced` default `TRIANGLELIST` fallback | Done |
 
 ---
 
@@ -103,7 +104,7 @@
   261  src/shims/d3d12_xs/d3d12_xs.hpp
    84  src/shims/d3d12_xs/d3d12_xs_internal.hpp
    85  src/shims/d3d12_xs/d3d12_xs_utils.cpp
- 5303  src/shims/d3d12_xs/device_x.cpp
+ 5513  src/shims/d3d12_xs/device_x.cpp
  1040  src/shims/d3d12_xs/rdna2_isa.hpp
  1052  src/shims/d3d12_xs/rdna2_lifter.hpp
   201  src/shims/d3d12_xs/shader_inspector.hpp
@@ -160,7 +161,7 @@
  1312  src/tests/scarlett_tests/tests_d3d12_core.cpp
  1949  src/tests/scarlett_tests/tests_d3d12_shaders_present.cpp
  2009  src/tests/scarlett_tests/tests_loader_e2e.cpp
-  801  src/tests/scarlett_tests/tests_rdna2_oracle.cpp
+  804  src/tests/scarlett_tests/tests_rdna2_oracle.cpp
   938  src/tests/scarlett_tests/tests_runtime_io.cpp
  1597  src/tests/scarlett_tests/tests_storage_swizzle.cpp
   113  src/tools/rdna2_sweep/main.cpp
@@ -191,7 +192,7 @@
 **DLL Exports (`.def`):** `XDspActivate`, `XDspConnectWithMaximumStreamLimit`, `XDspDeactivate`, `XDspDisconnect`, `XDspSubmitCommand`
 
 ## `d3d12_xs.dll`
-**Files:** `src/shims/d3d12_xs/command_list_x.cpp` (187 L), `src/shims/d3d12_xs/command_queue_x.cpp` (480 L), `src/shims/d3d12_xs/d3d12_xs.cpp` (380 L), `src/shims/d3d12_xs/d3d12_xs.cpp.bak` (374 L), `src/shims/d3d12_xs/d3d12_xs.def` (9 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (261 L), `src/shims/d3d12_xs/d3d12_xs_internal.hpp` (84 L), `src/shims/d3d12_xs/d3d12_xs_utils.cpp` (85 L), `src/shims/d3d12_xs/device_x.cpp` (5303 L), `src/shims/d3d12_xs/device_x.cpp.bak` (4488 L), `src/shims/d3d12_xs/device_x.cpp.bak2` (4714 L), `src/shims/d3d12_xs/device_x.cpp.bak3` (4785 L), `src/shims/d3d12_xs/device_x.cpp.bak4` (5049 L), `src/shims/d3d12_xs/device_x.cpp.bak5` (5077 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1040 L), `src/shims/d3d12_xs/rdna2_lifter.hpp` (1052 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_stripper.hpp` (272 L), `src/shims/d3d12_xs/shader_translator.hpp` (405 L)
+**Files:** `src/shims/d3d12_xs/command_list_x.cpp` (187 L), `src/shims/d3d12_xs/command_queue_x.cpp` (480 L), `src/shims/d3d12_xs/d3d12_xs.cpp` (380 L), `src/shims/d3d12_xs/d3d12_xs.cpp.bak` (374 L), `src/shims/d3d12_xs/d3d12_xs.def` (9 L), `src/shims/d3d12_xs/d3d12_xs.hpp` (261 L), `src/shims/d3d12_xs/d3d12_xs_internal.hpp` (84 L), `src/shims/d3d12_xs/d3d12_xs_utils.cpp` (85 L), `src/shims/d3d12_xs/device_x.cpp` (5513 L), `src/shims/d3d12_xs/device_x.cpp.bak` (4488 L), `src/shims/d3d12_xs/device_x.cpp.bak2` (4714 L), `src/shims/d3d12_xs/device_x.cpp.bak3` (4785 L), `src/shims/d3d12_xs/device_x.cpp.bak4` (5049 L), `src/shims/d3d12_xs/device_x.cpp.bak5` (5077 L), `src/shims/d3d12_xs/rdna2_isa.hpp` (1040 L), `src/shims/d3d12_xs/rdna2_lifter.hpp` (1052 L), `src/shims/d3d12_xs/shader_inspector.hpp` (201 L), `src/shims/d3d12_xs/shader_stripper.hpp` (272 L), `src/shims/d3d12_xs/shader_translator.hpp` (405 L)
 
 **DLL Exports (`.def`):** `D3D12XboxCreateDevice`, `D3D12SerializeRootSignature = ScarlettSerializeRootSignature`, `D3D12XboxSetProcessDebugFlags`, `D3DMapEsramMemory`, `D3D12ConfigureVirtualMemoryX`, `D3D12SerializeVersionedRootSignature = ScarlettSerializeVersionedRootSignature`, `D3D12CreateRootSignatureDeserializer = ScarlettCreateRootSignatureDeserializer`
 
@@ -593,13 +594,13 @@
 ```
 
 ## 6. Recent Git History
+- `83fd050 Fix CI: echo 0x20000 GameInputKind bit in GetCurrentReading when requested`
+- `2ce4788 Fix CI: accept 0x20000 GameInputKind mask and zero-init LDS slot in Case 17`
+- `17a4b08 Sync README.md Live Progress block with Sprint 72 status`
+- `1dce176 Sprint 72 checkpoint: retail Scarlett bring-up (SCLZ zlib, packed-mip tiling, descriptor-table guard, frame=120)`
 - `91ebc75 feat(gameinput,xgameruntime): GDK v0 gamepad polling + IXUser 2022 and XUserDeviceAssociation`
 - `7a7a092 docs: regenerate status after README edit`
 - `1f90711 Update README.md`
 - `f60b38e Merge pull request #5 from jadeowaowa/sprint-72-scarlett-binary-bringup`
 - `8097519 docs: add dynamic README progress dashboard and update Sprint 72 status & wiki`
 - `f0a8e01 feat(xg_xs,d3d12_xs): GCN 1D_THIN layout and shadow texture detiler`
-- `9e0c298 wip(terraria): PresentX menu rendering, CBV bounce ring, GDK xg_xs, shadow texture upload`
-- `f4f0d7e Sprint 71: RDNA2 independent-oracle suite (28 cases) & 255-ELF gfx1030 corpus sweep`
-- `2de878f Merge sprint-70-xvd-and-parser-hardening: real XVD geometry, parser hardening, and status CI (74/74)`
-- `385b503 feat(xvd,loader,ci): migrate real 12 KiB XVD geometry, harden PE/GameConfig parsers, add status drift check`

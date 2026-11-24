@@ -72,7 +72,19 @@ bool FormatDisallowsDesktopUav(DXGI_FORMAT fmt) {
     }
 }
 
+DXGI_FORMAT SanitizeXboxDxgiFormat(DXGI_FORMAT fmt) {
+    switch (static_cast<uint32_t>(fmt)) {
+    case 117u: return DXGI_FORMAT_R24G8_TYPELESS;           // Xbox R16G8_TYPELESS
+    case 118u: return DXGI_FORMAT_D24_UNORM_S8_UINT;        // Xbox D16_UNORM_S8_UINT
+    case 119u: return DXGI_FORMAT_R24_UNORM_X8_TYPELESS;    // Xbox R16_UNORM_X8_TYPELESS
+    case 120u: return DXGI_FORMAT_X24_TYPELESS_G8_UINT;     // Xbox X16_TYPELESS_G8_UINT
+    default:   return fmt;
+    }
+}
+
 D3D12_RESOURCE_DESC SanitizeXboxResourceDesc(const D3D12_RESOURCE_DESC& desc, const char* caller) {
+    const DXGI_FORMAT cleanFmt = SanitizeXboxDxgiFormat(desc.Format);
+    const bool fixFmt = (cleanFmt != desc.Format);
     const uint32_t rawFlags = static_cast<uint32_t>(desc.Flags);
     const uint32_t rawLayout = static_cast<uint32_t>(desc.Layout);
     const bool stripDenySrv =
@@ -81,7 +93,10 @@ D3D12_RESOURCE_DESC SanitizeXboxResourceDesc(const D3D12_RESOURCE_DESC& desc, co
     const bool stripUav =
         (desc.Dimension != D3D12_RESOURCE_DIMENSION_BUFFER) &&
         ((rawFlags & static_cast<uint32_t>(D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS)) != 0u) &&
-        (FormatDisallowsDesktopUav(desc.Format) || desc.SampleDesc.Count > 1u);
+        (FormatDisallowsDesktopUav(cleanFmt) || desc.SampleDesc.Count > 1u);
+    const bool stripB4Rtv =
+        (cleanFmt == DXGI_FORMAT_B4G4R4A4_UNORM) &&
+        ((rawFlags & static_cast<uint32_t>(D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET)) != 0u);
     const uint32_t kDepthConflictMask =
         static_cast<uint32_t>(D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET) |
         static_cast<uint32_t>(D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) |
@@ -90,13 +105,17 @@ D3D12_RESOURCE_DESC SanitizeXboxResourceDesc(const D3D12_RESOURCE_DESC& desc, co
         ((rawFlags & static_cast<uint32_t>(D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL)) != 0u) &&
         ((rawFlags & kDepthConflictMask) != 0u);
     const bool fixLayout = (rawLayout > 3u);
-    if ((rawFlags & D3D12XBOX_RESOURCE_FLAG_MASK) == 0u && !stripDenySrv && !stripUav && !stripDepthConflicts && !fixLayout) {
+    if ((rawFlags & D3D12XBOX_RESOURCE_FLAG_MASK) == 0u && !fixFmt && !stripDenySrv && !stripUav && !stripB4Rtv && !stripDepthConflicts && !fixLayout) {
         return desc;
     }
     D3D12_RESOURCE_DESC clean = desc;
+    clean.Format = cleanFmt;
     uint32_t cleanedFlags = rawFlags & ~D3D12XBOX_RESOURCE_FLAG_MASK;
     if (stripDepthConflicts) {
         cleanedFlags &= ~kDepthConflictMask;
+    }
+    if (stripB4Rtv) {
+        cleanedFlags &= ~static_cast<uint32_t>(D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET);
     }
     if (stripDenySrv) {
         cleanedFlags &= ~static_cast<uint32_t>(D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE);
@@ -991,6 +1010,7 @@ struct GuestDescriptorHeapRange {
     SIZE_T guestStart = 0;
     SIZE_T guestEnd = 0;
     SIZE_T nativeStart = 0;
+    SIZE_T shadowStart = 0;
     SIZE_T nativeSize = 0;
     UINT   increment = 0;
 };
@@ -1016,7 +1036,7 @@ static void UnregisterGuestDescriptorHeapRange(SIZE_T guestStart) {
     }
 }
 
-static D3D12_CPU_DESCRIPTOR_HANDLE TranslateCpuDescriptorHandle(D3D12_CPU_DESCRIPTOR_HANDLE h) {
+static D3D12_CPU_DESCRIPTOR_HANDLE TranslateCpuDescriptorHandle(D3D12_CPU_DESCRIPTOR_HANDLE h, bool forRead = false) {
     if (h.ptr == 0) return h;
     std::lock_guard<std::mutex> lock(g_descHeapRangeMtx);
     for (const auto& r : g_descHeapRanges) {
@@ -1034,16 +1054,42 @@ static D3D12_CPU_DESCRIPTOR_HANDLE TranslateCpuDescriptorHandle(D3D12_CPU_DESCRI
                 }
                 off = (r.increment > 0 && r.nativeSize >= r.increment) ? (r.nativeSize - r.increment) : 0;
             }
-            return D3D12_CPU_DESCRIPTOR_HANDLE{ r.nativeStart + off };
+            const SIZE_T base = (forRead && r.shadowStart != 0) ? r.shadowStart : r.nativeStart;
+            return D3D12_CPU_DESCRIPTOR_HANDLE{ base + off };
+        }
+        if (forRead && r.shadowStart != 0 && h.ptr >= r.nativeStart && h.ptr < r.nativeStart + r.nativeSize) {
+            return D3D12_CPU_DESCRIPTOR_HANDLE{ r.shadowStart + (h.ptr - r.nativeStart) };
         }
     }
     return h;
+}
+
+static bool TryTranslateShadowCpuDescriptorHandle(D3D12_CPU_DESCRIPTOR_HANDLE h, D3D12_CPU_DESCRIPTOR_HANDLE& outShadow) {
+    if (h.ptr == 0) return false;
+    std::lock_guard<std::mutex> lock(g_descHeapRangeMtx);
+    for (const auto& r : g_descHeapRanges) {
+        if (r.shadowStart == 0) continue;
+        if (h.ptr >= r.guestStart && h.ptr < r.guestEnd) {
+            SIZE_T off = h.ptr - r.guestStart;
+            if (off >= r.nativeSize) {
+                off = (r.increment > 0 && r.nativeSize >= r.increment) ? (r.nativeSize - r.increment) : 0;
+            }
+            outShadow = D3D12_CPU_DESCRIPTOR_HANDLE{ r.shadowStart + off };
+            return true;
+        }
+        if (h.ptr >= r.nativeStart && h.ptr < r.nativeStart + r.nativeSize) {
+            outShadow = D3D12_CPU_DESCRIPTOR_HANDLE{ r.shadowStart + (h.ptr - r.nativeStart) };
+            return true;
+        }
+    }
+    return false;
 }
 
 class XboxD3D12DescriptorHeap final : public ID3D12Pageable {
 public:
     XboxD3D12DescriptorHeap(
         ComPtr<ID3D12DescriptorHeap> nativeHeap,
+        ComPtr<ID3D12DescriptorHeap> shadowHeap,
         ID3D12Device* parentDevice,
         bool shaderVisible,
         const D3D12_DESCRIPTOR_HEAP_DESC& origDesc,
@@ -1051,17 +1097,19 @@ public:
         SIZE_T guestByteSize,
         UINT incrementSize)
         : m_heap(std::move(nativeHeap)),
+          m_shadowHeap(std::move(shadowHeap)),
           m_parent(parentDevice),
           m_shaderVisible(shaderVisible),
           m_origDesc(origDesc),
           m_guestCpuStart(guestCpuStart) {
         if (m_parent) m_parent->AddRef();
-        if (m_guestCpuStart != 0 && m_heap) {
+        if ((m_guestCpuStart != 0 || m_shadowHeap) && m_heap) {
             const D3D12_DESCRIPTOR_HEAP_DESC nativeDesc = m_heap->GetDesc();
             GuestDescriptorHeapRange range{};
             range.guestStart = m_guestCpuStart;
             range.guestEnd = m_guestCpuStart + guestByteSize;
             range.nativeStart = m_heap->GetCPUDescriptorHandleForHeapStart().ptr;
+            range.shadowStart = m_shadowHeap ? m_shadowHeap->GetCPUDescriptorHandleForHeapStart().ptr : 0;
             range.nativeSize = static_cast<SIZE_T>(nativeDesc.NumDescriptors) * static_cast<SIZE_T>(incrementSize);
             range.increment = incrementSize;
             RegisterGuestDescriptorHeapRange(range);
@@ -1146,6 +1194,7 @@ public:
 private:
     std::atomic<ULONG> m_refs{1};
     ComPtr<ID3D12DescriptorHeap> m_heap;
+    ComPtr<ID3D12DescriptorHeap> m_shadowHeap;
     ID3D12Device* m_parent = nullptr;
     bool m_shaderVisible = false;
     D3D12_DESCRIPTOR_HEAP_DESC m_origDesc{};
@@ -2832,11 +2881,13 @@ public:
     // Xbox ID3D12GraphicsCommandList slots 9..26 (match PC 1:1)
     virtual HRESULT STDMETHODCALLTYPE Close() { return m_cl->Close(); }                                                                // 9  (+0x048)
     virtual HRESULT STDMETHODCALLTYPE Reset(ID3D12CommandAllocator* pAllocator, ID3D12PipelineState* pInitialState) {                  // 10 (+0x050)
+        m_topoSet = false;
         return m_cl->Reset(XboxD3D12CommandAllocator::Unwrap(pAllocator), pInitialState);
     }
     virtual void STDMETHODCALLTYPE ClearState(ID3D12PipelineState* pPipelineState) { m_cl->ClearState(pPipelineState); }               // 11 (+0x058)
     virtual void STDMETHODCALLTYPE DrawInstanced(                                                                                       // 12 (+0x060)
         UINT VertexCountPerInstance, UINT InstanceCount, UINT StartVertexLocation, UINT StartInstanceLocation) {
+        if (!m_topoSet) { m_cl->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST); m_topoSet = true; }
         g_xboxStats.draws.fetch_add(1, std::memory_order_relaxed);
         m_cl->DrawInstanced(VertexCountPerInstance, InstanceCount, StartVertexLocation, StartInstanceLocation);
     }
@@ -2850,6 +2901,7 @@ public:
                           StartIndexLocation, BaseVertexLocation, StartInstanceLocation);
             sc::log::Write(sc::log::Level::Info, "d3d12_xs", "XboxD3D12GfxCL", db);
         }
+        if (!m_topoSet) { m_cl->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST); m_topoSet = true; }
         m_cl->DrawIndexedInstanced(IndexCountPerInstance, InstanceCount, StartIndexLocation, BaseVertexLocation, StartInstanceLocation);
     }
     virtual void STDMETHODCALLTYPE Dispatch(UINT ThreadGroupCountX, UINT ThreadGroupCountY, UINT ThreadGroupCountZ) {                  // 14 (+0x070)
@@ -2879,6 +2931,7 @@ public:
         m_cl->ResolveSubresource(XboxD3D12Resource::Unwrap(pDstResource), DstSubresource, XboxD3D12Resource::Unwrap(pSrcResource), SrcSubresource, Format);
     }
     virtual void STDMETHODCALLTYPE IASetPrimitiveTopology(D3D12_PRIMITIVE_TOPOLOGY PrimitiveTopology) {                                 // 20 (+0x0A0)
+        m_topoSet = (PrimitiveTopology != D3D_PRIMITIVE_TOPOLOGY_UNDEFINED);
         m_cl->IASetPrimitiveTopology(PrimitiveTopology);
     }
     virtual void STDMETHODCALLTYPE RSSetViewports(UINT NumViewports, const D3D12_VIEWPORT* pViewports) {                               // 21 (+0x0A8)
@@ -3222,6 +3275,7 @@ public:
     // Slot 139 (+0x458): Xbox ResetX(pAllocator, pInitialState, Flags)
     virtual HRESULT STDMETHODCALLTYPE ResetX(
         ID3D12CommandAllocator* pAllocator, ID3D12PipelineState* pInitialState, UINT /*Flags*/) {
+        m_topoSet = false;
         return m_cl->Reset(XboxD3D12CommandAllocator::Unwrap(pAllocator), pInitialState);
     }
     SCARLETT_XBOX_SUBOBJ_EXT_STUB(XboxD3D12GraphicsCommandList, 140)
@@ -3373,11 +3427,12 @@ private:
         }
         return bounced;
     }
-    uint64_t m_xboxInlinePad[32]{};
+    uint64_t m_xboxInlinePad[512]{};
     std::atomic<ULONG> m_refs{1};
     struct BoundHeapRange { UINT64 start; UINT64 end; };
     BoundHeapRange m_boundHeaps[2]{};
     uint32_t m_boundHeapCount = 0;
+    bool m_topoSet = false;
 
     bool IsValidBoundGpuDescriptor(UINT64 ptr) const {
         if (ptr == 0) return false;
@@ -3922,9 +3977,15 @@ public:
             }
         }
         const bool shaderVisible = (clean.Flags & D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE) != 0;
+        ComPtr<ID3D12DescriptorHeap> shadowHeap;
+        if (shaderVisible) {
+            D3D12_DESCRIPTOR_HEAP_DESC shadowDesc = clean;
+            shadowDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+            m_device->CreateDescriptorHeap(&shadowDesc, IID_PPV_ARGS(&shadowHeap));
+        }
         ComPtr<XboxD3D12DescriptorHeap> wrapped;
         wrapped.Attach(new XboxD3D12DescriptorHeap(
-            std::move(nativeHeap), this, shaderVisible, *pDescriptorHeapDesc, guestCpuStart, origBytes, inc));
+            std::move(nativeHeap), std::move(shadowHeap), this, shaderVisible, *pDescriptorHeapDesc, guestCpuStart, origBytes, inc));
         return wrapped->QueryInterface(riid, ppvHeap);
     }
 
@@ -4077,30 +4138,158 @@ public:
             clean.SizeInBytes = alignedSize;
         }
         m_device->CreateConstantBufferView(&clean, TranslateCpuDescriptorHandle(DestDescriptor));
+        D3D12_CPU_DESCRIPTOR_HANDLE shadowDst{};
+        if (TryTranslateShadowCpuDescriptorHandle(DestDescriptor, shadowDst)) {
+            m_device->CreateConstantBufferView(&clean, shadowDst);
+        }
+        D3D12_CPU_DESCRIPTOR_HANDLE shadowDst{};
+        if (TryTranslateShadowCpuDescriptorHandle(DestDescriptor, shadowDst)) {
+            m_device->CreateConstantBufferView(&clean, shadowDst);
+        }
     }
     void STDMETHODCALLTYPE CreateShaderResourceView(
         ID3D12Resource* pResource, const D3D12_SHADER_RESOURCE_VIEW_DESC* pDesc,
         D3D12_CPU_DESCRIPTOR_HANDLE DestDescriptor) override {
-        m_device->CreateShaderResourceView(XboxD3D12Resource::Unwrap(pResource), pDesc, TranslateCpuDescriptorHandle(DestDescriptor));
+        D3D12_SHADER_RESOURCE_VIEW_DESC cleanDesc{};
+        const D3D12_SHADER_RESOURCE_VIEW_DESC* useDesc = pDesc;
+        if (pDesc) {
+            const DXGI_FORMAT cleanFmt = SanitizeXboxDxgiFormat(pDesc->Format);
+            if (cleanFmt != pDesc->Format) {
+                cleanDesc = *pDesc;
+                cleanDesc.Format = cleanFmt;
+                useDesc = &cleanDesc;
+            }
+        }
+        ID3D12Resource* nativeRes = XboxD3D12Resource::Unwrap(pResource);
+        m_device->CreateShaderResourceView(nativeRes, useDesc, TranslateCpuDescriptorHandle(DestDescriptor));
+        D3D12_CPU_DESCRIPTOR_HANDLE shadowDst{};
+        if (TryTranslateShadowCpuDescriptorHandle(DestDescriptor, shadowDst)) {
+            m_device->CreateShaderResourceView(nativeRes, useDesc, shadowDst);
+        }
     }
     void STDMETHODCALLTYPE CreateUnorderedAccessView(
         ID3D12Resource* pResource, ID3D12Resource* pCounterResource,
         const D3D12_UNORDERED_ACCESS_VIEW_DESC* pDesc, D3D12_CPU_DESCRIPTOR_HANDLE DestDescriptor) override {
-        m_device->CreateUnorderedAccessView(XboxD3D12Resource::Unwrap(pResource), XboxD3D12Resource::Unwrap(pCounterResource), pDesc, TranslateCpuDescriptorHandle(DestDescriptor));
+        ID3D12Resource* nativeRes = XboxD3D12Resource::Unwrap(pResource);
+        ID3D12Resource* nativeCounter = XboxD3D12Resource::Unwrap(pCounterResource);
+        const D3D12_CPU_DESCRIPTOR_HANDLE dst = TranslateCpuDescriptorHandle(DestDescriptor);
+        if (nativeRes) {
+            const D3D12_RESOURCE_DESC rd = nativeRes->GetDesc();
+            if ((rd.Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) == 0) {
+                static std::atomic<uint32_t> s_nullUavLogs{0};
+                if (s_nullUavLogs.fetch_add(1, std::memory_order_relaxed) < 8) {
+                    char msg[160];
+                    std::snprintf(msg, sizeof(msg),
+                                  "-> substituted null UAV for resource without ALLOW_UNORDERED_ACCESS (dim=%u fmt=%u flags=0x%X)",
+                                  static_cast<unsigned>(rd.Dimension), static_cast<unsigned>(rd.Format),
+                                  static_cast<unsigned>(rd.Flags));
+                    sc::log::Write(sc::log::Level::Warn, "d3d12_xs", "XboxD3D12Device::CreateUnorderedAccessView", msg);
+                }
+                D3D12_UNORDERED_ACCESS_VIEW_DESC nullDesc{};
+                nullDesc.Format = DXGI_FORMAT_R32_UINT;
+                nullDesc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+                m_device->CreateUnorderedAccessView(nullptr, nullptr, &nullDesc, dst);
+                return;
+            }
+        }
+        D3D12_UNORDERED_ACCESS_VIEW_DESC cleanDesc{};
+        const D3D12_UNORDERED_ACCESS_VIEW_DESC* useDesc = pDesc;
+        if (pDesc) {
+            cleanDesc = *pDesc;
+            bool modified = false;
+            const DXGI_FORMAT cleanFmt = SanitizeXboxDxgiFormat(cleanDesc.Format);
+            if (cleanFmt != cleanDesc.Format) {
+                cleanDesc.Format = cleanFmt;
+                modified = true;
+            }
+            const DXGI_FORMAT resFmt = nativeRes ? nativeRes->GetDesc().Format : cleanDesc.Format;
+            const bool isPlanar =
+                resFmt == DXGI_FORMAT_R24G8_TYPELESS ||
+                resFmt == DXGI_FORMAT_D24_UNORM_S8_UINT ||
+                resFmt == DXGI_FORMAT_R32G8X24_TYPELESS ||
+                resFmt == DXGI_FORMAT_D32_FLOAT_S8X24_UINT ||
+                resFmt == DXGI_FORMAT_NV12 ||
+                resFmt == DXGI_FORMAT_P010 ||
+                resFmt == DXGI_FORMAT_P016;
+            if (!isPlanar) {
+                if (cleanDesc.ViewDimension == D3D12_UAV_DIMENSION_TEXTURE2D && cleanDesc.Texture2D.PlaneSlice != 0u) {
+                    cleanDesc.Texture2D.PlaneSlice = 0u;
+                    modified = true;
+                } else if (cleanDesc.ViewDimension == D3D12_UAV_DIMENSION_TEXTURE2DARRAY && cleanDesc.Texture2DArray.PlaneSlice != 0u) {
+                    cleanDesc.Texture2DArray.PlaneSlice = 0u;
+                    modified = true;
+                }
+            }
+            if (modified) useDesc = &cleanDesc;
+        }
+        m_device->CreateUnorderedAccessView(nativeRes, nativeCounter, useDesc, dst);
+        D3D12_CPU_DESCRIPTOR_HANDLE shadowDst{};
+        if (TryTranslateShadowCpuDescriptorHandle(DestDescriptor, shadowDst)) {
+            m_device->CreateUnorderedAccessView(nativeRes, nativeCounter, useDesc, shadowDst);
+        }
+        D3D12_CPU_DESCRIPTOR_HANDLE shadowDst{};
+        if (TryTranslateShadowCpuDescriptorHandle(DestDescriptor, shadowDst)) {
+            m_device->CreateUnorderedAccessView(nativeRes, nativeCounter, useDesc, shadowDst);
+        }
     }
     void STDMETHODCALLTYPE CreateRenderTargetView(
         ID3D12Resource* pResource, const D3D12_RENDER_TARGET_VIEW_DESC* pDesc,
         D3D12_CPU_DESCRIPTOR_HANDLE DestDescriptor) override {
-        m_device->CreateRenderTargetView(XboxD3D12Resource::Unwrap(pResource), pDesc, TranslateCpuDescriptorHandle(DestDescriptor));
+        ID3D12Resource* nativeRes = XboxD3D12Resource::Unwrap(pResource);
+        const D3D12_CPU_DESCRIPTOR_HANDLE dst = TranslateCpuDescriptorHandle(DestDescriptor);
+        D3D12_RENDER_TARGET_VIEW_DESC cleanDesc{};
+        const D3D12_RENDER_TARGET_VIEW_DESC* useDesc = pDesc;
+        DXGI_FORMAT viewFmt = pDesc ? SanitizeXboxDxgiFormat(pDesc->Format) : DXGI_FORMAT_UNKNOWN;
+        if (pDesc && viewFmt != pDesc->Format) {
+            cleanDesc = *pDesc;
+            cleanDesc.Format = viewFmt;
+            useDesc = &cleanDesc;
+        }
+        if (nativeRes) {
+            const D3D12_RESOURCE_DESC rd = nativeRes->GetDesc();
+            const DXGI_FORMAT effFmt = (viewFmt != DXGI_FORMAT_UNKNOWN) ? viewFmt : rd.Format;
+            if ((rd.Flags & D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET) == 0 ||
+                effFmt == DXGI_FORMAT_B4G4R4A4_UNORM) {
+                static std::atomic<uint32_t> s_nullRtvLogs{0};
+                if (s_nullRtvLogs.fetch_add(1, std::memory_order_relaxed) < 8) {
+                    char msg[160];
+                    std::snprintf(msg, sizeof(msg),
+                                  "-> substituted null RTV for unsupported/non-RT resource (dim=%u fmt=%u flags=0x%X)",
+                                  static_cast<unsigned>(rd.Dimension), static_cast<unsigned>(effFmt),
+                                  static_cast<unsigned>(rd.Flags));
+                    sc::log::Write(sc::log::Level::Warn, "d3d12_xs", "XboxD3D12Device::CreateRenderTargetView", msg);
+                }
+                D3D12_RENDER_TARGET_VIEW_DESC nullRtv{};
+                nullRtv.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+                nullRtv.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+                m_device->CreateRenderTargetView(nullptr, &nullRtv, dst);
+                return;
+            }
+        }
+        m_device->CreateRenderTargetView(nativeRes, useDesc, dst);
     }
     void STDMETHODCALLTYPE CreateDepthStencilView(
         ID3D12Resource* pResource, const D3D12_DEPTH_STENCIL_VIEW_DESC* pDesc,
         D3D12_CPU_DESCRIPTOR_HANDLE DestDescriptor) override {
-        m_device->CreateDepthStencilView(XboxD3D12Resource::Unwrap(pResource), pDesc, TranslateCpuDescriptorHandle(DestDescriptor));
+        D3D12_DEPTH_STENCIL_VIEW_DESC cleanDesc{};
+        const D3D12_DEPTH_STENCIL_VIEW_DESC* useDesc = pDesc;
+        if (pDesc) {
+            const DXGI_FORMAT cleanFmt = SanitizeXboxDxgiFormat(pDesc->Format);
+            if (cleanFmt != pDesc->Format) {
+                cleanDesc = *pDesc;
+                cleanDesc.Format = cleanFmt;
+                useDesc = &cleanDesc;
+            }
+        }
+        m_device->CreateDepthStencilView(XboxD3D12Resource::Unwrap(pResource), useDesc, TranslateCpuDescriptorHandle(DestDescriptor));
     }
     void STDMETHODCALLTYPE CreateSampler(
         const D3D12_SAMPLER_DESC* pDesc, D3D12_CPU_DESCRIPTOR_HANDLE DestDescriptor) override {
         m_device->CreateSampler(pDesc, TranslateCpuDescriptorHandle(DestDescriptor));
+        D3D12_CPU_DESCRIPTOR_HANDLE shadowDst{};
+        if (TryTranslateShadowCpuDescriptorHandle(DestDescriptor, shadowDst)) {
+            m_device->CreateSampler(pDesc, shadowDst);
+        }
     }
     void STDMETHODCALLTYPE CopyDescriptors(
         UINT NumDestDescriptorRanges, const D3D12_CPU_DESCRIPTOR_HANDLE* pDestDescriptorRangeStarts,
@@ -4120,16 +4309,37 @@ public:
         if (pSrcDescriptorRangeStarts && NumSrcDescriptorRanges > 0) {
             srcStarts.resize(NumSrcDescriptorRanges);
             for (UINT i = 0; i < NumSrcDescriptorRanges; ++i)
-                srcStarts[i] = TranslateCpuDescriptorHandle(pSrcDescriptorRangeStarts[i]);
+                srcStarts[i] = TranslateCpuDescriptorHandle(pSrcDescriptorRangeStarts[i], true);
             srcPtr = srcStarts.data();
         }
         m_device->CopyDescriptors(NumDestDescriptorRanges, dstPtr, pDestDescriptorRangeSizes,
                                   NumSrcDescriptorRanges, srcPtr, pSrcDescriptorRangeSizes, DescriptorHeapsType);
+        if (pDestDescriptorRangeStarts && NumDestDescriptorRanges > 0) {
+            bool anyShadow = false;
+            std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> shadowDstStarts(NumDestDescriptorRanges);
+            for (UINT i = 0; i < NumDestDescriptorRanges; ++i) {
+                if (TryTranslateShadowCpuDescriptorHandle(pDestDescriptorRangeStarts[i], shadowDstStarts[i])) {
+                    anyShadow = true;
+                } else {
+                    shadowDstStarts[i] = dstStarts[i];
+                }
+            }
+            if (anyShadow) {
+                m_device->CopyDescriptors(NumDestDescriptorRanges, shadowDstStarts.data(), pDestDescriptorRangeSizes,
+                                          NumSrcDescriptorRanges, srcPtr, pSrcDescriptorRangeSizes, DescriptorHeapsType);
+            }
+        }
     }
     void STDMETHODCALLTYPE CopyDescriptorsSimple(
         UINT NumDescriptors, D3D12_CPU_DESCRIPTOR_HANDLE DestDescriptorRangeStart,
         D3D12_CPU_DESCRIPTOR_HANDLE SrcDescriptorRangeStart, D3D12_DESCRIPTOR_HEAP_TYPE DescriptorHeapsType) override {
-        m_device->CopyDescriptorsSimple(NumDescriptors, TranslateCpuDescriptorHandle(DestDescriptorRangeStart), TranslateCpuDescriptorHandle(SrcDescriptorRangeStart), DescriptorHeapsType);
+        const D3D12_CPU_DESCRIPTOR_HANDLE dst = TranslateCpuDescriptorHandle(DestDescriptorRangeStart, false);
+        const D3D12_CPU_DESCRIPTOR_HANDLE src = TranslateCpuDescriptorHandle(SrcDescriptorRangeStart, true);
+        m_device->CopyDescriptorsSimple(NumDescriptors, dst, src, DescriptorHeapsType);
+        D3D12_CPU_DESCRIPTOR_HANDLE shadowDst{};
+        if (TryTranslateShadowCpuDescriptorHandle(DestDescriptorRangeStart, shadowDst)) {
+            m_device->CopyDescriptorsSimple(NumDescriptors, shadowDst, src, DescriptorHeapsType);
+        }
     }
 
     static constexpr size_t kXboxDeviceVtblSlots = 144;
